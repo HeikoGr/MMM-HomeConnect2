@@ -1,233 +1,316 @@
 Module.register("MMM-HomeConnect", {
-	// define variables used by module, but not in config data
-	updated:  0,
-	devices: [],
+  updated: 0,
+  devices: [],
+  config: null,
+  authInfo: null,
+  authStatus: null,
+  instanceId: null,
 
-	// holder for config info from module_name.js
-	config:null,
+  defaults: {
+    client_ID: "",
+    client_Secret: "",
+    use_headless_auth: false, // Enable headless Device Flow authentication
+    BaseURL: "https://api.home-connect.com/api",
+    showDeviceIcon: true,
+    showAlwaysAllDevices: false,
+    showDeviceIfDoorIsOpen: true,
+    showDeviceIfFailure: true,
+    showDeviceIfInfoIsAvailable: true,
+    updateFrequency: 1000 * 60 * 60
+  },
 
-	// anything here in defaults will be added to the config data
-	// and replaced if the same thing is provided in config
-	defaults: {
-        client_ID: "",
-		client_Secret: "",
-		BaseURL: 'https://api.home-connect.com/api',
-		showDeviceIcon: true, //Show or hide the icon of the devices
-		showAlwaysAllDevices: false, //if true all devices will be shown, despite if on or off
-		showDeviceIfDoorIsOpen: true, //if showAlwaysAllDevices is true, the device will be shown if Door is open
-		showDeviceIfFailure: true, //if showAlwaysAllDevices is true, the device will be shown if there is a failure
-		showDeviceIfInfoIsAvailable: true, //if showAlwaysAllDevices is true, the device will be shown if Info is Available
-		updateFrequency: 1000*60*60
-	},
+  init () {
+    Log.log(`${this.name} is in init!`);
+  },
 
-	init: function(){
-		Log.log(this.name + " is in init!");
-	},
+  start () {
+    Log.log(`${this.name} is starting!`);
 
-	start: function(){
-		Log.log(this.name + " is starting!");
+    // Eindeutige Instanz-ID generieren
+    this.instanceId = `hc_${Math.random().toString(36)
+      .substr(2, 9)}`;
+    Log.log(`${this.name} instance ID: ${this.instanceId}`);
+
+    const timer = setInterval(() => {
+      this.sendSocketNotification("UPDATEREQUEST", null);
+    }, this.config.updateFrequency);
+  },
+
+  loaded (callback) {
+    Log.log(`${this.name} is loaded!`);
+    callback();
+  },
+
+  getScripts () {
+    return [];
+  },
+
+  getStyles () {
+    return ["MMM-HomeConnect.css"];
+  },
+
+  getTranslations () {
+    return {
+      en: "translations/en.json",
+      de: "translations/de.json",
+      da: "translations/da.json"
+    };
+  },
+
+  getHeader () {
+    return "Home Connect";
+  },
+
+  notificationReceived (notification, payload, sender) {
+    if (notification === "ALL_MODULES_STARTED") {
+      // Config mit Instanz-ID senden
+      this.sendSocketNotification("CONFIG", {
+        ...this.config,
+        instanceId: this.instanceId
+      });
+    }
+  },
+
+  socketNotificationReceived (notification, payload) {
+    // Nur auf eigene Nachrichten reagieren (wenn instanceId vorhanden)
+    if (payload && payload.instanceId && payload.instanceId !== this.instanceId) {
+      return;
+    }
+
+    switch (notification) {
+      case "MMM-HomeConnect_Update":
+        this.devices = payload;
+        this.updateDom();
+        break;
+      case "AUTH_INFO":
+        // Nur aktualisieren wenn für diese Instanz oder global
+        if (!payload.instanceId || payload.instanceId === this.instanceId) {
+          this.authInfo = payload;
+          this.updateDom();
+        }
+        break;
+      case "AUTH_STATUS":
+        // Nur aktualisieren wenn für diese Instanz oder global
+        if (!payload.instanceId || payload.instanceId === this.instanceId) {
+          this.authStatus = payload;
+          this.updateDom();
+        }
+        break;
+      case "INIT_STATUS":
+        // Session-Status-Updates verarbeiten
+        if (!payload.instanceId || payload.instanceId === this.instanceId) {
+          Log.log(`${this.name} Init Status: ${payload.status} - ${payload.message}`);
+
+          if (payload.status === "session_active" || payload.status === "complete") {
+            // Session aktiv - normale Anzeige
+            this.authInfo = null;
+            this.authStatus = null;
+            this.updateDom();
+          } else if (payload.status === "auth_in_progress") {
+            // Authentifizierung läuft bereits
+            this.authStatus = {
+              status: "polling",
+              message: payload.message
+            };
+            this.updateDom();
+          }
+        }
+        break;
+    }
+  },
+
+  suspend () {
+  },
+
+  resume () {
+  },
+
+  getDom () {
+    const div = document.createElement("div");
+    let wrapper = "";
+    _self = this;
+
+    // Show authentication info if available
+    if (this.authInfo && this.authInfo.status === "waiting") {
+      div.innerHTML = this.getAuthHTML();
+      return div;
+    }
+
+    // Show authentication status if available
+    if (this.authStatus && this.authStatus.status === "polling") {
+      div.innerHTML = this.getAuthStatusHTML();
+      return div;
+    }
+
+    // Show error if authentication failed
+    if (this.authStatus && this.authStatus.status === "error") {
+      div.innerHTML = this.getAuthErrorHTML();
+      return div;
+    }
+
+    // Show loading message if no devices yet
+    if (!this.devices || this.devices.length == 0) {
+      if (this.config.use_headless_auth) {
+        div.innerHTML = "<div class='small'>" +
+          "<i class='fa fa-cog fa-spin'></i> Session-based Authentication aktiv<br>" +
+          `<span class='dimmed'>${_self.translate("LOADING_APPLIANCES")}...</span>` +
+          "</div>";
+      } else {
+        div.innerHTML = `<span class='small'>${_self.translate("LOADING_APPLIANCES")}...</span>`;
+      }
+      return div;
+    }
 
 
-		var timer = setInterval(()=>{
-			this.sendSocketNotification("UPDATEREQUEST", null);
-		}, this.config.updateFrequency);
-	},
+    // Show devices
+    this.devices.forEach((device) => {
+      // Compact and readable device show logic
+      let IsShowDevice = false;
 
-	loaded: function(callback) {
-		Log.log(this.name + " is loaded!");
+      if (_self.config.showAlwaysAllDevices) {
+        IsShowDevice = true;
+      }
+      if (device.PowerState === "On") {
+        IsShowDevice = true;
+      }
+      if (device.Lighting) {
+        IsShowDevice = true;
+      }
+      if (_self.config.showDeviceIfDoorIsOpen && device.DoorOpen) {
+        IsShowDevice = true;
+      }
+      if (_self.config.showDeviceIfFailure && device.Failure) {
+        IsShowDevice = true;
+      }
+      if (_self.config.showDeviceIfInfoIsAvailable && device.Failure) {
+        IsShowDevice = true;
+      }
 
-		callback();
-	},
+      if (IsShowDevice) {
+        let ProgessBar = "";
+        if (device.RemainingProgramTime > 0 && device.ProgramProgress) {
+          ProgessBar = `<progress value='${device.ProgramProgress}' max='100' width='95%'></progress>`;
+        }
 
-	// return list of other functional scripts to use, if any (like require in node_helper)
-	getScripts: function() {
-	return	[
-			// sample of list of files to specify here, if no files,do not use this routine, or return empty list
+        const StatusString =
+          device.RemainingProgramTime > 0
+            ? `${_self.translate("DONE_IN")} ${new Date(device.RemainingProgramTime * 1000).toISOString()
+              .slice(11, 16)}`
+            : "";
+        const Image = `${device.type}.png`;
+        const DeviceName = device.name;
+        let container = "<div class='deviceContainer'>";
+        if (_self.config.showDeviceIcon) {
+          container += `<img src='modules/MMM-HomeConnect/Icons/${Image}' class='device_img'>`;
+        }
+        container += "<div class='deviceStatusIcons'>";
+        [
+          device.PowerState === "On" || device.PowerState === "Standby"
+            ? `<i class='fa fa-plug deviceStatusIcon' title='${device.PowerState}'></i>`
+            : "",
+          device.DoorState === "Open"
+            ? "<i class='fa fa-door-open deviceStatusIcon' title='Door Open'></i>"
+            : "",
+          device.Lighting === true
+            ? "<i class='fa fa-lightbulb-o deviceStatusIcon' title='Light On'></i>"
+            : ""
+        ].forEach((icon) => {
+          if (icon) {
+            container += icon;
+          }
+        });
+        container += "</div>";
+        container += `<div class='deviceName bright small'>${DeviceName}<br>`;
+        container += "</div>"; // End deviceName
+        container += "<div></div>"; // Empty gridcell for layout
+        container += `<div class='deviceStatus dimmed xsmall'>${StatusString}</div>`;
+        container += `<div class='deviceProgessBar'>${ProgessBar}</div>`;
+        container += "</div>"; // End deviceContainer
+        if (wrapper === "") {
+          wrapper = container;
+        } else {
+          wrapper += container;
+        }
+      }
+    });
 
-			//'script.js', // will try to load it from the vendor folder, otherwise it will load is from the module folder.
-			//'moment.js', // this file is available in the vendor folder, so it doesn't need to be available in the module folder.
-			//this.file('anotherfile.js'), // this file will be loaded straight from the module folder.
-			//'https://code.jquery.com/jquery-2.2.3.min.js',  // this file will be loaded from the jquery servers.
-		]
-	}, 
+    if (wrapper == "") {
+      wrapper = `<div class='dimmed small'>${_self.translate("NO_ACTIVE_APPLIANCES")}</div>`;
+    }
+    div.innerHTML = wrapper;
+    return div;
+  },
 
-	// return list of stylesheet files to use if any
-	getStyles: function() {
-		return ["MMM-HomeConnect.css"];
-		//return 	[
-			// sample of list of files to specify here, if no files, do not use this routine, , or return empty list
+  getAuthHTML () {
+    let html = "";
+    html += "<div class='auth-container'>";
+    html += "<div class='auth-header'>🔐 Home Connect Authentifizierung</div>";
 
-			//'script.css', // will try to load it from the vendor folder, otherwise it will load is from the module folder.
-			//'font-awesome.css', // this file is available in the vendor folder, so it doesn't need to be avialable in the module folder.
-			//this.file('anotherfile.css'), // this file will be loaded straight from the module folder.
-			//'https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css',  // this file will be loaded from the bootstrapcdn servers.
-		//]
-	},
+    html += "<div class='auth-step'>";
+    html += "<div class='auth-step-title'>📱 <strong>Schritt 1:</strong> Öffnen Sie diese URL in einem Browser:</div>";
+    html += "<div class='auth-step-content'>";
+    html += `<div class='auth-url'><a href='${this.authInfo.verification_uri}'>${this.authInfo.verification_uri}</a></div>`;
+    html += "</div>";
+    html += "</div>";
 
-	// return list of translation files to use, if any
-	getTranslations: function() {
-		return {
-			en: "translations/en.json", 
-			de: "translations/de.json",
-			da: "translations/da.json",
-		}
-	}, 
+    html += "<div class='auth-step'>";
+    html += "<div class='auth-step-title'>🔑 <strong>Schritt 2:</strong> Geben Sie diesen Code ein:</div>";
+    html += "<div class='auth-step-content'>";
+    html += `<div class='auth-code'>${this.authInfo.user_code}</div>`;
+    html += "</div>";
+    html += "</div>";
 
+    html += "<div class='auth-step'>";
+    html += "<div class='auth-step-title'>🔗 <strong>Oder direkter Link:</strong></div>";
+    html += "<div class='auth-step-content'>";
+    html += `<div class='auth-url'><a href='${this.authInfo.verification_uri_complete}'>${this.authInfo.verification_uri_complete}</a></div>`;
+    html += "</div>";
+    html += "</div>";
 
+    html += "<div class='auth-footer'>";
+    html += `<div class='auth-timer'>⏱️ Code läuft ab in: ${this.authInfo.expires_in_minutes} Minuten</div>`;
+    html += "</div>";
 
-	// only called if the module header was configured in module config in config.js
-	getHeader: function() {
-		return "Home Connect";
-	},
+    html += "<div class='auth-waiting'>Sobald Sie sich authentifiziert haben, wird automatisch fortgefahren...</div>";
+    html += "</div>";
 
-	// messages received from other modules and the system (NOT from your node helper)
-	// payload is a notification dependent data structure
-	notificationReceived: function(notification, payload, sender) {
-		// once everybody is loaded up
-		if(notification==="ALL_MODULES_STARTED"){
-			// send our config to our node_helper
-			this.sendSocketNotification("CONFIG",this.config)
-		}
-		if (sender) {
-			//Log.log(this.name + " received a module notification: " + notification + " from sender: " + sender.name);
-		} else {
-			//Log.log(this.name + " received a system notification: " + notification);
-		}
-	},
+    return html;
+  },
 
-	// messages received from from your node helper (NOT other modules or the system)
-	// payload is a notification dependent data structure, up to you to design between module and node_helper
-	socketNotificationReceived: function(notification, payload) {
-		//Log.log(this.name + " received a socket notification: " + notification + " - Payload: " + payload);
-		
-		switch(notification){
-			case "MMM-HomeConnect_Update":
-				this.devices = payload;
-				this.updateDom();
-			break;
-		}
-	},
+  getAuthStatusHTML () {
+    let html = "";
+    html += "<div class='auth-container'>";
+    html += "<div class='auth-header'>⏳ Warten auf Authentifizierung</div>";
 
-	// system notification your module is being hidden
-	// typically you would stop doing UI updates (getDom/updateDom) if the module is hidden
-	suspend: function(){
+    // Progress bar
+    if (this.authStatus.attempt && this.authStatus.maxAttempts) {
+      const progress = Math.round(this.authStatus.attempt / this.authStatus.maxAttempts * 100);
+      html += "<div class='progress-container'>";
+      html += "<div class='progress-bar'>";
+      html += `<div class='progress-fill' style='width: ${progress}%'></div>`;
+      html += "</div>";
+      html += "</div>";
+    }
 
-	},
+    html += `<div class='auth-message'>${this.authStatus.message}</div>`;
 
-	// system notification your module is being unhidden/shown
-	// typically you would resume doing UI updates (getDom/updateDom) if the module is shown
-	resume: function(){
+    if (this.authStatus.interval) {
+      html += `<div class='auth-info'>Polling-Intervall: ${this.authStatus.interval} Sekunden</div>`;
+    }
 
-	},
+    html += "</div>";
 
-	// this is the major worker of the module, it provides the displayable content for this module
-	getDom: function() {
-		var div = document.createElement("div");
-		var wrapper = "";
-		_self = this;
-		
-		if( !this.devices || this.devices.length == 0 ){
-			div.innerHTML = "<span class='deviceName'><span>"+_self.translate("LOADING_APPLIANCES")+ "...</span></span>";
-			return div;
-		}
-		
-		this.devices.forEach(function (device) {
-			//Check if Device should be ignored
-			var IsSkipDevice = false;	
-			
-			if(_self.config.showAlwaysAllDevices == false && device.PowerState != 'On' && ( device.Lighting === undefined || device.Lighting != true  ) ){
+    return html;
+  },
 
-				IsSkipDevice = true;
+  getAuthErrorHTML () {
+    let html = "";
+    html += "<div class='auth-container error'>";
+    html += "<div class='auth-header'>❌ Authentifizierung fehlgeschlagen</div>";
+    html += `<div class='auth-message'>${this.authStatus.message}</div>`;
+    html += "<div class='auth-info'>Bitte starten Sie MagicMirror neu, um es erneut zu versuchen.</div>";
+    html += "</div>";
 
-				if(_self.config.showDeviceIfDoorIsOpen && device.DoorOpen){
-					IsSkipDevice = false;
-				}
-
-				if(_self.config.showDeviceIfFailure && device.Failure){
-					IsSkipDevice = false;
-				}
-						
-				if(_self.config.showDeviceIfInfoIsAvailable && device.Failure){
-					IsSkipDevice = false;
-				}
-			}
-
-			if(!IsSkipDevice){
-				var StatusString = "";
-
-				var Image = device.type + ".png";
-
-				var DeviceName = device.name;
-				
-				var container = "<div class='deviceContainerWithoutDeviceIcon'>"					
-								+ "<div>";
-
-				if(_self.config.showDeviceIcon){
-					container = "<div class='deviceContainer'>"
-								  + "<img src='/modules/MMM-HomeConnect/Icons/" + Image + "' />"
-							  + "<div>";
-				}		
-
-				if(device.PowerState == 'On' || device.PowerState == 'Standby'){
-					container += "<div>"
-								+"<img class='deviceStatusIcon' src='/modules/MMM-HomeConnect/Icons/Status/" + device.PowerState +".png' />"
-							  +"</div>";
-				}
-
-				if(device.DoorState == 'Open'){
-					container += "<div>"
-								+"<img class='deviceStatusIcon' src='/modules/MMM-HomeConnect/Icons/Status/Status_DoorOpen.png' />"
-							  +"</div>";
-				}
-
-				if(device.Lighting == true){
-					container += "<div>"
-							  +"<img class='deviceStatusIcon' src='/modules/MMM-HomeConnect/Icons/Status/Status_LightOn.png' />"
-							  +"</div>";
-				}
-				
-				container +="</div>"
-							+"<div>"
-								+"<div>"
-									+"<span class='deviceName'>" + DeviceName + "</span>"
-								+"</div>"
-								+"<div>"
-									+"<span Class='deviceStatus'>${Status}</span>"
-								+"</div>";
-
-				//Add Timebar if there is remaining Time
-				if(device.RemainingProgramTime > 0){
-					StatusString += " - "+ _self.translate("DONE_IN") + " " + new Date(device.RemainingProgramTime * 1000).toISOString().substr(11, 5);
-
-					if( device.ProgramProgress ){
-						container+="<div>"
-							+"<div Class='deviceProgress_Base'>"
-								+"<div Class='deviceProgress' style='width:" + device.ProgramProgress + "%'></div>"
-							+"</div>"
-						+"</div>";
-					}
-				}
-
-				container+="</div>"
-						 +"</div>";
-
-				container = container.replace("${Status}", StatusString);
-
-				if(wrapper == ""){
-					wrapper=container;
-				}
-				else{
-					wrapper+=container;
-				}
-			}
-		});
-							
-		//If there is no active devices then tell it
-		if(wrapper == ""){
-			wrapper = "<span class='deviceName'><span>"+ _self.translate("NO_ACTIVE_APPLIANCES") + "</span></span>";
-		}
-
-		div.innerHTML = wrapper
-		return div;
-	},
-})
+    return html;
+  }
+}); // End Module
