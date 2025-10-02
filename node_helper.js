@@ -206,7 +206,7 @@ module.exports = NodeHelper.create({
         if (!this.configReceived) {
           this.configReceived = true;
           this.config = payload;
-          setConfig(payload);
+          //setConfig(payload);
 
           console.log("🔧 use_headless_auth:", this.config.use_headless_auth);
 
