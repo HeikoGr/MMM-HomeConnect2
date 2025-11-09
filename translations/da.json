@@ -1,4 +1,19 @@
 {
 	"DONE_IN": "færdig om",
-	"NO_ACTIVE_APPLIANCES": "Ingen aktive apparater"
+	"NO_ACTIVE_APPLIANCES": "Ingen aktive apparater",
+	"LOADING_APPLIANCES": "Indlæser apparater",
+	"HEADER_TITLE": "Home Connect",
+	"AUTH_TITLE": "Home Connect godkendelse",
+	"AUTH_STEP1": "Trin 1: Åbn denne URL i en browser:",
+	"AUTH_STEP2": "Trin 2: Indtast denne kode:",
+	"AUTH_STEP_DIRECT": "Eller direkte link:",
+	"AUTH_CODE_EXPIRES": "Koden udløber om:",
+	"AUTH_WAITING": "Når du har godkendt, fortsætter det automatisk...",
+	"AUTH_STATUS_WAITING": "Venter på godkendelse",
+	"AUTH_POLL_INTERVAL": "Polling-interval:",
+	"AUTH_MINUTES": "minutter",
+	"AUTH_SECONDS": "sekunder",
+	"AUTH_FAILED_TITLE": "Godkendelse mislykkedes",
+	"AUTH_FAILED_INFO": "Genstart MagicMirror for at prøve igen.",
+	"SESSION_BASED_AUTH": "Sessionsbaseret godkendelse aktiv"
 }

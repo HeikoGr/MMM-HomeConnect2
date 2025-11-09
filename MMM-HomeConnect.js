@@ -19,14 +19,14 @@ Module.register("MMM-HomeConnect", {
     updateFrequency: 1000 * 60 * 60
   },
 
-  init () {
+  init() {
     Log.log(`${this.name} is in init!`);
   },
 
-  start () {
+  start() {
     Log.log(`${this.name} is starting!`);
 
-    // Eindeutige Instanz-ID generieren
+    // Generate a unique instance ID
     this.instanceId = `hc_${Math.random().toString(36)
       .substr(2, 9)}`;
     Log.log(`${this.name} instance ID: ${this.instanceId}`);
@@ -36,20 +36,20 @@ Module.register("MMM-HomeConnect", {
     }, this.config.updateFrequency);
   },
 
-  loaded (callback) {
+  loaded(callback) {
     Log.log(`${this.name} is loaded!`);
     callback();
   },
 
-  getScripts () {
+  getScripts() {
     return [];
   },
 
-  getStyles () {
+  getStyles() {
     return ["MMM-HomeConnect.css"];
   },
 
-  getTranslations () {
+  getTranslations() {
     return {
       en: "translations/en.json",
       de: "translations/de.json",
@@ -57,13 +57,13 @@ Module.register("MMM-HomeConnect", {
     };
   },
 
-  getHeader () {
-    return "Home Connect";
+  getHeader() {
+    return this.translate("HEADER_TITLE");
   },
 
-  notificationReceived (notification, payload, sender) {
+  notificationReceived(notification, payload, sender) {
     if (notification === "ALL_MODULES_STARTED") {
-      // Config mit Instanz-ID senden
+      // Send config with instanceId
       this.sendSocketNotification("CONFIG", {
         ...this.config,
         instanceId: this.instanceId
@@ -71,8 +71,8 @@ Module.register("MMM-HomeConnect", {
     }
   },
 
-  socketNotificationReceived (notification, payload) {
-    // Nur auf eigene Nachrichten reagieren (wenn instanceId vorhanden)
+  socketNotificationReceived(notification, payload) {
+    // Only respond to messages for this instance (if instanceId present)
     if (payload && payload.instanceId && payload.instanceId !== this.instanceId) {
       return;
     }
@@ -83,31 +83,31 @@ Module.register("MMM-HomeConnect", {
         this.updateDom();
         break;
       case "AUTH_INFO":
-        // Nur aktualisieren wenn für diese Instanz oder global
+        // Only update if for this instance or global
         if (!payload.instanceId || payload.instanceId === this.instanceId) {
           this.authInfo = payload;
           this.updateDom();
         }
         break;
       case "AUTH_STATUS":
-        // Nur aktualisieren wenn für diese Instanz oder global
+        // Only update if for this instance or global
         if (!payload.instanceId || payload.instanceId === this.instanceId) {
           this.authStatus = payload;
           this.updateDom();
         }
         break;
       case "INIT_STATUS":
-        // Session-Status-Updates verarbeiten
+        // Process session status updates
         if (!payload.instanceId || payload.instanceId === this.instanceId) {
           Log.log(`${this.name} Init Status: ${payload.status} - ${payload.message}`);
 
           if (payload.status === "session_active" || payload.status === "complete") {
-            // Session aktiv - normale Anzeige
+            // Session active - normal display
             this.authInfo = null;
             this.authStatus = null;
             this.updateDom();
           } else if (payload.status === "auth_in_progress") {
-            // Authentifizierung läuft bereits
+            // Authentication already in progress
             this.authStatus = {
               status: "polling",
               message: payload.message
@@ -119,13 +119,13 @@ Module.register("MMM-HomeConnect", {
     }
   },
 
-  suspend () {
+  suspend() {
   },
 
-  resume () {
+  resume() {
   },
 
-  getDom () {
+  getDom() {
     const div = document.createElement("div");
     let wrapper = "";
     _self = this;
@@ -152,7 +152,7 @@ Module.register("MMM-HomeConnect", {
     if (!this.devices || this.devices.length == 0) {
       if (this.config.use_headless_auth) {
         div.innerHTML = "<div class='small'>" +
-          "<i class='fa fa-cog fa-spin'></i> Session-based Authentication aktiv<br>" +
+          `<i class='fa fa-cog fa-spin'></i> ${_self.translate("SESSION_BASED_AUTH")}<br>` +
           `<span class='dimmed'>${_self.translate("LOADING_APPLIANCES")}...</span>` +
           "</div>";
       } else {
@@ -241,46 +241,46 @@ Module.register("MMM-HomeConnect", {
     return div;
   },
 
-  getAuthHTML () {
+  getAuthHTML() {
     let html = "";
     html += "<div class='auth-container'>";
-    html += "<div class='auth-header'>🔐 Home Connect Authentifizierung</div>";
+    html += `<div class='auth-header'>🔐 ${this.translate("AUTH_TITLE")}</div>`;
 
     html += "<div class='auth-step'>";
-    html += "<div class='auth-step-title'>📱 <strong>Schritt 1:</strong> Öffnen Sie diese URL in einem Browser:</div>";
+    html += `<div class='auth-step-title'>📱 <strong>${this.translate("AUTH_STEP1")}</strong></div>`;
     html += "<div class='auth-step-content'>";
     html += `<div class='auth-url'><a href='${this.authInfo.verification_uri}'>${this.authInfo.verification_uri}</a></div>`;
     html += "</div>";
     html += "</div>";
 
     html += "<div class='auth-step'>";
-    html += "<div class='auth-step-title'>🔑 <strong>Schritt 2:</strong> Geben Sie diesen Code ein:</div>";
+    html += `<div class='auth-step-title'>🔑 <strong>${this.translate("AUTH_STEP2")}</strong></div>`;
     html += "<div class='auth-step-content'>";
     html += `<div class='auth-code'>${this.authInfo.user_code}</div>`;
     html += "</div>";
     html += "</div>";
 
     html += "<div class='auth-step'>";
-    html += "<div class='auth-step-title'>🔗 <strong>Oder direkter Link:</strong></div>";
+    html += `<div class='auth-step-title'>🔗 <strong>${this.translate("AUTH_STEP_DIRECT")}</strong></div>`;
     html += "<div class='auth-step-content'>";
     html += `<div class='auth-url'><a href='${this.authInfo.verification_uri_complete}'>${this.authInfo.verification_uri_complete}</a></div>`;
     html += "</div>";
     html += "</div>";
 
     html += "<div class='auth-footer'>";
-    html += `<div class='auth-timer'>⏱️ Code läuft ab in: ${this.authInfo.expires_in_minutes} Minuten</div>`;
+    html += `<div class='auth-timer'>⏱️ ${this.translate("AUTH_CODE_EXPIRES")} ${this.authInfo.expires_in_minutes} ${this.translate("AUTH_MINUTES")}</div>`;
     html += "</div>";
 
-    html += "<div class='auth-waiting'>Sobald Sie sich authentifiziert haben, wird automatisch fortgefahren...</div>";
+    html += `<div class='auth-waiting'>${this.translate("AUTH_WAITING")}</div>`;
     html += "</div>";
 
     return html;
   },
 
-  getAuthStatusHTML () {
+  getAuthStatusHTML() {
     let html = "";
     html += "<div class='auth-container'>";
-    html += "<div class='auth-header'>⏳ Warten auf Authentifizierung</div>";
+    html += `<div class='auth-header'>⏳ ${this.translate("AUTH_STATUS_WAITING")}</div>`;
 
     // Progress bar
     if (this.authStatus.attempt && this.authStatus.maxAttempts) {
@@ -295,7 +295,7 @@ Module.register("MMM-HomeConnect", {
     html += `<div class='auth-message'>${this.authStatus.message}</div>`;
 
     if (this.authStatus.interval) {
-      html += `<div class='auth-info'>Polling-Intervall: ${this.authStatus.interval} Sekunden</div>`;
+      html += `<div class='auth-info'>${this.translate("AUTH_POLL_INTERVAL")} ${this.authStatus.interval} ${this.translate("AUTH_SECONDS")}</div>`;
     }
 
     html += "</div>";
@@ -303,12 +303,12 @@ Module.register("MMM-HomeConnect", {
     return html;
   },
 
-  getAuthErrorHTML () {
+  getAuthErrorHTML() {
     let html = "";
     html += "<div class='auth-container error'>";
-    html += "<div class='auth-header'>❌ Authentifizierung fehlgeschlagen</div>";
+    html += `<div class='auth-header'>❌ ${this.translate("AUTH_FAILED_TITLE")}</div>`;
     html += `<div class='auth-message'>${this.authStatus.message}</div>`;
-    html += "<div class='auth-info'>Bitte starten Sie MagicMirror neu, um es erneut zu versuchen.</div>";
+    html += `<div class='auth-info'>${this.translate("AUTH_FAILED_INFO")}</div>`;
     html += "</div>";
 
     return html;

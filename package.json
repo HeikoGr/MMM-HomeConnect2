@@ -40,7 +40,7 @@
     "Neff",
     "Gaggenau"
   ],
-  "license": "ISC",
+  "license": "MIT",
   "dependencies": {
     "home-connect-js": "git+https://github.com/HeikoGr/home-connect-js"
   },
