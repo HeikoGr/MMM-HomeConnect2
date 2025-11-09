@@ -42,7 +42,7 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "home-connect-js": "git+https://github.com/HeikoGr/home-connect-js"
+    "home-connect-js": "git+https://github.com/djerik/home-connect-js"
   },
   "bugs": {
     "url": "https://github.com/HeikoGr/MMM-HomeConnect/issues"

@@ -156,7 +156,9 @@ Module.register("MMM-HomeConnect", {
           `<span class='dimmed'>${_self.translate("LOADING_APPLIANCES")}...</span>` +
           "</div>";
       } else {
-        div.innerHTML = `<span class='small'>${_self.translate("LOADING_APPLIANCES")}...</span>`;
+        div.inn
+
+        erHTML = `<span class='small'>${_self.translate("LOADING_APPLIANCES")}...</span>`;
       }
       return div;
     }
