@@ -7,6 +7,7 @@ Module.register("MMM-HomeConnect", {
   instanceId: null,
 
   defaults: {
+    header: "Home Connect Appliances",
     client_ID: "",
     client_Secret: "",
     use_headless_auth: false, // Enable headless Device Flow authentication
@@ -55,10 +56,6 @@ Module.register("MMM-HomeConnect", {
       de: "translations/de.json",
       da: "translations/da.json"
     };
-  },
-
-  getHeader() {
-    return this.translate("HEADER_TITLE");
   },
 
   notificationReceived(notification, payload, sender) {
