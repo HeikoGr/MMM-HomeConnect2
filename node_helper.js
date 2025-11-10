@@ -1,7 +1,8 @@
-const HomeConnect = require("home-connect-js");
+let HomeConnect;
 const fs = require("fs");
 const NodeHelper = require("node_helper");
-const fetch = require("node-fetch");
+// use built-in fetch when available
+const fetch = typeof globalThis.fetch === 'function' ? globalThis.fetch.bind(globalThis) : null;
 
 const globalSession = {
   isAuthenticated: false,
@@ -599,6 +600,9 @@ module.exports = NodeHelper.create({
   async initializeHomeConnect(refreshToken) {
     return new Promise((resolve, reject) => {
       console.log("🏠 Initializing HomeConnect with token...");
+      if (!HomeConnect) {
+        HomeConnect = require("./home-connect-js.js");
+      }
       this.hc = new HomeConnect(
         this.config.client_ID,
         this.config.client_Secret,
@@ -692,6 +696,10 @@ module.exports = NodeHelper.create({
     }
 
     globalSession.isAuthenticating = true;
+
+    if (!HomeConnect) {
+      HomeConnect = require("./home-connect-js.js");
+    }
 
     this.hc = new HomeConnect(
       this.config.client_ID,

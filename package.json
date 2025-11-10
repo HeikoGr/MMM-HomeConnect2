@@ -42,7 +42,10 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "home-connect-js": "git+https://github.com/djerik/home-connect-js"
+    "eventsource": "^2.0.0",
+    "express": "^5.1.0",
+    "swagger-client": "^3.18.4",
+    "open": "^8.4.0"
   },
   "bugs": {
     "url": "https://github.com/HeikoGr/MMM-HomeConnect/issues"

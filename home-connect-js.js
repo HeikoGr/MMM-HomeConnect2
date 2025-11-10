@@ -1,0 +1,262 @@
+// Vendored single-file version of home-connect-js (utils + main combined)
+const EventSource = require('eventsource');
+const SwaggerClient = require('swagger-client');
+// use built-in fetch when available (Node 18+). If not present, this will throw
+const fetch = typeof globalThis.fetch === 'function' ? globalThis.fetch.bind(globalThis) : null;
+const express = require('express');
+const open = require('open');
+const EventEmitter = require('events');
+
+// URLs used by the library
+global.urls = {
+    simulation: {
+        base: 'https://simulator.home-connect.com/',
+        api: 'https://apiclient.home-connect.com/hcsdk.yaml',
+    },
+    physical: {
+        base: 'https://api.home-connect.com/',
+        api: 'https://apiclient.home-connect.com/hcsdk-production.yaml',
+    },
+};
+
+// --- utils ---
+async function authorize(clientId, clientSecret) {
+    let authCode = await getAuthorizationCode(clientId);
+    let tokens = await getTokens(clientId, clientSecret, authCode);
+    return tokens;
+}
+
+function getClient(accessToken) {
+    return new Promise((resolve, reject) => {
+        SwaggerClient({
+            url: isSimulated ? urls.simulation.api : urls.physical.api,
+            v2OperationIdCompatibilityMode: true,
+            requestInterceptor: (req) => {
+                req.headers['accept'] = 'application/vnd.bsh.sdk.v1+json';
+                req.headers['authorization'] = 'Bearer ' + accessToken;
+            },
+        })
+            .then((client) => {
+                resolve(client);
+            })
+            .catch(reject);
+    });
+}
+
+function refreshToken(clientSecret, refreshToken) {
+    return new Promise((resolve, reject) => {
+        if (!fetch) {
+            return reject(new Error('Global fetch is not available in this Node runtime'));
+        }
+        fetch((isSimulated ? urls.simulation.base : urls.physical.base) + 'security/oauth/token', {
+            method: 'POST',
+            headers: { 'content-type': 'application/x-www-form-urlencoded' },
+            body: 'grant_type=refresh_token&client_secret=' + clientSecret + '&refresh_token=' + refreshToken,
+        })
+            .then(checkResponseStatus)
+            .then((res) => res.json())
+            .then((json) =>
+                resolve({
+                    access_token: json.access_token,
+                    refresh_token: json.refresh_token,
+                    expires_in: json.expires_in,
+                    timestamp: Math.floor(Date.now() / 1000),
+                }),
+            )
+            .catch((err) => reject(err));
+    });
+}
+
+function getAuthorizationCode(clientId) {
+    return new Promise((resolve, reject) => {
+        const app = express();
+        app.get('/o2c', (req, res) => {
+            res.send('Authorization complete. You can now close this window.');
+            server.close();
+            resolve(req.query.code);
+        });
+        const server = app.listen(3000);
+        let url = (isSimulated ? urls.simulation.base : urls.physical.base) + 'security/oauth/authorize';
+        open(url + '?client_id=' + clientId + '&response_type=code');
+    });
+}
+
+function getTokens(clientId, clientSecret, authCode) {
+    return new Promise((resolve, reject) => {
+        if (!fetch) {
+            return reject(new Error('Global fetch is not available in this Node runtime'));
+        }
+        fetch((isSimulated ? urls.simulation.base : urls.physical.base) + 'security/oauth/token', {
+            method: 'POST',
+            headers: { 'content-type': 'application/x-www-form-urlencoded' },
+            body: 'client_id=' + clientId + '&client_secret=' + clientSecret + '&grant_type=authorization_code&code=' + authCode,
+        })
+            .then(checkResponseStatus)
+            .then((res) => res.json())
+            .then((json) =>
+                resolve({
+                    access_token: json.access_token,
+                    refresh_token: json.refresh_token,
+                    expires_in: json.expires_in,
+                    timestamp: Math.floor(Date.now() / 1000),
+                }),
+            )
+            .catch((err) => reject(err));
+    });
+}
+
+function checkResponseStatus(res) {
+    if (res.ok) {
+        return res;
+    } else {
+        throw new Error(`The HTTP status of the reponse: ${res.status} (${res.statusText})`);
+    }
+}
+
+const utils = {
+    authorize,
+    getClient,
+    refreshToken,
+};
+
+// --- HomeConnect class ---
+class HomeConnect extends EventEmitter {
+    constructor(clientId, clientSecret, refreshToken) {
+        super();
+        this.clientId = clientId;
+        this.clientSecret = clientSecret;
+        this.tokens = {};
+        this.tokens.refresh_token = refreshToken;
+        this.eventSources = {};
+        this.eventListeners = {};
+        this.eventSource = null;
+        this.eventListener = new Map();
+        this.tokenRefreshTimeout = null;
+    }
+
+    async init(options) {
+        global.isSimulated = options != undefined && 'isSimulated' in options && typeof options.isSimulated === 'boolean' ? options.isSimulated : false;
+
+        try {
+            // refresh tokens or authorize app
+            this.tokens = await (this.tokens.refresh_token ? utils.refreshToken(this.clientSecret, this.tokens.refresh_token) : utils.authorize(this.clientId, this.clientSecret));
+
+            // schedule token refresh
+            clearTimeout(this.tokenRefreshTimeout);
+            const timeToNextTokenRefresh = this.tokens.timestamp + this.tokens.expires_in * 0.9 - Math.floor(Date.now() / 1000);
+            this.tokenRefreshTimeout = setTimeout(() => this.refreshTokens(), timeToNextTokenRefresh * 1000);
+            this.client = await utils.getClient(this.tokens.access_token);
+            this.emit('newRefreshToken', this.tokens.refresh_token);
+        } catch (error) {
+            throw error;
+        }
+    }
+
+    async command(tag, operationId, haId, body) {
+        try {
+            return this.client.apis[tag][operationId]({ haId, body });
+        } catch (error) {
+            throw error;
+        }
+    }
+
+    subscribe(haid, event, callback) {
+        if (this.eventSources && !(haid in this.eventSources)) {
+            const url = isSimulated ? urls.simulation.base : urls.physical.base;
+            const eventSource = new EventSource(url + 'api/homeappliances/' + haid + '/events', {
+                headers: {
+                    accept: 'text/event-stream',
+                    authorization: 'Bearer ' + this.tokens.access_token,
+                },
+            });
+            this.eventSources = { ...this.eventSources, [haid]: eventSource };
+        }
+
+        if (this.eventListeners && !(haid in this.eventListeners)) {
+            const listeners = new Map();
+            listeners.set(event, callback);
+            this.eventListeners = { ...this.eventListeners, [haid]: listeners };
+        }
+
+        this.eventSources[haid].addEventListener(event, callback);
+        this.eventListeners[haid].set(event, callback);
+    }
+
+    subscribe(event, callback) {
+        if (!this.eventSource) {
+            const url = isSimulated ? urls.simulation.base : urls.physical.base;
+            this.eventSource = new EventSource(url + 'api/homeappliances/events', {
+                headers: {
+                    accept: 'text/event-stream',
+                    authorization: 'Bearer ' + this.tokens.access_token,
+                },
+            });
+        }
+
+        this.eventSource.addEventListener(event, callback);
+        this.eventListener.set(event, callback);
+    }
+
+    unsubscribe(event, callback) {
+        if (this.eventSource) {
+            this.eventSource.removeEventListener(event, callback);
+        }
+        if (this.eventListener) {
+            this.eventListener.delete(event);
+        }
+    }
+
+    async refreshTokens() {
+        clearTimeout(this.tokenRefreshTimeout);
+        let timeToNextTokenRefresh;
+        try {
+            this.tokens = await utils.refreshToken(this.clientSecret, this.tokens.refresh_token);
+            this.emit('newRefreshToken', this.tokens.refresh_token);
+            this.client = await utils.getClient(this.tokens.access_token);
+            this.recreateEventSources();
+            timeToNextTokenRefresh = this.tokens.timestamp + this.tokens.expires_in * 0.9 - Math.floor(Date.now() / 1000);
+        } catch (error) {
+            timeToNextTokenRefresh = 60;
+            console.error('Could not refresh tokens: ' + error.message);
+            console.error('Retrying in 60 seconds');
+        }
+        this.tokenRefreshTimeout = setTimeout(() => this.refreshTokens(), timeToNextTokenRefresh * 1000);
+    }
+
+    recreateEventSources() {
+        for (const haid of Object.keys(this.eventSources)) {
+            this.eventSources[haid].close();
+            for (const [event, callback] of this.eventListeners[haid]) {
+                this.eventSources[haid].removeEventListener(event, callback);
+            }
+            const url = isSimulated ? urls.simulation.base : urls.physical.base;
+            this.eventSources[haid] = new EventSource(url + 'api/homeappliances/' + haid + '/events', {
+                headers: {
+                    accept: 'text/event-stream',
+                    authorization: 'Bearer ' + this.tokens.access_token,
+                },
+            });
+            for (const [event, callback] of this.eventListeners[haid]) {
+                this.eventSources[haid].addEventListener(event, callback);
+            }
+        }
+        if (this.eventSource) {
+            this.eventSource.close();
+            for (const [event, callback] of this.eventListener) {
+                this.eventSource.removeEventListener(event, callback);
+            }
+            const url = isSimulated ? urls.simulation.base : urls.physical.base;
+            this.eventSource = new EventSource(url + 'api/homeappliances/events', {
+                headers: {
+                    accept: 'text/event-stream',
+                    authorization: 'Bearer ' + this.tokens.access_token,
+                },
+            });
+            for (const [event, callback] of this.eventListener) {
+                this.eventSource.addEventListener(event, callback);
+            }
+        }
+    }
+}
+
+module.exports = HomeConnect;
