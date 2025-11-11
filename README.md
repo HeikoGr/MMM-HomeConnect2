@@ -2,8 +2,8 @@
 
 This module connects MagicMirror to BSH (Bosch, Siemens, Neff, Gaggenau, ...) devices. It uses the OAuth2 Device Flow so a browser is not required on the MagicMirror server.
 
-### Overview / Appliance Status
-![](screenshots/screen_overview.png)
+## Overview / Appliance Status
+![Overview of appliance status](screenshots/screen_overview.png)
 
 Key features
 - Headless Device Flow authentication (no local browser needed)
@@ -32,9 +32,7 @@ Simple config example (add to your MagicMirror `config/config.js`):
     module: "MMM-HomeConnect2",
     position: "top_left",
     config: {
-        client_ID: "YOUR_CLIENT_ID",
-        client_Secret: "YOUR_CLIENT_SECRET",
-        use_headless_auth: true,
+        clientId: "YOUR_CLIENT_ID",
         showDeviceIcon: true,
         updateFrequency: 60 * 60 * 1000 // 1 hour
     }
@@ -43,7 +41,7 @@ Simple config example (add to your MagicMirror `config/config.js`):
 
 
 ### Authentication / Device Flow
-![](screenshots/screen_auth.png)
+![Authentication Workflow visualisation](screenshots/screen_auth.png)
 
 How authentication works
 - First time: module shows a URL and a short code on the MagicMirror screen.
@@ -58,7 +56,7 @@ Troubleshooting
 - Token file: `modules/MMM-HomeConnect2/refresh_token.json` (do not commit this file).
 
 Security
-- Keep `client_Secret` and `refresh_token.json` private. Do not commit them to git.
+- Keep `clientSecret` and `refresh_token.json` private. Do not commit them to git.
 
 Developer notes
 - API endpoints used: device_authorization, token, and homeappliances endpoints of Home Connect.
