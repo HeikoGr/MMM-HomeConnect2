@@ -1,4 +1,4 @@
-# MMM-HomeConnect (Headless Device Flow)
+# MMM-HomeConnect2 (Headless Device Flow)
 
 This module connects MagicMirror to BSH (Bosch, Siemens, Neff, Gaggenau, ...) devices. It uses the OAuth2 Device Flow so a browser is not required on the MagicMirror server.
 
@@ -15,8 +15,8 @@ Quick install
 
 ```bash
 cd ~/MagicMirror/modules
-git clone https://github.com/djerik/MMM-HomeConnect
-cd MMM-HomeConnect
+git clone https://github.com/djerik/MMM-HomeConnect2
+cd MMM-HomeConnect2
 npm install
 ```
 
@@ -29,7 +29,7 @@ Simple config example (add to your MagicMirror `config/config.js`):
 
 ```js
 {
-    module: "MMM-HomeConnect",
+    module: "MMM-HomeConnect2",
     position: "top_left",
     config: {
         client_ID: "YOUR_CLIENT_ID",
@@ -55,7 +55,7 @@ If the token expires, the module will automatically refresh it when possible.
 Troubleshooting
 - If you see "polling too quickly" errors, wait a minute and try again.
 - Check logs with `pm2 logs mm` or in your terminal.
-- Token file: `modules/MMM-HomeConnect/refresh_token.json` (do not commit this file).
+- Token file: `modules/MMM-HomeConnect2/refresh_token.json` (do not commit this file).
 
 Security
 - Keep `client_Secret` and `refresh_token.json` private. Do not commit them to git.
@@ -67,9 +67,9 @@ Developer notes
 Comparison to the original
 --------------------------
 
-This repository is a fork of the original project by djerik (https://github.com/djerik/MMM-HomeConnect). It is created with respect for the original work and builds on the same goal — integrating Home Connect devices into MagicMirror — while making a few deliberate changes to better suit common headless deployments and to improve maintainability.
+This repository is a fork of the original project by djerik (https://github.com/djerik/MMM-HomeConnect2). It is created with respect for the original work and builds on the same goal — integrating Home Connect devices into MagicMirror — while making a few deliberate changes to better suit common headless deployments and to improve maintainability.
 
-Key differences and rationale (this fork vs. djerik/MMM-HomeConnect):
+Key differences and rationale (this fork vs. djerik/MMM-HomeConnect2):
 
 - Headless-first (Device Flow) instead of browser fallback
 - This fork treats the OAuth2 Device Flow (headless) as the primary authentication method. That means there is no built-in Express server or automatic opening of a local browser. The aim is to make the module work reliably on display-less systems (Raspberry Pi, servers).

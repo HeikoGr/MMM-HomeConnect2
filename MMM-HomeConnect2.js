@@ -1,4 +1,4 @@
-Module.register("MMM-HomeConnect", {
+Module.register("MMM-HomeConnect2", {
   updated: 0,
   devices: [],
   config: null,
