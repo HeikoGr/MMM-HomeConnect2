@@ -17,13 +17,13 @@ const globalSession = {
   MIN_AUTH_INTERVAL: 60000
 };
 
-async function initiateDeviceFlow (clientId) {
+async function initiateDeviceFlow(clientId) {
   try {
     const response = await fetch(
       "https://api.home-connect.com/security/oauth/device_authorization",
       {
         method: "POST",
-        headers: {"Content-Type": "application/x-www-form-urlencoded"},
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: `client_id=${clientId}`
       }
     );
@@ -42,7 +42,7 @@ async function initiateDeviceFlow (clientId) {
   }
 }
 
-function handleTokenSuccess (tokens, sendNotification) {
+function handleTokenSuccess(tokens, sendNotification) {
   console.log("✅ Token received successfully!");
   if (sendNotification) {
     sendNotification("AUTH_STATUS", {
@@ -58,17 +58,17 @@ function handleTokenSuccess (tokens, sendNotification) {
   };
 }
 
-function handleTokenError (error, sendNotification) {
+function handleTokenError(error, sendNotification) {
   console.log("Token response error:", error);
 
   if (error.error === "authorization_pending") {
     console.log("⏳ Waiting for user authorization...");
-    return {action: "retry"};
+    return { action: "retry" };
   }
 
   if (error.error === "slow_down") {
     console.log("⚠️ Slowing down polling interval");
-    return {action: "slow_down"};
+    return { action: "slow_down" };
   }
 
   if (error.error === "access_denied") {
@@ -78,7 +78,7 @@ function handleTokenError (error, sendNotification) {
         message: "Benutzer hat Autorisierung verweigert"
       });
     }
-    return {action: "error", message: "❌ User denied authorization"};
+    return { action: "error", message: "❌ User denied authorization" };
   }
 
   if (error.error === "expired_token") {
@@ -100,15 +100,15 @@ function handleTokenError (error, sendNotification) {
   };
 }
 
-async function requestToken (clientId, clientSecret, deviceCode) {
+async function requestToken(clientId, clientSecret, deviceCode) {
   return fetch("https://api.home-connect.com/security/oauth/token", {
     method: "POST",
-    headers: {"Content-Type": "application/x-www-form-urlencoded"},
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: `grant_type=device_code&device_code=${deviceCode}&client_id=${clientId}&client_secret=${clientSecret}`
   });
 }
 
-async function pollForToken (
+async function pollForToken(
   clientId,
   clientSecret,
   deviceCode,
@@ -168,7 +168,7 @@ async function pollForToken (
   });
 }
 
-async function headlessAuth (clientId, clientSecret, sendNotification) {
+async function headlessAuth(clientId, clientSecret, sendNotification) {
   try {
     console.log("🚀 Starting headless authentication using Device Flow...");
     const deviceAuth = await initiateDeviceFlow(clientId);
@@ -259,19 +259,19 @@ module.exports = NodeHelper.create({
   instanceId: null,
   subscribed: false,
 
-  init () {
+  init() {
     console.log("init module helper: MMM-HomeConnect (Session-Based Version)");
   },
 
-  start () {
+  start() {
     console.log(`Starting module helper: ${this.name}`);
   },
 
-  stop () {
+  stop() {
     console.log(`Stopping module helper: ${this.name}`);
   },
 
-  handleConfigNotificationFirstTime () {
+  handleConfigNotificationFirstTime() {
     this.configReceived = true;
     console.log("🔧 use_headless_auth:", this.config.use_headless_auth);
 
@@ -292,7 +292,7 @@ module.exports = NodeHelper.create({
     this.checkTokenAndInitialize();
   },
 
-  handleSessionAlreadyActive () {
+  handleSessionAlreadyActive() {
     console.log("✅ Session bereits authentifiziert - verwende bestehende Token");
     this.sendSocketNotification("INIT_STATUS", {
       status: "session_active",
@@ -307,7 +307,7 @@ module.exports = NodeHelper.create({
     }
   },
 
-  notifyAuthInProgress () {
+  notifyAuthInProgress() {
     console.log("⏳ Authentifizierung bereits im Gange für andere Client-Instanz");
     this.sendSocketNotification("INIT_STATUS", {
       status: "auth_in_progress",
@@ -316,7 +316,7 @@ module.exports = NodeHelper.create({
     });
   },
 
-  handleConfigNotificationSubsequent () {
+  handleConfigNotificationSubsequent() {
     if (globalSession.isAuthenticated && this.hc) {
       this.sendSocketNotification("INIT_STATUS", {
         status: "complete",
@@ -332,7 +332,7 @@ module.exports = NodeHelper.create({
     }
   },
 
-  handleConfigNotification (payload) {
+  handleConfigNotification(payload) {
     this.instanceId = payload.instanceId || "default";
     globalSession.clientInstances.add(this.instanceId);
 
@@ -347,7 +347,7 @@ module.exports = NodeHelper.create({
     }
   },
 
-  handleUpdateRequest () {
+  handleUpdateRequest() {
     if (this.hc && !globalSession.isAuthenticating) {
       console.log("📡 Update request received - fetching devices");
       this.getDevices();
@@ -356,12 +356,12 @@ module.exports = NodeHelper.create({
     }
   },
 
-  handleRetryAuth () {
+  handleRetryAuth() {
     console.log("🔄 Manual retry requested...");
     this.retryAuthentication();
   },
 
-  socketNotificationReceived (notification, payload) {
+  socketNotificationReceived(notification, payload) {
     switch (notification) {
       case "CONFIG":
         this.handleConfigNotification(payload);
@@ -377,7 +377,7 @@ module.exports = NodeHelper.create({
     }
   },
 
-  broadcastToAllClients (notification, payload) {
+  broadcastToAllClients(notification, payload) {
     globalSession.clientInstances.forEach((instanceId) => {
       this.sendSocketNotification(notification, {
         ...payload,
@@ -386,15 +386,15 @@ module.exports = NodeHelper.create({
     });
   },
 
-  readRefreshTokenFromFile () {
-    if (!fs.existsSync("./modules/MMM-HomeConnect/refresh_token.json")) {
+  readRefreshTokenFromFile() {
+    if (!fs.existsSync("./modules/MMM-HomeConnect2/refresh_token.json")) {
       console.log("📄 No refresh token file found");
       return null;
     }
 
     try {
       const token = fs
-        .readFileSync("./modules/MMM-HomeConnect/refresh_token.json", "utf8")
+        .readFileSync("./modules/MMM-HomeConnect2/refresh_token.json", "utf8")
         .trim();
 
       if (token && token.length > 0) {
@@ -409,7 +409,7 @@ module.exports = NodeHelper.create({
     }
   },
 
-  checkRateLimit () {
+  checkRateLimit() {
     const now = Date.now();
     if (now - globalSession.lastAuthAttempt < globalSession.MIN_AUTH_INTERVAL) {
       console.log("⚠️ Rate limit: Warten vor nächstem Auth-Versuch");
@@ -422,7 +422,7 @@ module.exports = NodeHelper.create({
     return true;
   },
 
-  initiateAuthFlow () {
+  initiateAuthFlow() {
     const now = Date.now();
     globalSession.lastAuthAttempt = now;
 
@@ -440,7 +440,7 @@ module.exports = NodeHelper.create({
     }
   },
 
-  checkTokenAndInitialize () {
+  checkTokenAndInitialize() {
     console.log("🔍 Checking for existing refresh token...");
 
     const token = this.readRefreshTokenFromFile();
@@ -466,9 +466,9 @@ module.exports = NodeHelper.create({
     this.initiateAuthFlow();
   },
 
-  handleHeadlessAuthSuccess (tokens) {
+  handleHeadlessAuthSuccess(tokens) {
     fs.writeFileSync(
-      "./modules/MMM-HomeConnect/refresh_token.json",
+      "./modules/MMM-HomeConnect2/refresh_token.json",
       tokens.refresh_token
     );
     console.log("💾 Refresh token saved successfully");
@@ -484,7 +484,7 @@ module.exports = NodeHelper.create({
     return this.initializeHomeConnect(tokens.refresh_token);
   },
 
-  handleHeadlessAuthError (error) {
+  handleHeadlessAuthError(error) {
     globalSession.isAuthenticating = false;
     console.error("❌ Headless authentication failed:", error.message);
 
@@ -519,7 +519,7 @@ module.exports = NodeHelper.create({
     });
   },
 
-  async initWithHeadlessAuth () {
+  async initWithHeadlessAuth() {
     if (globalSession.isAuthenticating) {
       console.log("⚠️ Authentication already in progress, skipping...");
       return;
@@ -545,7 +545,7 @@ module.exports = NodeHelper.create({
     }
   },
 
-  handleHomeConnectInitSuccess () {
+  handleHomeConnectInitSuccess() {
     console.log("✅ HomeConnect initialized successfully");
 
     globalSession.isAuthenticated = true;
@@ -561,7 +561,7 @@ module.exports = NodeHelper.create({
     }, 2000);
   },
 
-  handleHomeConnectInitError (error) {
+  handleHomeConnectInitError(error) {
     console.error("❌ HomeConnect initialization failed:", error);
     globalSession.isAuthenticating = false;
 
@@ -571,10 +571,10 @@ module.exports = NodeHelper.create({
     });
   },
 
-  setupHomeConnectRefreshToken () {
+  setupHomeConnectRefreshToken() {
     this.hc.on("newRefreshToken", (refreshToken) => {
       fs.writeFileSync(
-        "./modules/MMM-HomeConnect/refresh_token.json",
+        "./modules/MMM-HomeConnect2/refresh_token.json",
         refreshToken
       );
       console.log("🔄 Refresh token updated");
@@ -588,7 +588,7 @@ module.exports = NodeHelper.create({
     });
   },
 
-  async initializeHomeConnect (refreshToken) {
+  async initializeHomeConnect(refreshToken) {
     return new Promise((resolve, reject) => {
       console.log("🏠 Initializing HomeConnect with token...");
       if (!HomeConnect) {
@@ -626,7 +626,7 @@ module.exports = NodeHelper.create({
   },
 
 
-  fetchDeviceStatus (device) {
+  fetchDeviceStatus(device) {
     this.hc
       .command("status", "get_status", device.haId)
       .then((statusResult) => {
@@ -639,7 +639,7 @@ module.exports = NodeHelper.create({
       .catch((error) => console.error(`❌ Status error for ${device.name}:`, error));
   },
 
-  fetchDeviceSettings (device) {
+  fetchDeviceSettings(device) {
     this.hc
       .command("settings", "get_settings", device.haId)
       .then((settingsResult) => {
@@ -652,7 +652,7 @@ module.exports = NodeHelper.create({
       .catch((error) => console.error(`❌ Settings error for ${device.name}:`, error));
   },
 
-  processDevice (device, index) {
+  processDevice(device, index) {
     console.log(`📱 Processing device ${index + 1}: ${device.name} (${device.haId})`);
     this.devices.set(device.haId, device);
 
@@ -665,7 +665,7 @@ module.exports = NodeHelper.create({
     }
   },
 
-  subscribeToDeviceEvents () {
+  subscribeToDeviceEvents() {
     if (!this.subscribed) {
       console.log("📡 Subscribing to device events...");
       this.hc.subscribe("NOTIFY", (e) => {
@@ -684,13 +684,13 @@ module.exports = NodeHelper.create({
     }
   },
 
-  sortDevices () {
+  sortDevices() {
     const array = [...this.devices.entries()];
     const sortedArray = array.sort((a, b) => a[1].name > b[1].name ? 1 : -1);
     this.devices = new Map(sortedArray);
   },
 
-  handleGetDevicesSuccess (result) {
+  handleGetDevicesSuccess(result) {
     console.log(`✅ API Response received - Found ${result.body.data.homeappliances.length} appliances`);
 
     if (result.body.data.homeappliances.length === 0) {
@@ -717,7 +717,7 @@ module.exports = NodeHelper.create({
     });
   },
 
-  handleGetDevicesError (error) {
+  handleGetDevicesError(error) {
     console.error("❌ Failed to get devices:", error && error.stack
       ? error.stack
       : error);
@@ -735,7 +735,7 @@ module.exports = NodeHelper.create({
     }
   },
 
-  getDevices () {
+  getDevices() {
     if (!this.hc) {
       console.error("❌ HomeConnect not initialized - cannot get devices");
       this.broadcastToAllClients("INIT_STATUS", {
@@ -758,7 +758,7 @@ module.exports = NodeHelper.create({
       .catch((error) => this.handleGetDevicesError(error));
   },
 
-  retryAuthentication () {
+  retryAuthentication() {
     console.log("🔄 Manual authentication retry...");
     globalSession.isAuthenticated = false;
     globalSession.isAuthenticating = false;
@@ -772,8 +772,8 @@ module.exports = NodeHelper.create({
     this.devices.clear();
     this.subscribed = false;
 
-    if (fs.existsSync("./modules/MMM-HomeConnect/refresh_token.json")) {
-      fs.unlinkSync("./modules/MMM-HomeConnect/refresh_token.json");
+    if (fs.existsSync("./modules/MMM-HomeConnect2/refresh_token.json")) {
+      fs.unlinkSync("./modules/MMM-HomeConnect2/refresh_token.json");
       console.log("🗑️ Old token file deleted");
     }
 
@@ -782,7 +782,7 @@ module.exports = NodeHelper.create({
     this.checkTokenAndInitialize();
   },
 
-  deviceEvent (data) {
+  deviceEvent(data) {
     const _self = this;
     try {
       const eventObj = JSON.parse(data.data);
@@ -798,25 +798,25 @@ module.exports = NodeHelper.create({
     }
   },
 
-  parseRemainingProgramTime (device, value) {
+  parseRemainingProgramTime(device, value) {
     device.RemainingProgramTime = value;
   },
 
-  parseProgramProgress (device, value) {
+  parseProgramProgress(device, value) {
     device.ProgramProgress = value;
   },
 
-  parseOperationState (device, value) {
+  parseOperationState(device, value) {
     if (value === "BSH.Common.EnumType.OperationState.Finished") {
       device.RemainingProgramTime = 0;
     }
   },
 
-  parseLighting (device, value) {
+  parseLighting(device, value) {
     device.Lighting = value;
   },
 
-  parsePowerState (device, value) {
+  parsePowerState(device, value) {
     const powerStateMap = {
       "BSH.Common.EnumType.PowerState.On": "On",
       "BSH.Common.EnumType.PowerState.Standby": "Standby",
@@ -825,7 +825,7 @@ module.exports = NodeHelper.create({
     device.PowerState = powerStateMap[value];
   },
 
-  parseDoorState (device, value) {
+  parseDoorState(device, value) {
     const doorStateMap = {
       "BSH.Common.EnumType.DoorState.Open": "Open",
       "BSH.Common.EnumType.DoorState.Closed": "Closed",
@@ -834,7 +834,7 @@ module.exports = NodeHelper.create({
     device.DoorState = doorStateMap[value];
   },
 
-  parseEvent (event, device) {
+  parseEvent(event, device) {
     if (!device) {
       return;
     }
@@ -854,7 +854,7 @@ module.exports = NodeHelper.create({
     }
   },
 
-  broadcastDevices () {
+  broadcastDevices() {
     console.log(`📡 Broadcasting ${this.devices.size} devices to ${globalSession.clientInstances.size} clients`);
     globalSession.clientInstances.forEach(() => {
       this.sendSocketNotification(

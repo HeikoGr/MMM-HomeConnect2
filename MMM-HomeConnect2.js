@@ -198,7 +198,7 @@ Module.register("MMM-HomeConnect2", {
         const DeviceName = device.name;
         let container = "<div class='deviceContainer'>";
         if (_self.config.showDeviceIcon) {
-          container += `<img src='modules/MMM-HomeConnect/Icons/${Image}' class='device_img'>`;
+          container += `<img src='modules/MMM-HomeConnect2/Icons/${Image}' class='device_img'>`;
         }
         container += "<div class='deviceStatusIcons'>";
         [
