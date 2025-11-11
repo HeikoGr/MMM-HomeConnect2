@@ -2,8 +2,6 @@
 const EventSource = require('eventsource');
 // use built-in fetch when available (Node 18+). If not present, this will throw
 const fetch = typeof globalThis.fetch === 'function' ? globalThis.fetch.bind(globalThis) : null;
-const express = require('express');
-const open = require('open');
 const EventEmitter = require('events');
 
 // URLs used by the library
@@ -19,11 +17,8 @@ global.urls = {
 };
 
 // --- utils ---
-async function authorize(clientId, clientSecret) {
-    let authCode = await getAuthorizationCode(clientId);
-    let tokens = await getTokens(clientId, clientSecret, authCode);
-    return tokens;
-}
+// Note: The interactive browser OAuth flow has been removed.
+// This module expects a refresh token to be available (headless/device flow).
 
 function getClient(accessToken) {
     // Return a simple client object that mimics the swagger-client API structure
@@ -49,7 +44,7 @@ function makeApiRequest(method, path, accessToken, body = null) {
     if (!fetch) {
         return Promise.reject(new Error('Global fetch is not available in this Node runtime'));
     }
-    
+
     const baseUrl = isSimulated ? urls.simulation.base : urls.physical.base;
     const url = baseUrl + path;
     const options = {
@@ -95,54 +90,21 @@ function refreshToken(clientSecret, refreshToken) {
     });
 }
 
-function getAuthorizationCode(clientId) {
-    return new Promise((resolve, reject) => {
-        const app = express();
-        app.get('/o2c', (req, res) => {
-            res.send('Authorization complete. You can now close this window.');
-            server.close();
-            resolve(req.query.code);
-        });
-        const server = app.listen(3000);
-        let url = (isSimulated ? urls.simulation.base : urls.physical.base) + 'security/oauth/authorize';
-        open(url + '?client_id=' + clientId + '&response_type=code');
-    });
-}
-
-function getTokens(clientId, clientSecret, authCode) {
-    return new Promise((resolve, reject) => {
-        if (!fetch) {
-            return reject(new Error('Global fetch is not available in this Node runtime'));
-        }
-        fetch((isSimulated ? urls.simulation.base : urls.physical.base) + 'security/oauth/token', {
-            method: 'POST',
-            headers: { 'content-type': 'application/x-www-form-urlencoded' },
-            body: 'client_id=' + clientId + '&client_secret=' + clientSecret + '&grant_type=authorization_code&code=' + authCode,
-        })
-            .then(checkResponseStatus)
-            .then((res) => res.json())
-            .then((json) =>
-                resolve({
-                    access_token: json.access_token,
-                    refresh_token: json.refresh_token,
-                    expires_in: json.expires_in,
-                    timestamp: Math.floor(Date.now() / 1000),
-                }),
-            )
-            .catch((err) => reject(err));
-    });
-}
+// Interactive OAuth helpers removed. Use the device (headless) flow instead.
 
 function checkResponseStatus(res) {
     if (res.ok) {
         return res;
     } else {
-        throw new Error(`The HTTP status of the reponse: ${res.status} (${res.statusText})`);
+        // Try to get response body text for better debugging
+        return res.text().then((text) => {
+            const truncated = typeof text === 'string' && text.length > 1000 ? text.slice(0, 1000) + '... (truncated)' : text;
+            throw new Error(`HTTP ${res.status} ${res.statusText}: ${truncated}`);
+        });
     }
 }
 
 const utils = {
-    authorize,
     getClient,
     refreshToken,
 };
@@ -166,8 +128,13 @@ class HomeConnect extends EventEmitter {
         global.isSimulated = options != undefined && 'isSimulated' in options && typeof options.isSimulated === 'boolean' ? options.isSimulated : false;
 
         try {
-            // refresh tokens or authorize app
-            this.tokens = await (this.tokens.refresh_token ? utils.refreshToken(this.clientSecret, this.tokens.refresh_token) : utils.authorize(this.clientId, this.clientSecret));
+            // refresh tokens
+            if (this.tokens.refresh_token) {
+                this.tokens = await utils.refreshToken(this.clientSecret, this.tokens.refresh_token);
+            } else {
+                // The module no longer supports the interactive browser OAuth flow.
+                throw new Error('No refresh token available. This module requires headless authentication (device flow).');
+            }
 
             // schedule token refresh
             clearTimeout(this.tokenRefreshTimeout);

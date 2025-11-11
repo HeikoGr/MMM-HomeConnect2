@@ -260,7 +260,12 @@ Module.register("MMM-HomeConnect", {
     html += "<div class='auth-step'>";
     html += `<div class='auth-step-title'>🔗 <strong>${this.translate("AUTH_STEP_DIRECT")}</strong></div>`;
     html += "<div class='auth-step-content'>";
-    html += `<div class='auth-url'><a href='${this.authInfo.verification_uri_complete}'>${this.authInfo.verification_uri_complete}</a></div>`;
+    // Prefer QR SVG if provided by the helper; fallback to direct link
+    if (this.authInfo.verification_qr_svg) {
+      html += `<div class='auth-qr'>${this.authInfo.verification_qr_svg}</div>`;
+    } else if (this.authInfo.verification_uri_complete) {
+      html += `<div class='auth-url'><a href='${this.authInfo.verification_uri_complete}'>${this.authInfo.verification_uri_complete}</a></div>`;
+    }
     html += "</div>";
     html += "</div>";
 

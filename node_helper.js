@@ -3,6 +3,7 @@ const fs = require("fs");
 const NodeHelper = require("node_helper");
 // use built-in fetch when available
 const fetch = typeof globalThis.fetch === 'function' ? globalThis.fetch.bind(globalThis) : null;
+const QRCode = require('qrcode');
 
 const globalSession = {
   isAuthenticated: false,
@@ -188,10 +189,27 @@ async function headlessAuth(clientId, clientSecret, sendNotification) {
     console.log("🔑 Geben Sie dort folgenden Code ein:");
     console.log(`📋 CODE: ${deviceAuth.user_code}`);
     console.log("");
-    console.log("🔗 Oder verwenden Sie diesen direkten Link:");
-    console.log(
-      `${deviceAuth.verification_uri_complete || `${deviceAuth.verification_uri}?user_code=${deviceAuth.user_code}`}`,
-    );
+    // Instead of printing the direct link, generate an SVG QR code for the
+    // verification link so users can scan it with their phone.
+    const completeLink =
+      deviceAuth.verification_uri_complete ||
+      `${deviceAuth.verification_uri}?user_code=${deviceAuth.user_code}`;
+    console.log("🔗 Scan diesen QR-Code mit deinem Handy, um die Seite zu öffnen:");
+    let verificationQrSvg = null;
+    try {
+      verificationQrSvg = await QRCode.toString(completeLink, {
+        type: 'svg',
+        errorCorrectionLevel: 'H',
+        margin: 1,
+      });
+      // print the raw SVG to the console so headless setups (with a UI) can
+      // capture or display it if needed.
+      console.log(verificationQrSvg);
+    } catch (qrErr) {
+      console.error('❌ QR-Code Generierung fehlgeschlagen:', qrErr.message);
+      // Fallback: print the direct link
+      console.log('Direct link:', completeLink);
+    }
     console.log("");
     console.log(
       `⏱️ Code läuft ab in: ${Math.floor(deviceAuth.expires_in / 60)} Minuten`,
@@ -204,9 +222,11 @@ async function headlessAuth(clientId, clientSecret, sendNotification) {
         status: "waiting",
         verification_uri: deviceAuth.verification_uri,
         user_code: deviceAuth.user_code,
-        verification_uri_complete:
-          deviceAuth.verification_uri_complete ||
-          `${deviceAuth.verification_uri}?user_code=${deviceAuth.user_code}`,
+        // Provide the SVG directly so the frontend can render it.
+        verification_qr_svg: verificationQrSvg,
+        // Also include the complete link as fallback for older frontends.
+        verification_uri_complete: completeLink,
+        // Keep expires/interval for the frontend to show timers.
         expires_in: deviceAuth.expires_in,
         interval: deviceAuth.interval || 5,
         expires_in_minutes: Math.floor(deviceAuth.expires_in / 60),
@@ -415,12 +435,9 @@ module.exports = NodeHelper.create({
   initiateAuthFlow() {
     const now = Date.now();
     globalSession.lastAuthAttempt = now;
-
-    if (
-      this.config.use_headless_auth &&
-      !globalSession.isAuthenticating &&
-      !globalSession.refreshToken
-    ) {
+    // Only headless/device flow is supported. Always use headless if there is
+    // no refresh token available.
+    if (!globalSession.isAuthenticating && !globalSession.refreshToken) {
       console.log(
         "🔧 No refresh token available - using headless authentication",
       );
@@ -429,13 +446,6 @@ module.exports = NodeHelper.create({
         message: "Authentifizierung erforderlich",
       });
       this.initWithHeadlessAuth();
-    } else if (!globalSession.isAuthenticating && !globalSession.refreshToken) {
-      console.log("🔧 No refresh token available - using standard OAuth flow");
-      this.broadcastToAllClients("INIT_STATUS", {
-        status: "oauth_needed",
-        message: "OAuth Browser-Anmeldung erforderlich",
-      });
-      this.initWithOAuth();
     }
   },
 
@@ -445,16 +455,16 @@ module.exports = NodeHelper.create({
     const token = this.readRefreshTokenFromFile();
 
     if (token) {
-      console.log("🔧 Using standard OAuth initialization");
+      console.log("🔧 Using saved refresh token - initializing HomeConnect");
       globalSession.refreshToken = token;
       this.refreshToken = token;
 
       this.broadcastToAllClients("INIT_STATUS", {
         status: "token_found",
-        message: "Token gefunden - OAuth wird verwendet",
+        message: "Token gefunden - initialisiere HomeConnect",
       });
 
-      this.initWithOAuth();
+      this.initializeHomeConnect(token);
       return;
     }
 
@@ -514,13 +524,12 @@ module.exports = NodeHelper.create({
     }
 
     console.log(
-      "❌ Max initialization attempts reached - falling back to OAuth",
+      "❌ Max initialization attempts reached - aborting headless authentication",
     );
     this.broadcastToAllClients("INIT_STATUS", {
-      status: "fallback_oauth",
-      message: "Fallback zu OAuth Browser-Anmeldung",
+      status: "auth_failed",
+      message: "Authentifizierung fehlgeschlagen - bitte manuell überprüfen",
     });
-    this.initWithOAuth();
   },
 
   async initWithHeadlessAuth() {
@@ -634,103 +643,7 @@ module.exports = NodeHelper.create({
     });
   },
 
-  handleOAuthSuccess() {
-    console.log("✅ OAuth initialization successful");
 
-    globalSession.isAuthenticated = true;
-    globalSession.isAuthenticating = false;
-
-    this.broadcastToAllClients("INIT_STATUS", {
-      status: "success",
-      message: "OAuth erfolgreich",
-    });
-
-    setTimeout(() => {
-      this.getDevices();
-    }, 2000);
-  },
-
-  handleOAuthError(error) {
-    console.error("❌ OAuth initialization failed:", error);
-    globalSession.isAuthenticating = false;
-
-    this.broadcastToAllClients("INIT_STATUS", {
-      status: "oauth_error",
-      message: `OAuth Fehler: ${error.message}`,
-    });
-
-    console.log(
-      "💡 Please check your configuration and try restarting MagicMirror",
-    );
-  },
-
-  setupOAuthRefreshToken() {
-    this.hc.on("newRefreshToken", (refreshToken) => {
-      fs.writeFileSync(
-        "./modules/MMM-HomeConnect/refresh_token.json",
-        refreshToken,
-      );
-      console.log("🔄 OAuth refresh token updated and saved");
-      globalSession.refreshToken = refreshToken;
-      // Only fetch devices if not yet subscribed (initial setup)
-      if (!this.subscribed) {
-        this.getDevices();
-      } else {
-        console.log(
-          "ℹ️ Token updated - devices already loaded, skipping getDevices()",
-        );
-      }
-    });
-  },
-
-  initWithOAuth() {
-    if (globalSession.isAuthenticating) {
-      return;
-    }
-
-    console.log("🔧 Initializing with OAuth...");
-    if (this.refreshToken) {
-      console.log("🔑 Using existing refresh token");
-    } else {
-      console.log("🔑 No refresh token - will trigger browser OAuth flow");
-    }
-
-    globalSession.isAuthenticating = true;
-
-    if (!HomeConnect) {
-      HomeConnect = require("./home-connect-js.js");
-    }
-
-    this.hc = new HomeConnect(
-      this.config.client_ID,
-      this.config.client_Secret,
-      this.refreshToken,
-    );
-
-    const oauthTimeout = setTimeout(() => {
-      console.error("⏰ OAuth initialization timeout");
-      globalSession.isAuthenticating = false;
-      this.broadcastToAllClients("INIT_STATUS", {
-        status: "oauth_timeout",
-        message: "OAuth Timeout - bitte Browser prüfen",
-      });
-    }, 60000);
-
-    this.hc
-      .init({
-        isSimulated: false,
-      })
-      .then(() => {
-        clearTimeout(oauthTimeout);
-        this.handleOAuthSuccess();
-      })
-      .catch((error) => {
-        clearTimeout(oauthTimeout);
-        this.handleOAuthError(error);
-      });
-
-    this.setupOAuthRefreshToken();
-  },
 
   fetchDeviceStatus(device) {
     this.hc
@@ -834,7 +747,7 @@ module.exports = NodeHelper.create({
   },
 
   handleGetDevicesError(error) {
-    console.error("❌ Failed to get devices:", error);
+    console.error("❌ Failed to get devices:", error && error.stack ? error.stack : error);
 
     this.broadcastToAllClients("INIT_STATUS", {
       status: "device_error",
