@@ -15,7 +15,7 @@ Quick install
 
 ```bash
 cd ~/MagicMirror/modules
-git clone https://github.com/djerik/MMM-HomeConnect2
+git clone https://github.com/HeikoGr/MMM-HomeConnect2
 cd MMM-HomeConnect2
 npm install
 ```
@@ -67,9 +67,9 @@ Developer notes
 Comparison to the original
 --------------------------
 
-This repository is a fork of the original project by djerik (https://github.com/djerik/MMM-HomeConnect2). It is created with respect for the original work and builds on the same goal — integrating Home Connect devices into MagicMirror — while making a few deliberate changes to better suit common headless deployments and to improve maintainability.
+This repository is a fork of the original project by djerik (https://github.com/djerik/MMM-HomeConnect). It is created with respect for the original work and builds on the same goal — integrating Home Connect devices into MagicMirror — while making a few deliberate changes to better suit common headless deployments and to improve maintainability.
 
-Key differences and rationale (this fork vs. djerik/MMM-HomeConnect2):
+Key differences and rationale (this fork vs. djerik/MMM-HomeConnect):
 
 - Headless-first (Device Flow) instead of browser fallback
 - This fork treats the OAuth2 Device Flow (headless) as the primary authentication method. That means there is no built-in Express server or automatic opening of a local browser. The aim is to make the module work reliably on display-less systems (Raspberry Pi, servers).
