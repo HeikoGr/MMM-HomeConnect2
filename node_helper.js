@@ -2,8 +2,10 @@ let HomeConnect;
 const fs = require("fs");
 const NodeHelper = require("node_helper");
 // use built-in fetch when available
-const fetch = typeof globalThis.fetch === 'function' ? globalThis.fetch.bind(globalThis) : null;
-const QRCode = require('qrcode');
+const fetch = typeof globalThis.fetch === "function"
+  ? globalThis.fetch.bind(globalThis)
+  : null;
+const QRCode = require("qrcode");
 
 const globalSession = {
   isAuthenticated: false,
@@ -12,25 +14,23 @@ const globalSession = {
   refreshToken: null,
   clientInstances: new Set(),
   lastAuthAttempt: 0,
-  MIN_AUTH_INTERVAL: 60000,
+  MIN_AUTH_INTERVAL: 60000
 };
 
-async function initiateDeviceFlow(clientId) {
+async function initiateDeviceFlow (clientId) {
   try {
     const response = await fetch(
       "https://api.home-connect.com/security/oauth/device_authorization",
       {
         method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: `client_id=${clientId}`,
-      },
+        headers: {"Content-Type": "application/x-www-form-urlencoded"},
+        body: `client_id=${clientId}`
+      }
     );
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(
-        `Device authorization failed: ${response.status} - ${errorText}`,
-      );
+      throw new Error(`Device authorization failed: ${response.status} - ${errorText}`);
     }
 
     const data = await response.json();
@@ -42,79 +42,79 @@ async function initiateDeviceFlow(clientId) {
   }
 }
 
-function handleTokenSuccess(tokens, sendNotification) {
+function handleTokenSuccess (tokens, sendNotification) {
   console.log("✅ Token received successfully!");
   if (sendNotification) {
     sendNotification("AUTH_STATUS", {
       status: "success",
-      message: "Authentifizierung erfolgreich!",
+      message: "Authentifizierung erfolgreich!"
     });
   }
   return {
     access_token: tokens.access_token,
     refresh_token: tokens.refresh_token,
     expires_in: tokens.expires_in,
-    timestamp: Math.floor(Date.now() / 1000),
+    timestamp: Math.floor(Date.now() / 1000)
   };
 }
 
-function handleTokenError(error, sendNotification) {
+function handleTokenError (error, sendNotification) {
   console.log("Token response error:", error);
 
   if (error.error === "authorization_pending") {
     console.log("⏳ Waiting for user authorization...");
-    return { action: "retry" };
+    return {action: "retry"};
   }
 
   if (error.error === "slow_down") {
     console.log("⚠️ Slowing down polling interval");
-    return { action: "slow_down" };
+    return {action: "slow_down"};
   }
 
   if (error.error === "access_denied") {
     if (sendNotification) {
       sendNotification("AUTH_STATUS", {
         status: "error",
-        message: "Benutzer hat Autorisierung verweigert",
+        message: "Benutzer hat Autorisierung verweigert"
       });
     }
-    return { action: "error", message: "❌ User denied authorization" };
+    return {action: "error", message: "❌ User denied authorization"};
   }
 
   if (error.error === "expired_token") {
     if (sendNotification) {
       sendNotification("AUTH_STATUS", {
         status: "error",
-        message: "Autorisierungscode abgelaufen - bitte neu starten",
+        message: "Autorisierungscode abgelaufen - bitte neu starten"
       });
     }
     return {
       action: "error",
-      message: "❌ Device code expired - please restart",
+      message: "❌ Device code expired - please restart"
     };
   }
 
   return {
     action: "error",
-    message: `Token request failed: ${error.error_description || error.error}`,
+    message: `Token request failed: ${error.error_description || error.error}`
   };
 }
 
-async function requestToken(clientId, clientSecret, deviceCode) {
+async function requestToken (clientId, clientSecret, deviceCode) {
   return fetch("https://api.home-connect.com/security/oauth/token", {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: `grant_type=device_code&device_code=${deviceCode}&client_id=${clientId}&client_secret=${clientSecret}`,
+    headers: {"Content-Type": "application/x-www-form-urlencoded"},
+    body: `grant_type=device_code&device_code=${deviceCode}&client_id=${clientId}&client_secret=${clientSecret}`
   });
 }
 
-async function pollForToken(
+async function pollForToken (
   clientId,
   clientSecret,
   deviceCode,
   interval = 5,
   maxAttempts = 60,
-  sendNotification,
+  sendNotification
 ) {
   return new Promise((resolve, reject) => {
     let attempts = 0;
@@ -124,22 +124,18 @@ async function pollForToken(
     const poll = async () => {
       attempts++;
       if (attempts > maxAttempts) {
-        reject(
-          new Error(`Token polling timeout after ${maxAttempts} attempts`),
-        );
+        reject(new Error(`Token polling timeout after ${maxAttempts} attempts`));
         return;
       }
       try {
-        console.log(
-          `Token polling attempt ${attempts}/${maxAttempts} (interval: ${currentInterval}s)`,
-        );
+        console.log(`Token polling attempt ${attempts}/${maxAttempts} (interval: ${currentInterval}s)`);
         if (sendNotification) {
           sendNotification("AUTH_STATUS", {
             status: "polling",
             attempt: attempts,
             maxAttempts,
             interval: currentInterval,
-            message: `Warten auf Autorisierung... (Versuch ${attempts}/${maxAttempts})`,
+            message: `Warten auf Autorisierung... (Versuch ${attempts}/${maxAttempts})`
           });
         }
 
@@ -172,7 +168,7 @@ async function pollForToken(
   });
 }
 
-async function headlessAuth(clientId, clientSecret, sendNotification) {
+async function headlessAuth (clientId, clientSecret, sendNotification) {
   try {
     console.log("🚀 Starting headless authentication using Device Flow...");
     const deviceAuth = await initiateDeviceFlow(clientId);
@@ -181,16 +177,17 @@ async function headlessAuth(clientId, clientSecret, sendNotification) {
     console.log("║ HOME CONNECT AUTHENTICATION ║");
     console.log("╚══════════════════════════════════════════════════╝");
     console.log("");
-    console.log(
-      "📱 Bitte öffnen Sie in einem Browser auf einem beliebigen Gerät:",
-    );
+    console.log("📱 Bitte öffnen Sie in einem Browser auf einem beliebigen Gerät:");
     console.log(`🌐 URL: ${deviceAuth.verification_uri}`);
     console.log("");
     console.log("🔑 Geben Sie dort folgenden Code ein:");
     console.log(`📋 CODE: ${deviceAuth.user_code}`);
     console.log("");
-    // Instead of printing the direct link, generate an SVG QR code for the
-    // verification link so users can scan it with their phone.
+
+    /*
+     * Instead of printing the direct link, generate an SVG QR code for the
+     * verification link so users can scan it with their phone.
+     */
     const completeLink =
       deviceAuth.verification_uri_complete ||
       `${deviceAuth.verification_uri}?user_code=${deviceAuth.user_code}`;
@@ -198,22 +195,23 @@ async function headlessAuth(clientId, clientSecret, sendNotification) {
     let verificationQrSvg = null;
     try {
       verificationQrSvg = await QRCode.toString(completeLink, {
-        type: 'svg',
-        errorCorrectionLevel: 'H',
-        margin: 1,
+        type: "svg",
+        errorCorrectionLevel: "H",
+        margin: 1
       });
-      // print the raw SVG to the console so headless setups (with a UI) can
-      // capture or display it if needed.
+
+      /*
+       * print the raw SVG to the console so headless setups (with a UI) can
+       * capture or display it if needed.
+       */
       console.log(verificationQrSvg);
     } catch (qrErr) {
-      console.error('❌ QR-Code Generierung fehlgeschlagen:', qrErr.message);
+      console.error("❌ QR-Code Generierung fehlgeschlagen:", qrErr.message);
       // Fallback: print the direct link
-      console.log('Direct link:', completeLink);
+      console.log("Direct link:", completeLink);
     }
     console.log("");
-    console.log(
-      `⏱️ Code läuft ab in: ${Math.floor(deviceAuth.expires_in / 60)} Minuten`,
-    );
+    console.log(`⏱️ Code läuft ab in: ${Math.floor(deviceAuth.expires_in / 60)} Minuten`);
     console.log(`🔄 Polling-Intervall: ${deviceAuth.interval || 5} Sekunden`);
     console.log("");
 
@@ -229,7 +227,7 @@ async function headlessAuth(clientId, clientSecret, sendNotification) {
         // Keep expires/interval for the frontend to show timers.
         expires_in: deviceAuth.expires_in,
         interval: deviceAuth.interval || 5,
-        expires_in_minutes: Math.floor(deviceAuth.expires_in / 60),
+        expires_in_minutes: Math.floor(deviceAuth.expires_in / 60)
       });
     }
 
@@ -239,7 +237,7 @@ async function headlessAuth(clientId, clientSecret, sendNotification) {
       deviceAuth.device_code,
       deviceAuth.interval || 5,
       Math.floor(deviceAuth.expires_in / (deviceAuth.interval || 5)),
-      sendNotification,
+      sendNotification
     );
 
     console.log("✅ Authentifizierung erfolgreich abgeschlossen!");
@@ -261,19 +259,19 @@ module.exports = NodeHelper.create({
   instanceId: null,
   subscribed: false,
 
-  init() {
+  init () {
     console.log("init module helper: MMM-HomeConnect (Session-Based Version)");
   },
 
-  start() {
+  start () {
     console.log(`Starting module helper: ${this.name}`);
   },
 
-  stop() {
+  stop () {
     console.log(`Stopping module helper: ${this.name}`);
   },
 
-  handleConfigNotificationFirstTime() {
+  handleConfigNotificationFirstTime () {
     this.configReceived = true;
     console.log("🔧 use_headless_auth:", this.config.use_headless_auth);
 
@@ -288,20 +286,18 @@ module.exports = NodeHelper.create({
     this.sendSocketNotification("INIT_STATUS", {
       status: "initializing",
       message: "Initialisierung gestartet...",
-      instanceId: this.instanceId,
+      instanceId: this.instanceId
     });
 
     this.checkTokenAndInitialize();
   },
 
-  handleSessionAlreadyActive() {
-    console.log(
-      "✅ Session bereits authentifiziert - verwende bestehende Token",
-    );
+  handleSessionAlreadyActive () {
+    console.log("✅ Session bereits authentifiziert - verwende bestehende Token");
     this.sendSocketNotification("INIT_STATUS", {
       status: "session_active",
       message: "Session aktiv - verwende bestehende Authentifizierung",
-      instanceId: this.instanceId,
+      instanceId: this.instanceId
     });
 
     if (this.hc) {
@@ -311,23 +307,21 @@ module.exports = NodeHelper.create({
     }
   },
 
-  notifyAuthInProgress() {
-    console.log(
-      "⏳ Authentifizierung bereits im Gange für andere Client-Instanz",
-    );
+  notifyAuthInProgress () {
+    console.log("⏳ Authentifizierung bereits im Gange für andere Client-Instanz");
     this.sendSocketNotification("INIT_STATUS", {
       status: "auth_in_progress",
       message: "Authentifizierung läuft bereits...",
-      instanceId: this.instanceId,
+      instanceId: this.instanceId
     });
   },
 
-  handleConfigNotificationSubsequent() {
+  handleConfigNotificationSubsequent () {
     if (globalSession.isAuthenticated && this.hc) {
       this.sendSocketNotification("INIT_STATUS", {
         status: "complete",
         message: "Bereits initialisiert",
-        instanceId: this.instanceId,
+        instanceId: this.instanceId
       });
 
       setTimeout(() => {
@@ -338,13 +332,11 @@ module.exports = NodeHelper.create({
     }
   },
 
-  handleConfigNotification(payload) {
+  handleConfigNotification (payload) {
     this.instanceId = payload.instanceId || "default";
     globalSession.clientInstances.add(this.instanceId);
 
-    console.log(
-      `📋 Processing CONFIG notification for instance: ${this.instanceId}`,
-    );
+    console.log(`📋 Processing CONFIG notification for instance: ${this.instanceId}`);
     console.log(`🔧 Registered clients: ${globalSession.clientInstances.size}`);
 
     if (!this.configReceived) {
@@ -355,23 +347,21 @@ module.exports = NodeHelper.create({
     }
   },
 
-  handleUpdateRequest() {
+  handleUpdateRequest () {
     if (this.hc && !globalSession.isAuthenticating) {
       console.log("📡 Update request received - fetching devices");
       this.getDevices();
     } else {
-      console.log(
-        "⚠️ Update request ignored - HC not ready or auth in progress",
-      );
+      console.log("⚠️ Update request ignored - HC not ready or auth in progress");
     }
   },
 
-  handleRetryAuth() {
+  handleRetryAuth () {
     console.log("🔄 Manual retry requested...");
     this.retryAuthentication();
   },
 
-  socketNotificationReceived(notification, payload) {
+  socketNotificationReceived (notification, payload) {
     switch (notification) {
       case "CONFIG":
         this.handleConfigNotification(payload);
@@ -387,16 +377,16 @@ module.exports = NodeHelper.create({
     }
   },
 
-  broadcastToAllClients(notification, payload) {
+  broadcastToAllClients (notification, payload) {
     globalSession.clientInstances.forEach((instanceId) => {
       this.sendSocketNotification(notification, {
         ...payload,
-        instanceId,
+        instanceId
       });
     });
   },
 
-  readRefreshTokenFromFile() {
+  readRefreshTokenFromFile () {
     if (!fs.existsSync("./modules/MMM-HomeConnect/refresh_token.json")) {
       console.log("📄 No refresh token file found");
       return null;
@@ -419,37 +409,38 @@ module.exports = NodeHelper.create({
     }
   },
 
-  checkRateLimit() {
+  checkRateLimit () {
     const now = Date.now();
     if (now - globalSession.lastAuthAttempt < globalSession.MIN_AUTH_INTERVAL) {
       console.log("⚠️ Rate limit: Warten vor nächstem Auth-Versuch");
       this.broadcastToAllClients("INIT_STATUS", {
         status: "rate_limited",
-        message: "Rate Limit - bitte warten...",
+        message: "Rate Limit - bitte warten..."
       });
       return false;
     }
     return true;
   },
 
-  initiateAuthFlow() {
+  initiateAuthFlow () {
     const now = Date.now();
     globalSession.lastAuthAttempt = now;
-    // Only headless/device flow is supported. Always use headless if there is
-    // no refresh token available.
+
+    /*
+     * Only headless/device flow is supported. Always use headless if there is
+     * no refresh token available.
+     */
     if (!globalSession.isAuthenticating && !globalSession.refreshToken) {
-      console.log(
-        "🔧 No refresh token available - using headless authentication",
-      );
+      console.log("🔧 No refresh token available - using headless authentication");
       this.broadcastToAllClients("INIT_STATUS", {
         status: "need_auth",
-        message: "Authentifizierung erforderlich",
+        message: "Authentifizierung erforderlich"
       });
       this.initWithHeadlessAuth();
     }
   },
 
-  checkTokenAndInitialize() {
+  checkTokenAndInitialize () {
     console.log("🔍 Checking for existing refresh token...");
 
     const token = this.readRefreshTokenFromFile();
@@ -461,7 +452,7 @@ module.exports = NodeHelper.create({
 
       this.broadcastToAllClients("INIT_STATUS", {
         status: "token_found",
-        message: "Token gefunden - initialisiere HomeConnect",
+        message: "Token gefunden - initialisiere HomeConnect"
       });
 
       this.initializeHomeConnect(token);
@@ -475,10 +466,10 @@ module.exports = NodeHelper.create({
     this.initiateAuthFlow();
   },
 
-  handleHeadlessAuthSuccess(tokens) {
+  handleHeadlessAuthSuccess (tokens) {
     fs.writeFileSync(
       "./modules/MMM-HomeConnect/refresh_token.json",
-      tokens.refresh_token,
+      tokens.refresh_token
     );
     console.log("💾 Refresh token saved successfully");
 
@@ -487,34 +478,32 @@ module.exports = NodeHelper.create({
 
     this.broadcastToAllClients("INIT_STATUS", {
       status: "initializing_hc",
-      message: "HomeConnect wird initialisiert...",
+      message: "HomeConnect wird initialisiert..."
     });
 
     return this.initializeHomeConnect(tokens.refresh_token);
   },
 
-  handleHeadlessAuthError(error) {
+  handleHeadlessAuthError (error) {
     globalSession.isAuthenticating = false;
     console.error("❌ Headless authentication failed:", error.message);
 
     this.broadcastToAllClients("AUTH_STATUS", {
       status: "error",
-      message: `Authentifizierung fehlgeschlagen: ${error.message}`,
+      message: `Authentifizierung fehlgeschlagen: ${error.message}`
     });
 
     if (error.message.includes("polling too quickly")) {
       console.log("💡 Rate limiting detected - will not retry automatically");
       this.broadcastToAllClients("INIT_STATUS", {
         status: "rate_limited",
-        message: "Rate Limit erreicht - bitte in 2 Minuten neu starten",
+        message: "Rate Limit erreicht - bitte in 2 Minuten neu starten"
       });
       return;
     }
 
     if (this.initializationAttempts < this.maxInitAttempts) {
-      console.log(
-        `🔄 Will retry in 30 seconds (${this.initializationAttempts}/${this.maxInitAttempts})`,
-      );
+      console.log(`🔄 Will retry in 30 seconds (${this.initializationAttempts}/${this.maxInitAttempts})`);
       setTimeout(() => {
         if (!this.hc) {
           this.initWithHeadlessAuth();
@@ -523,16 +512,14 @@ module.exports = NodeHelper.create({
       return;
     }
 
-    console.log(
-      "❌ Max initialization attempts reached - aborting headless authentication",
-    );
+    console.log("❌ Max initialization attempts reached - aborting headless authentication");
     this.broadcastToAllClients("INIT_STATUS", {
       status: "auth_failed",
-      message: "Authentifizierung fehlgeschlagen - bitte manuell überprüfen",
+      message: "Authentifizierung fehlgeschlagen - bitte manuell überprüfen"
     });
   },
 
-  async initWithHeadlessAuth() {
+  async initWithHeadlessAuth () {
     if (globalSession.isAuthenticating) {
       console.log("⚠️ Authentication already in progress, skipping...");
       return;
@@ -541,9 +528,7 @@ module.exports = NodeHelper.create({
     globalSession.isAuthenticating = true;
     this.initializationAttempts++;
 
-    console.log(
-      `🚀 Starting headless authentication (attempt ${this.initializationAttempts}/${this.maxInitAttempts})`,
-    );
+    console.log(`🚀 Starting headless authentication (attempt ${this.initializationAttempts}/${this.maxInitAttempts})`);
 
     try {
       const _self = this;
@@ -551,8 +536,7 @@ module.exports = NodeHelper.create({
       const tokens = await headlessAuth(
         this.config.client_ID,
         this.config.client_Secret,
-        (notification, payload) =>
-          _self.broadcastToAllClients(notification, payload),
+        (notification, payload) => _self.broadcastToAllClients(notification, payload)
       );
 
       await this.handleHeadlessAuthSuccess(tokens);
@@ -561,7 +545,7 @@ module.exports = NodeHelper.create({
     }
   },
 
-  handleHomeConnectInitSuccess() {
+  handleHomeConnectInitSuccess () {
     console.log("✅ HomeConnect initialized successfully");
 
     globalSession.isAuthenticated = true;
@@ -569,7 +553,7 @@ module.exports = NodeHelper.create({
 
     this.broadcastToAllClients("INIT_STATUS", {
       status: "success",
-      message: "Erfolgreich initialisiert",
+      message: "Erfolgreich initialisiert"
     });
 
     setTimeout(() => {
@@ -577,21 +561,21 @@ module.exports = NodeHelper.create({
     }, 2000);
   },
 
-  handleHomeConnectInitError(error) {
+  handleHomeConnectInitError (error) {
     console.error("❌ HomeConnect initialization failed:", error);
     globalSession.isAuthenticating = false;
 
     this.broadcastToAllClients("INIT_STATUS", {
       status: "hc_error",
-      message: `HomeConnect Fehler: ${error.message}`,
+      message: `HomeConnect Fehler: ${error.message}`
     });
   },
 
-  setupHomeConnectRefreshToken() {
+  setupHomeConnectRefreshToken () {
     this.hc.on("newRefreshToken", (refreshToken) => {
       fs.writeFileSync(
         "./modules/MMM-HomeConnect/refresh_token.json",
-        refreshToken,
+        refreshToken
       );
       console.log("🔄 Refresh token updated");
       globalSession.refreshToken = refreshToken;
@@ -599,14 +583,12 @@ module.exports = NodeHelper.create({
       if (!this.subscribed) {
         this.getDevices();
       } else {
-        console.log(
-          "ℹ️ Token updated - devices already loaded, skipping getDevices()",
-        );
+        console.log("ℹ️ Token updated - devices already loaded, skipping getDevices()");
       }
     });
   },
 
-  async initializeHomeConnect(refreshToken) {
+  async initializeHomeConnect (refreshToken) {
     return new Promise((resolve, reject) => {
       console.log("🏠 Initializing HomeConnect with token...");
       if (!HomeConnect) {
@@ -615,7 +597,7 @@ module.exports = NodeHelper.create({
       this.hc = new HomeConnect(
         this.config.client_ID,
         this.config.client_Secret,
-        refreshToken,
+        refreshToken
       );
 
       const initTimeout = setTimeout(() => {
@@ -626,7 +608,7 @@ module.exports = NodeHelper.create({
 
       this.hc
         .init({
-          isSimulated: false,
+          isSimulated: false
         })
         .then(() => {
           clearTimeout(initTimeout);
@@ -644,8 +626,7 @@ module.exports = NodeHelper.create({
   },
 
 
-
-  fetchDeviceStatus(device) {
+  fetchDeviceStatus (device) {
     this.hc
       .command("status", "get_status", device.haId)
       .then((statusResult) => {
@@ -655,12 +636,10 @@ module.exports = NodeHelper.create({
         });
         this.broadcastDevices();
       })
-      .catch((error) =>
-        console.error(`❌ Status error for ${device.name}:`, error),
-      );
+      .catch((error) => console.error(`❌ Status error for ${device.name}:`, error));
   },
 
-  fetchDeviceSettings(device) {
+  fetchDeviceSettings (device) {
     this.hc
       .command("settings", "get_settings", device.haId)
       .then((settingsResult) => {
@@ -670,15 +649,11 @@ module.exports = NodeHelper.create({
         });
         this.broadcastDevices();
       })
-      .catch((error) =>
-        console.error(`❌ Settings error for ${device.name}:`, error),
-      );
+      .catch((error) => console.error(`❌ Settings error for ${device.name}:`, error));
   },
 
-  processDevice(device, index) {
-    console.log(
-      `📱 Processing device ${index + 1}: ${device.name} (${device.haId})`,
-    );
+  processDevice (device, index) {
+    console.log(`📱 Processing device ${index + 1}: ${device.name} (${device.haId})`);
     this.devices.set(device.haId, device);
 
     if (device.connected === true) {
@@ -690,7 +665,7 @@ module.exports = NodeHelper.create({
     }
   },
 
-  subscribeToDeviceEvents() {
+  subscribeToDeviceEvents () {
     if (!this.subscribed) {
       console.log("📡 Subscribing to device events...");
       this.hc.subscribe("NOTIFY", (e) => {
@@ -705,28 +680,24 @@ module.exports = NodeHelper.create({
       this.subscribed = true;
       console.log("✅ Event subscriptions established");
     } else {
-      console.log(
-        "ℹ️ Already subscribed to device events - skipping duplicate subscription",
-      );
+      console.log("ℹ️ Already subscribed to device events - skipping duplicate subscription");
     }
   },
 
-  sortDevices() {
+  sortDevices () {
     const array = [...this.devices.entries()];
-    const sortedArray = array.sort((a, b) => (a[1].name > b[1].name ? 1 : -1));
+    const sortedArray = array.sort((a, b) => a[1].name > b[1].name ? 1 : -1);
     this.devices = new Map(sortedArray);
   },
 
-  handleGetDevicesSuccess(result) {
-    console.log(
-      `✅ API Response received - Found ${result.body.data.homeappliances.length} appliances`,
-    );
+  handleGetDevicesSuccess (result) {
+    console.log(`✅ API Response received - Found ${result.body.data.homeappliances.length} appliances`);
 
     if (result.body.data.homeappliances.length === 0) {
       console.log("⚠️ No appliances found - check Home Connect app");
       this.broadcastToAllClients("INIT_STATUS", {
         status: "no_devices",
-        message: "Keine Geräte gefunden - Home Connect App prüfen",
+        message: "Keine Geräte gefunden - Home Connect App prüfen"
       });
     }
 
@@ -742,16 +713,18 @@ module.exports = NodeHelper.create({
 
     this.broadcastToAllClients("INIT_STATUS", {
       status: "complete",
-      message: `${result.body.data.homeappliances.length} Gerät(e) geladen`,
+      message: `${result.body.data.homeappliances.length} Gerät(e) geladen`
     });
   },
 
-  handleGetDevicesError(error) {
-    console.error("❌ Failed to get devices:", error && error.stack ? error.stack : error);
+  handleGetDevicesError (error) {
+    console.error("❌ Failed to get devices:", error && error.stack
+      ? error.stack
+      : error);
 
     this.broadcastToAllClients("INIT_STATUS", {
       status: "device_error",
-      message: `Geräte-Fehler: ${error.message}`,
+      message: `Geräte-Fehler: ${error.message}`
     });
 
     if (error.message.includes("fetch") || error.message.includes("network")) {
@@ -762,12 +735,12 @@ module.exports = NodeHelper.create({
     }
   },
 
-  getDevices() {
+  getDevices () {
     if (!this.hc) {
       console.error("❌ HomeConnect not initialized - cannot get devices");
       this.broadcastToAllClients("INIT_STATUS", {
         status: "hc_not_ready",
-        message: "HomeConnect nicht bereit",
+        message: "HomeConnect nicht bereit"
       });
       return;
     }
@@ -776,7 +749,7 @@ module.exports = NodeHelper.create({
 
     this.broadcastToAllClients("INIT_STATUS", {
       status: "fetching_devices",
-      message: "Geräte werden geladen...",
+      message: "Geräte werden geladen..."
     });
 
     this.hc
@@ -785,7 +758,7 @@ module.exports = NodeHelper.create({
       .catch((error) => this.handleGetDevicesError(error));
   },
 
-  retryAuthentication() {
+  retryAuthentication () {
     console.log("🔄 Manual authentication retry...");
     globalSession.isAuthenticated = false;
     globalSession.isAuthenticating = false;
@@ -809,7 +782,7 @@ module.exports = NodeHelper.create({
     this.checkTokenAndInitialize();
   },
 
-  deviceEvent(data) {
+  deviceEvent (data) {
     const _self = this;
     try {
       const eventObj = JSON.parse(data.data);
@@ -825,60 +798,54 @@ module.exports = NodeHelper.create({
     }
   },
 
-  parseRemainingProgramTime(device, value) {
+  parseRemainingProgramTime (device, value) {
     device.RemainingProgramTime = value;
   },
 
-  parseProgramProgress(device, value) {
+  parseProgramProgress (device, value) {
     device.ProgramProgress = value;
   },
 
-  parseOperationState(device, value) {
+  parseOperationState (device, value) {
     if (value === "BSH.Common.EnumType.OperationState.Finished") {
       device.RemainingProgramTime = 0;
     }
   },
 
-  parseLighting(device, value) {
+  parseLighting (device, value) {
     device.Lighting = value;
   },
 
-  parsePowerState(device, value) {
+  parsePowerState (device, value) {
     const powerStateMap = {
       "BSH.Common.EnumType.PowerState.On": "On",
       "BSH.Common.EnumType.PowerState.Standby": "Standby",
-      "BSH.Common.EnumType.PowerState.Off": "Off",
+      "BSH.Common.EnumType.PowerState.Off": "Off"
     };
     device.PowerState = powerStateMap[value];
   },
 
-  parseDoorState(device, value) {
+  parseDoorState (device, value) {
     const doorStateMap = {
       "BSH.Common.EnumType.DoorState.Open": "Open",
       "BSH.Common.EnumType.DoorState.Closed": "Closed",
-      "BSH.Common.EnumType.DoorState.Locked": "Locked",
+      "BSH.Common.EnumType.DoorState.Locked": "Locked"
     };
     device.DoorState = doorStateMap[value];
   },
 
-  parseEvent(event, device) {
+  parseEvent (event, device) {
     if (!device) {
       return;
     }
 
     const eventHandlers = {
-      "BSH.Common.Option.RemainingProgramTime": () =>
-        this.parseRemainingProgramTime(device, event.value),
-      "BSH.Common.Option.ProgramProgress": () =>
-        this.parseProgramProgress(device, event.value),
-      "BSH.Common.Status.OperationState": () =>
-        this.parseOperationState(device, event.value),
-      "Cooking.Common.Setting.Lighting": () =>
-        this.parseLighting(device, event.value),
-      "BSH.Common.Setting.PowerState": () =>
-        this.parsePowerState(device, event.value),
-      "BSH.Common.Status.DoorState": () =>
-        this.parseDoorState(device, event.value),
+      "BSH.Common.Option.RemainingProgramTime": () => this.parseRemainingProgramTime(device, event.value),
+      "BSH.Common.Option.ProgramProgress": () => this.parseProgramProgress(device, event.value),
+      "BSH.Common.Status.OperationState": () => this.parseOperationState(device, event.value),
+      "Cooking.Common.Setting.Lighting": () => this.parseLighting(device, event.value),
+      "BSH.Common.Setting.PowerState": () => this.parsePowerState(device, event.value),
+      "BSH.Common.Status.DoorState": () => this.parseDoorState(device, event.value)
     };
 
     const handler = eventHandlers[event.key];
@@ -887,15 +854,13 @@ module.exports = NodeHelper.create({
     }
   },
 
-  broadcastDevices() {
-    console.log(
-      `📡 Broadcasting ${this.devices.size} devices to ${globalSession.clientInstances.size} clients`,
-    );
+  broadcastDevices () {
+    console.log(`📡 Broadcasting ${this.devices.size} devices to ${globalSession.clientInstances.size} clients`);
     globalSession.clientInstances.forEach(() => {
       this.sendSocketNotification(
         "MMM-HomeConnect_Update",
-        Array.from(this.devices.values()),
+        Array.from(this.devices.values())
       );
     });
-  },
+  }
 });
