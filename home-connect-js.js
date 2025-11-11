@@ -1,6 +1,5 @@
 // Vendored single-file version of home-connect-js (utils + main combined)
 const EventSource = require('eventsource');
-const SwaggerClient = require('swagger-client');
 // use built-in fetch when available (Node 18+). If not present, this will throw
 const fetch = typeof globalThis.fetch === 'function' ? globalThis.fetch.bind(globalThis) : null;
 const express = require('express');
@@ -27,20 +26,49 @@ async function authorize(clientId, clientSecret) {
 }
 
 function getClient(accessToken) {
-    return new Promise((resolve, reject) => {
-        SwaggerClient({
-            url: isSimulated ? urls.simulation.api : urls.physical.api,
-            v2OperationIdCompatibilityMode: true,
-            requestInterceptor: (req) => {
-                req.headers['accept'] = 'application/vnd.bsh.sdk.v1+json';
-                req.headers['authorization'] = 'Bearer ' + accessToken;
+    // Return a simple client object that mimics the swagger-client API structure
+    // but uses fetch directly for API calls
+    return Promise.resolve({
+        accessToken: accessToken,
+        baseUrl: isSimulated ? urls.simulation.base : urls.physical.base,
+        apis: {
+            appliances: {
+                get_home_appliances: () => makeApiRequest('GET', 'api/homeappliances', accessToken),
             },
-        })
-            .then((client) => {
-                resolve(client);
-            })
-            .catch(reject);
+            status: {
+                get_status: (params) => makeApiRequest('GET', `api/homeappliances/${params.haId}/status`, accessToken),
+            },
+            settings: {
+                get_settings: (params) => makeApiRequest('GET', `api/homeappliances/${params.haId}/settings`, accessToken),
+            },
+        },
     });
+}
+
+function makeApiRequest(method, path, accessToken, body = null) {
+    if (!fetch) {
+        return Promise.reject(new Error('Global fetch is not available in this Node runtime'));
+    }
+    
+    const baseUrl = isSimulated ? urls.simulation.base : urls.physical.base;
+    const url = baseUrl + path;
+    const options = {
+        method: method,
+        headers: {
+            'accept': 'application/vnd.bsh.sdk.v1+json',
+            'authorization': 'Bearer ' + accessToken,
+        },
+    };
+
+    if (body && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
+        options.headers['content-type'] = 'application/json';
+        options.body = JSON.stringify(body);
+    }
+
+    return fetch(url, options)
+        .then(checkResponseStatus)
+        .then((res) => res.json())
+        .then((json) => ({ body: json })); // Wrap in body to match swagger-client response format
 }
 
 function refreshToken(clientSecret, refreshToken) {
