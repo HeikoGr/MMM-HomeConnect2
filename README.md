@@ -9,6 +9,7 @@ Key features
 - Basic rate limiting and error handling
 
 Quick install
+
 ```bash
 cd ~/MagicMirror/modules
 git clone https://github.com/djerik/MMM-HomeConnect
@@ -56,9 +57,35 @@ Developer notes
 - API endpoints used: device_authorization, token, and homeappliances endpoints of Home Connect.
 - Minimum polling interval: 5 seconds. Module adapts if server returns slow_down.
 
-License
-- MIT
+Comparison to the original
+--------------------------
 
-Support
-- This is a community fork. Open an issue for bugs or questions.
-````
+This repository is a fork of the original project by djerik (https://github.com/djerik/MMM-HomeConnect). It is created with respect for the original work and builds on the same goal — integrating Home Connect devices into MagicMirror — while making a few deliberate changes to better suit common headless deployments and to improve maintainability.
+
+Key differences and rationale (this fork vs. djerik/MMM-HomeConnect):
+
+- Headless-first (Device Flow) instead of browser fallback
+- This fork treats the OAuth2 Device Flow (headless) as the primary authentication method. That means there is no built-in Express server or automatic opening of a local browser. The aim is to make the module work reliably on display-less systems (Raspberry Pi, servers).
+- Benefit: more reliable operation on pure headless devices and fewer additional services/ports required.
+- Trade-off: there is no automatic browser-based OAuth fallback — if you prefer that flow you need to provide a refresh token manually or use a different setup.
+
+- QR code support for the Device Flow
+- Instead of sending only a URL, the module generates an QR code and sends it to the frontend UI so users can scan the verification URL with a phone and open it directly.
+- Benefit: convenient authentication on mobile devices.
+
+- Reduced / simplified dependencies
+- Dependencies such as `express` and `open`, which were used for browser-based flows, were removed. The dependency footprint is smaller and better suited to headless environments.
+
+- More robust token/error handling and logging
+- Improved polling logic, slower backoff handling on `slow_down`, clearer error messages and refresh-token storage/updates.
+- The code now reports more helpful error messages (HTTP status + truncated response body) to make debugging easier.
+
+
+Design choices / why these changes
+- The changes aim to provide a better experience on typical MagicMirror installs (headless Raspberry Pi) and make authentication easier via smartphone (QR code).
+
+When you might prefer the original
+- If you prefer an integrated browser-based OAuth experience (automatic opening of a local browser) or require strict 1:1 look&feel with the original project, the original repository may be the better choice.
+
+Credits
+- Many thanks to djerik for the original module — core ideas and structure come from that project.
