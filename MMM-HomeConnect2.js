@@ -47,7 +47,7 @@ Module.register("MMM-HomeConnect2", {
   },
 
   getStyles() {
-    return ["MMM-HomeConnect.css"];
+    return ["MMM-HomeConnect2.css"];
   },
 
   getTranslations() {
