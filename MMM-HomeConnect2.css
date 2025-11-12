@@ -6,9 +6,9 @@
   padding: 0;
   position: relative;
 }
- 
+
 .MMM-HomeConnect2 header {
-  text-align: left
+  text-align: left;
 }
 
 .deviceContainer {
@@ -27,49 +27,49 @@
 }
 
 .deviceContainer > img {
-  	text-align: center;
-  	align-self: center;
-    width: 60px;
-    height: 60px;
+  text-align: center;
+  align-self: center;
+  width: 60px;
+  height: 60px;
 }
 
 .deviceContainer > div {
-  	text-align: left;
-  	align-self: center;
+  text-align: left;
+  align-self: center;
 }
 
 .deviceStatusIcon {
   text-align: center;
   align-self: center;
-  line-height: 0.80;
-  color: #FFFFFF;
+  line-height: 0.8;
+  color: #ffffff;
   font-size: 18pt;
 }
 
-.deviceName{
-	font-size: 20pt;
+.deviceName {
+  font-size: 20pt;
   font-weight: bold;
   text-align: left;
   vertical-align: middle;
-  color: #FFFFFF;
+  color: #ffffff;
 }
 
-.deviceStatus{
-	font-size: 12px;
+.deviceStatus {
+  font-size: 12px;
 }
 
-.deviceProgress_Base{
-	background-color: #8b8b8b;
-    height:5px;
-    margin-top: 5px;
+.deviceProgress_Base {
+  background-color: #8b8b8b;
+  height: 5px;
+  margin-top: 5px;
 }
 
-.deviceProgress{
-	background-color: #FFF;
-    height:5px;
-    margin-top: 5px;
+.deviceProgress {
+  background-color: #fff;
+  height: 5px;
+  margin-top: 5px;
 }
 
 progress {
-    inline-size: 20em;
+  inline-size: 20em;
 }
