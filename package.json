@@ -1,7 +1,7 @@
 {
   "name": "mmm-homeconnect2",
   "version": "1.0.1",
-  "description": "Magic Mirror Module for Siemens Home Connect",
+  "description": "MagicMirror² Module for Home Connect",
   "main": "MMM-HomeConnect2.js",
   "author": "HeikoGr",
   "repository": {
@@ -9,9 +9,9 @@
     "url": "git+https://github.com/HeikoGr/MMM-HomeConnect2.git"
   },
   "scripts": {
-    "lint": "eslint . --ext .js || true && prettier --check .",
-    "lint:fix": "eslint --fix . && prettier --write .",
-    "test": "npm run lint",
+    "lint": "eslint --ext .js || true && prettier --check .",
+    "lint:fix": "eslint --fix && prettier --write .",
+    "test": "node --run lint",
     "test:spelling": "cspell .",
     "check": "node check.js ../../config/config.js || true"
   },
@@ -37,7 +37,7 @@
   "keywords": [
     "MagicMirror²",
     "HomeConnect",
-    "SmartHome",
+    "Smart Home",
     "Appliances",
     "BSH",
     "Bosch",

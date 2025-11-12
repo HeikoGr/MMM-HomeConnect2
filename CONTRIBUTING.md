@@ -12,17 +12,17 @@ Thanks for wanting to contribute! Here are simple steps:
 
 3) Test locally
 - In the module folder run: `npm ci`.
-- Run `npm run lint` and `npm run test:spelling`.
+- Run `node --run lint` and `node --run test:spelling`.
 
 4) Style
 - Use ESLint and Prettier (see `package.json` scripts).
 
 5) PR checklist
-- Does `npm run lint` pass?
+- Does `node --run lint` pass?
 - Is README updated if needed?
 - Did you add test steps in the PR?
 
 If unsure, open an issue first.
 
 ---
-Kurze Version: Fork → Branch → Arbeit → `npm run lint` → PR öffnen.
+Kurze Version: Fork → Branch → Arbeit → `node --run lint` → PR öffnen.

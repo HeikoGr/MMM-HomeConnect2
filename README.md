@@ -11,7 +11,7 @@ Key features
 - Token storage and automatic refresh
 - Basic rate limiting and error handling
 
-Quick install
+## Installation
 
 ```bash
 cd ~/MagicMirror/modules
@@ -19,6 +19,16 @@ git clone https://github.com/HeikoGr/MMM-HomeConnect2
 cd MMM-HomeConnect2
 npm install
 ```
+
+## Update
+
+```bash
+cd ~/MagicMirror/modules/MMM-HomeConnect2
+git pull
+npm install
+```
+
+##  Requirements
 
 - You need to have a registred Home Connect Account with eMail and password with connected Home Connect devices.
 - You also need to register for a Home Connect Developer Account [Home Connect Registration](https://developer.home-connect.com/user/register).
@@ -35,7 +45,7 @@ Simple config example (add to your MagicMirror `config/config.js`):
         clientId: "YOUR_CLIENT_ID",
         showDeviceIcon: true,
         updateFrequency: 60 * 60 * 1000 // 1 hour
-    }
+    },
 }
 ```
 
