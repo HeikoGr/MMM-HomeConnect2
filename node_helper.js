@@ -115,7 +115,7 @@ function handleTokenError(error, sendNotification) {
     if (sendNotification) {
       sendNotification("AUTH_STATUS", {
         status: "error",
-        message: "Benutzer hat Autorisierung verweigert"
+        message: "User denied authorization"
       });
     }
     return {
@@ -128,7 +128,7 @@ function handleTokenError(error, sendNotification) {
     if (sendNotification) {
       sendNotification("AUTH_STATUS", {
         status: "error",
-        message: "Autorisierungscode abgelaufen - bitte neu starten"
+        message: "Device code expired - please restart"
       });
     }
     return {
@@ -220,8 +220,7 @@ async function headlessAuth(clientId, clientSecret, sendNotification) {
     moduleLog("info", "User code:", deviceAuth.user_code);
 
     /*
-     * Instead of printing the direct link, generate an SVG QR code for the
-     * verification link so users can scan it with their phone.
+     * generate an SVG QR code
      */
     const completeLink =
       deviceAuth.verification_uri_complete ||
@@ -235,10 +234,6 @@ async function headlessAuth(clientId, clientSecret, sendNotification) {
         margin: 1
       });
 
-      /*
-       * Print the raw SVG to the console so headless setups (with a UI) can
-       * capture or display it if needed.
-       */
       moduleLog("debug", "QR SVG generated");
     } catch (qrErr) {
       moduleLog("error", "QR code generation failed:", qrErr.message);
@@ -353,7 +348,7 @@ module.exports = NodeHelper.create({
     if (globalSession.isAuthenticated && this.hc) {
       this.sendSocketNotification("INIT_STATUS", {
         status: "complete",
-        message: "Bereits initialisiert",
+        message: "Already initialized",
         instanceId: this.instanceId
       });
 
@@ -427,7 +422,7 @@ module.exports = NodeHelper.create({
       moduleLog("warn", "HomeConnect not initialized - cannot fetch active programs");
       this.broadcastToAllClients("INIT_STATUS", {
         status: "hc_not_ready",
-        message: "HomeConnect nicht bereit"
+        message: "HomeConnect not ready"
       });
       return;
     }
@@ -460,7 +455,7 @@ module.exports = NodeHelper.create({
       moduleLog("info", `Rate limited - ${remainingSeconds}s remaining`);
       this.broadcastToAllClients("INIT_STATUS", {
         status: "device_error",
-        message: `Rate Limit aktiv - bitte ${remainingSeconds}s warten`,
+        message: `Rate limit active - please wait ${remainingSeconds}s`,
         rateLimitSeconds: remainingSeconds,
         instanceId: requester
       });
@@ -748,29 +743,47 @@ module.exports = NodeHelper.create({
   },
 
   fetchDeviceStatus(device) {
-    this.hc
-      .command("status", "get_status", device.haId)
-      .then((statusResult) => {
-        moduleLog("debug", `Status received for ${device.name}`);
-        statusResult.body.data.status.forEach((event) => {
-          this.parseEvent(event, device);
-        });
-        this.broadcastDevices();
-      })
-      .catch((error) => moduleLog("error", `Status error for ${device.name}:`, error));
+    // Use client helper only; fallback raw command removed.
+    if (this.hc && typeof this.hc.getStatus === 'function') {
+      this.hc
+        .getStatus(device.haId)
+        .then((res) => {
+          if (res.success && res.data && Array.isArray(res.data.status)) {
+            res.data.status.forEach((event) => {
+              if (this.hc && typeof this.hc.applyEventToDevice === 'function') {
+                this.hc.applyEventToDevice(device, event);
+              }
+            });
+          }
+          this.broadcastDevices();
+        })
+        .catch((err) => moduleLog("error", `Status error for ${device.name}:`, err));
+      return;
+    }
+
+    // If the client wrapper is not available, report and skip.
+    moduleLog("error", `HomeConnect client missing getStatus wrapper - cannot fetch status for ${device.name}`);
   },
 
   fetchDeviceSettings(device) {
-    this.hc
-      .command("settings", "get_settings", device.haId)
-      .then((settingsResult) => {
-        moduleLog("debug", `Settings received for ${device.name}`);
-        settingsResult.body.data.settings.forEach((event) => {
-          this.parseEvent(event, device);
-        });
-        this.broadcastDevices();
-      })
-      .catch((error) => moduleLog("error", `Settings error for ${device.name}:`, error));
+    if (this.hc && typeof this.hc.getSettings === 'function') {
+      this.hc
+        .getSettings(device.haId)
+        .then((res) => {
+          if (res.success && res.data && Array.isArray(res.data.settings)) {
+            res.data.settings.forEach((event) => {
+              if (this.hc && typeof this.hc.applyEventToDevice === 'function') {
+                this.hc.applyEventToDevice(device, event);
+              }
+            });
+          }
+          this.broadcastDevices();
+        })
+        .catch((err) => moduleLog("error", `Settings error for ${device.name}:`, err));
+      return;
+    }
+
+    moduleLog("error", `HomeConnect client missing getSettings wrapper - cannot fetch settings for ${device.name}`);
   },
 
   processDevice(device, index) {
@@ -862,7 +875,7 @@ module.exports = NodeHelper.create({
       console.error("❌ HomeConnect not initialized - cannot get devices");
       this.broadcastToAllClients("INIT_STATUS", {
         status: "hc_not_ready",
-        message: "HomeConnect nicht bereit"
+        message: "HomeConnect not ready"
       });
       return;
     }
@@ -874,10 +887,28 @@ module.exports = NodeHelper.create({
       message: "Fetching devices..."
     });
 
-    this.hc
-      .command("appliances", "get_home_appliances")
-      .then((result) => this.handleGetDevicesSuccess(result))
-      .catch((error) => this.handleGetDevicesError(error));
+    // Require client wrapper; raw command fallback removed.
+    if (this.hc && typeof this.hc.getHomeAppliances === 'function') {
+      this.hc
+        .getHomeAppliances()
+        .then((res) => {
+          if (res && res.success && res.data) {
+            // shape into previous swagger-like result for compatibility
+            const fakeResult = { body: { data: res.data } };
+            this.handleGetDevicesSuccess(fakeResult);
+          } else {
+            const err = new Error(res && res.error ? res.error : 'Failed to fetch appliances');
+            err.statusCode = res && res.statusCode ? res.statusCode : null;
+            this.handleGetDevicesError(err);
+          }
+        })
+        .catch((err) => this.handleGetDevicesError(err));
+      return;
+    }
+
+    const err = new Error('HomeConnect client missing getHomeAppliances wrapper - cannot fetch devices');
+    moduleLog('error', err.message);
+    this.handleGetDevicesError(err);
   },
 
   retryAuthentication() {
@@ -911,73 +942,16 @@ module.exports = NodeHelper.create({
       eventObj.items.forEach((item) => {
         if (item.uri) {
           const haId = item.uri.split("/")[3];
-          _self.parseEvent(item, _self.devices.get(haId));
+          if (_self.hc && typeof _self.hc.applyEventToDevice === 'function') {
+            _self.hc.applyEventToDevice(_self.devices.get(haId), item);
+          } else {
+            moduleLog('warn', 'No event parser available for device events; update home-connect-js client');
+          }
         }
       });
       _self.broadcastDevices();
     } catch (error) {
       moduleLog("error", "Error processing device event:", error);
-    }
-  },
-
-  parseRemainingProgramTime(device, value) {
-    device.RemainingProgramTime = value;
-  },
-
-  parseProgramProgress(device, value) {
-    device.ProgramProgress = value;
-  },
-
-  parseOperationState(device, value) {
-    if (value === "BSH.Common.EnumType.OperationState.Finished") {
-      device.RemainingProgramTime = 0;
-    }
-  },
-
-  parseLighting(device, value) {
-    device.Lighting = value;
-  },
-
-  parsePowerState(device, value) {
-    const powerStateMap = {
-      "BSH.Common.EnumType.PowerState.On": "On",
-      "BSH.Common.EnumType.PowerState.Standby": "Standby",
-      "BSH.Common.EnumType.PowerState.Off": "Off"
-    };
-    device.PowerState = powerStateMap[value];
-  },
-
-  parseDoorState(device, value) {
-    const doorStateMap = {
-      "BSH.Common.EnumType.DoorState.Open": "Open",
-      "BSH.Common.EnumType.DoorState.Closed": "Closed",
-      "BSH.Common.EnumType.DoorState.Locked": "Locked"
-    };
-    device.DoorState = doorStateMap[value];
-  },
-
-  parseEvent(event, device) {
-    if (!device) {
-      return;
-    }
-
-    const eventHandlers = {
-      "BSH.Common.Option.RemainingProgramTime": () =>
-        this.parseRemainingProgramTime(device, event.value),
-      "BSH.Common.Option.ProgramProgress": () =>
-        this.parseProgramProgress(device, event.value),
-      "BSH.Common.Status.OperationState": () =>
-        this.parseOperationState(device, event.value),
-      "Cooking.Common.Setting.Lighting": () =>
-        this.parseLighting(device, event.value),
-      "BSH.Common.Setting.PowerState": () =>
-        this.parsePowerState(device, event.value),
-      "BSH.Common.Status.DoorState": () =>
-        this.parseDoorState(device, event.value)
-    },
-      handler = eventHandlers[event.key];
-    if (handler) {
-      handler();
     }
   },
 
@@ -994,20 +968,32 @@ module.exports = NodeHelper.create({
   async fetchActiveProgramForDevice(haId, deviceName) {
     try {
       moduleLog("debug", `Fetching active program for ${deviceName} (${haId})`);
-
-      // Use the command() API exposed by home-connect-js.js
-      const result = await this.hc.command("programs", "get_active_program", haId);
-
-      if (result && result.body && result.body.data) {
-        moduleLog("debug", `Active program data received for ${deviceName}`);
-        return {
-          haId,
-          success: true,
-          data: result.body.data
-        };
+      // Prefer client wrapper if available
+      if (this.hc && typeof this.hc.getActiveProgram === 'function') {
+        const res = await this.hc.getActiveProgram(haId);
+        if (res.success) {
+          moduleLog("debug", `Active program data received for ${deviceName}`);
+          return { haId, success: true, data: res.data };
+        }
+        // No active program or non-fatal response
+        if (res.statusCode === 404) {
+          moduleLog("debug", `No active program for ${deviceName}`);
+          return { haId, success: false, error: "No active program" };
+        }
+        // propagate rate limit / other errors upwards where necessary
+        if (res.statusCode === 429) {
+          moduleLog("warn", `Rate limit hit for ${deviceName}`);
+          const err = new Error(res.error || 'rate limit');
+          err.statusCode = 429;
+          throw err;
+        }
+        return { haId, success: false, error: res.error || 'Unknown error' };
       }
 
-      return { haId, success: false, error: "No active program" };
+      // No raw command fallback: client wrapper required.
+      const err = new Error('HomeConnect client missing getActiveProgram wrapper');
+      moduleLog('error', err.message);
+      return { haId, success: false, error: err.message };
     } catch (error) {
       // Handle 404 - no active program running
       if (error.statusCode === 404 || error.status === 404 || (error.message && error.message.includes("404"))) {
@@ -1065,7 +1051,9 @@ module.exports = NodeHelper.create({
             // Extract relevant options
             if (result.data.options) {
               result.data.options.forEach(option => {
-                this.parseEvent(option, device);
+                if (this.hc && typeof this.hc.applyEventToDevice === 'function') {
+                  this.hc.applyEventToDevice(device, option);
+                }
               });
             }
             programData[result.haId] = {

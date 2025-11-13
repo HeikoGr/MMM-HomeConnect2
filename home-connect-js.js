@@ -220,6 +220,50 @@ class HomeConnect extends EventEmitter {
     return this.client.apis[tag][operationId]({ haId, body });
   }
 
+  /*
+   * High-level convenience wrappers that return normalized results instead of
+   * raw swagger-client shaped responses. They return an object with either
+   * { success: true, data } or { success: false, statusCode, error }.
+   */
+  async getHomeAppliances() {
+    try {
+      const res = await this.command("appliances", "get_home_appliances");
+      return { success: true, data: res.body.data };
+    } catch (err) {
+      return { success: false, statusCode: err.statusCode || err.status || null, error: err.message || String(err) };
+    }
+  }
+
+  async getActiveProgram(haId) {
+    try {
+      const res = await this.command("programs", "get_active_program", haId);
+      return { success: true, data: res.body.data };
+    } catch (err) {
+      const code = err.statusCode || err.status || (err.message && (err.message.includes("404") ? 404 : null));
+      return { success: false, statusCode: code, error: err.message || String(err) };
+    }
+  }
+
+  async getStatus(haId) {
+    try {
+      const res = await this.command("status", "get_status", haId);
+      return { success: true, data: res.body.data };
+    } catch (err) {
+      const code = err.statusCode || err.status || (err.message && (err.message.includes("404") ? 404 : null));
+      return { success: false, statusCode: code, error: err.message || String(err) };
+    }
+  }
+
+  async getSettings(haId) {
+    try {
+      const res = await this.command("settings", "get_settings", haId);
+      return { success: true, data: res.body.data };
+    } catch (err) {
+      const code = err.statusCode || err.status || (err.message && (err.message.includes("404") ? 404 : null));
+      return { success: false, statusCode: code, error: err.message || String(err) };
+    }
+  }
+
   subscribeDevice(haid, event, callback) {
     if (this.eventSources && !(haid in this.eventSources)) {
       const url = global.isSimulated
@@ -338,6 +382,57 @@ class HomeConnect extends EventEmitter {
       for (const [event, callback] of this.eventListener) {
         this.eventSource.addEventListener(event, callback);
       }
+    }
+  }
+
+  /*
+   * Helpers to normalize and apply events to device objects. These were
+   * previously implemented in the node_helper; moving them here centralizes
+   * API-specific parsing.
+   */
+  applyEventToDevice(device, event) {
+    if (!device || !event || !event.key) return;
+    const key = event.key;
+    const value = event.value;
+
+    switch (key) {
+      case "BSH.Common.Option.RemainingProgramTime":
+        device.RemainingProgramTime = value;
+        break;
+      case "BSH.Common.Option.ProgramProgress":
+        device.ProgramProgress = value;
+        break;
+      case "BSH.Common.Status.OperationState":
+        if (value === "BSH.Common.EnumType.OperationState.Finished") {
+          device.RemainingProgramTime = 0;
+        }
+        break;
+      case "Cooking.Common.Setting.Lighting":
+        device.Lighting = value;
+        break;
+      case "BSH.Common.Setting.PowerState":
+        {
+          const powerStateMap = {
+            "BSH.Common.EnumType.PowerState.On": "On",
+            "BSH.Common.EnumType.PowerState.Standby": "Standby",
+            "BSH.Common.EnumType.PowerState.Off": "Off"
+          };
+          device.PowerState = powerStateMap[value];
+        }
+        break;
+      case "BSH.Common.Status.DoorState":
+        {
+          const doorStateMap = {
+            "BSH.Common.EnumType.DoorState.Open": "Open",
+            "BSH.Common.EnumType.DoorState.Closed": "Closed",
+            "BSH.Common.EnumType.DoorState.Locked": "Locked"
+          };
+          device.DoorState = doorStateMap[value];
+        }
+        break;
+      default:
+        // no-op for unhandled keys
+        break;
     }
   }
 }
