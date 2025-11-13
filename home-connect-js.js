@@ -1,13 +1,24 @@
 // Vendored single-file version of home-connect-js (utils + main combined)
-const EventSource = require("eventsource");
 
-// Use built-in fetch when available (Node 18+). If not present, this will throw
-let fetch = null;
-
-if (typeof globalThis.fetch === "function") {
-  fetch = globalThis.fetch.bind(globalThis);
-} else {
-  fetch = null;
+// Ensure EventSource is available when running in Node (server-side)
+if (typeof EventSource === "undefined") {
+  try {
+    // Use the npm "eventsource" package as a polyfill for Node.js
+    const es = require("eventsource");
+    // Support different module export shapes (commonjs / esm interop)
+    global.EventSource = es && (es.default || es.EventSource || es);
+    if (typeof global.EventSource !== "function") {
+      console.error(
+        "EventSource polyfill loaded but is not a constructor:",
+        typeof global.EventSource,
+        global.EventSource
+      );
+    }
+  } catch (e) {
+    // If require fails, keep silent — the original error will be logged later.
+    // You can uncomment the next line to log the install hint:
+    // console.warn("EventSource polyfill not available. Run: npm install eventsource");
+  }
 }
 
 const EventEmitter = require("events");
@@ -28,18 +39,18 @@ global.urls = {
 global.isSimulated = false;
 
 const checkResponseStatus = (res) => {
-    if (res.ok) {
-      return res;
-    }
-    // Try to get response body text for better debugging
-    return res.text().then((text) => {
-      const truncated =
-        typeof text === "string" && text.length > 1000
-          ? `${text.slice(0, 1000)}... (truncated)`
-          : text;
-      throw new Error(`HTTP ${res.status} ${res.statusText}: ${truncated}`);
-    });
-  },
+  if (res.ok) {
+    return res;
+  }
+  // Try to get response body text for better debugging
+  return res.text().then((text) => {
+    const truncated =
+      typeof text === "string" && text.length > 1000
+        ? `${text.slice(0, 1000)}... (truncated)`
+        : text;
+    throw new Error(`HTTP ${res.status} ${res.statusText}: ${truncated}`);
+  });
+},
   /*
    * --- utils ---
    * Note: The interactive browser OAuth flow has been removed.
@@ -53,8 +64,8 @@ const checkResponseStatus = (res) => {
       );
     }
     const baseUrl = global.isSimulated
-        ? global.urls.simulation.base
-        : global.urls.physical.base,
+      ? global.urls.simulation.base
+      : global.urls.physical.base,
       url = baseUrl + path,
       options = {
         method,
@@ -106,6 +117,15 @@ const checkResponseStatus = (res) => {
               `api/homeappliances/${params.haId}/settings`,
               accessToken
             )
+        },
+        // New: programs API support
+        programs: {
+          get_active_program: (params) =>
+            makeApiRequest(
+              "GET",
+              `api/homeappliances/${params.haId}/programs/active`,
+              accessToken
+            )
         }
       }
     });
@@ -117,10 +137,9 @@ const checkResponseStatus = (res) => {
         return;
       }
       fetch(
-        `${
-          global.isSimulated
-            ? global.urls.simulation.base
-            : global.urls.physical.base
+        `${global.isSimulated
+          ? global.urls.simulation.base
+          : global.urls.physical.base
         }security/oauth/token`,
         {
           method: "POST",
@@ -165,8 +184,8 @@ class HomeConnect extends EventEmitter {
   async init(options) {
     global.isSimulated =
       typeof options !== "undefined" &&
-      "isSimulated" in options &&
-      typeof options.isSimulated === "boolean"
+        "isSimulated" in options &&
+        typeof options.isSimulated === "boolean"
         ? options.isSimulated
         : false;
 
@@ -204,8 +223,8 @@ class HomeConnect extends EventEmitter {
   subscribeDevice(haid, event, callback) {
     if (this.eventSources && !(haid in this.eventSources)) {
       const url = global.isSimulated
-          ? global.urls.simulation.base
-          : global.urls.physical.base,
+        ? global.urls.simulation.base
+        : global.urls.physical.base,
         eventSource = new EventSource(
           `${url}api/homeappliances/${haid}/events`,
           {

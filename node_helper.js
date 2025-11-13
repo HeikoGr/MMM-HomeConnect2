@@ -14,7 +14,11 @@ const QRCode = require("qrcode"),
     refreshToken: null,
     clientInstances: new Set(),
     lastAuthAttempt: 0,
-    MIN_AUTH_INTERVAL: 60000
+    MIN_AUTH_INTERVAL: 60000,
+    // Rate limiting for active program requests
+    rateLimitUntil: 0,
+    lastActiveProgramFetch: 0,
+    MIN_ACTIVE_PROGRAM_INTERVAL: 10000 // 10 seconds between fetches
   };
 
 async function initiateDeviceFlow(clientId) {
@@ -402,6 +406,42 @@ module.exports = NodeHelper.create({
     this.retryAuthentication();
   },
 
+  handleGetActivePrograms() {
+    console.log("📊 GET_ACTIVE_PROGRAMS request received");
+
+    if (!this.hc) {
+      console.warn("⚠️ HomeConnect not initialized - cannot fetch active programs");
+      this.broadcastToAllClients("INIT_STATUS", {
+        status: "hc_not_ready",
+        message: "HomeConnect nicht bereit"
+      });
+      return;
+    }
+
+    const now = Date.now();
+
+    // Check if we're currently rate limited
+    if (now < globalSession.rateLimitUntil) {
+      const remainingSeconds = Math.ceil((globalSession.rateLimitUntil - now) / 1000);
+      console.log(`⏳ Rate limited - ${remainingSeconds}s remaining`);
+      this.broadcastToAllClients("INIT_STATUS", {
+        status: "device_error",
+        message: `Rate Limit aktiv - bitte ${remainingSeconds}s warten`,
+        rateLimitSeconds: remainingSeconds
+      });
+      return;
+    }
+
+    // Check minimum interval between requests
+    if (now - globalSession.lastActiveProgramFetch < globalSession.MIN_ACTIVE_PROGRAM_INTERVAL) {
+      console.log("⚠️ Throttling active program requests");
+      return;
+    }
+
+    globalSession.lastActiveProgramFetch = now;
+    this.fetchActiveProgramsForAllDevices();
+  },
+
   socketNotificationReceived(notification, payload) {
     switch (notification) {
       case "CONFIG":
@@ -414,6 +454,10 @@ module.exports = NodeHelper.create({
 
       case "RETRY_AUTH":
         this.handleRetryAuth();
+        break;
+
+      case "GET_ACTIVE_PROGRAMS":
+        this.handleGetActivePrograms();
         break;
     }
   },
@@ -628,12 +672,14 @@ module.exports = NodeHelper.create({
       );
       console.log("🔄 Refresh token updated");
       globalSession.refreshToken = refreshToken;
-      // Only fetch devices if not yet subscribed (initial setup)
-      if (!this.subscribed) {
+      // After init has completed (subscriptions established), refresh devices on token update.
+      // During initial init (subscribed === false), skip to avoid double fetching.
+      if (this.subscribed) {
+        console.log("🔁 Token updated post-init - refreshing device list");
         this.getDevices();
       } else {
         console.log(
-          "ℹ️ Token updated - devices already loaded, skipping getDevices()"
+          "ℹ️ Token updated during initialization - device fetch will run after init"
         );
       }
     });
@@ -901,19 +947,19 @@ module.exports = NodeHelper.create({
     }
 
     const eventHandlers = {
-        "BSH.Common.Option.RemainingProgramTime": () =>
-          this.parseRemainingProgramTime(device, event.value),
-        "BSH.Common.Option.ProgramProgress": () =>
-          this.parseProgramProgress(device, event.value),
-        "BSH.Common.Status.OperationState": () =>
-          this.parseOperationState(device, event.value),
-        "Cooking.Common.Setting.Lighting": () =>
-          this.parseLighting(device, event.value),
-        "BSH.Common.Setting.PowerState": () =>
-          this.parsePowerState(device, event.value),
-        "BSH.Common.Status.DoorState": () =>
-          this.parseDoorState(device, event.value)
-      },
+      "BSH.Common.Option.RemainingProgramTime": () =>
+        this.parseRemainingProgramTime(device, event.value),
+      "BSH.Common.Option.ProgramProgress": () =>
+        this.parseProgramProgress(device, event.value),
+      "BSH.Common.Status.OperationState": () =>
+        this.parseOperationState(device, event.value),
+      "Cooking.Common.Setting.Lighting": () =>
+        this.parseLighting(device, event.value),
+      "BSH.Common.Setting.PowerState": () =>
+        this.parsePowerState(device, event.value),
+      "BSH.Common.Status.DoorState": () =>
+        this.parseDoorState(device, event.value)
+    },
       handler = eventHandlers[event.key];
     if (handler) {
       handler();
@@ -929,6 +975,135 @@ module.exports = NodeHelper.create({
         "MMM-HomeConnect_Update",
         Array.from(this.devices.values())
       );
+    });
+  },
+
+  async fetchActiveProgramForDevice(haId, deviceName) {
+    try {
+      console.log(`🔍 Fetching active program for ${deviceName} (${haId})`);
+
+      // Use the command() API exposed by home-connect-js.js
+      const result = await this.hc.command("programs", "get_active_program", haId);
+
+      if (result && result.body && result.body.data) {
+        console.log(`✅ Active program data received for ${deviceName}`);
+        return {
+          haId,
+          success: true,
+          data: result.body.data
+        };
+      }
+
+      return { haId, success: false, error: "No active program" };
+    } catch (error) {
+      // Handle 404 - no active program running
+      if (error.statusCode === 404 || error.status === 404 || (error.message && error.message.includes("404"))) {
+        console.log(`ℹ️ No active program for ${deviceName}`);
+        return { haId, success: false, error: "No active program" };
+      }
+
+      // Handle rate limiting (429)
+      if (error.statusCode === 429 || error.status === 429 || (error.message && (error.message.includes("429") || error.message.includes("rate limit")))) {
+        console.warn(`⚠️ Rate limit hit for ${deviceName}`);
+        throw error; // Propagate to trigger backoff
+      }
+
+      console.error(`❌ Error fetching active program for ${deviceName}:`, error.message || error);
+      return { haId, success: false, error: error.message || "Unknown error" };
+    }
+  },
+
+  async fetchActiveProgramsForAllDevices() {
+    const deviceArray = Array.from(this.devices.values());
+
+    if (deviceArray.length === 0) {
+      console.log("ℹ️ No devices to fetch active programs for");
+      return;
+    }
+
+    console.log(`📊 Fetching active programs for ${deviceArray.length} device(s)`);
+
+    this.broadcastToAllClients("INIT_STATUS", {
+      status: "fetching_programs",
+      message: "Aktive Programme werden geladen..."
+    });
+
+    try {
+      const results = [];
+
+      // Fetch sequentially to avoid overwhelming the API
+      for (const device of deviceArray) {
+        if (device.connected === true) {
+          const result = await this.fetchActiveProgramForDevice(device.haId, device.name);
+          results.push(result);
+
+          // Small delay between requests to avoid rate limiting
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+
+      // Process successful results
+      const programData = {};
+      results.forEach(result => {
+        if (result.success && result.data) {
+          const device = this.devices.get(result.haId);
+          if (device) {
+            // Extract relevant options
+            if (result.data.options) {
+              result.data.options.forEach(option => {
+                this.parseEvent(option, device);
+              });
+            }
+            programData[result.haId] = {
+              name: device.name,
+              program: result.data
+            };
+          }
+        }
+      });
+
+      console.log(`✅ Active programs fetched: ${Object.keys(programData).length} with data`);
+
+      // Broadcast updated device data
+      this.broadcastDevices();
+
+      // Send program-specific data
+      this.broadcastToAllClients("ACTIVE_PROGRAMS_DATA", {
+        programs: programData,
+        timestamp: Date.now()
+      });
+
+    } catch (error) {
+      this.handleActiveProgramFetchError(error);
+    }
+  },
+
+  handleActiveProgramFetchError(error) {
+    console.error("❌ Failed to fetch active programs:", error.message);
+
+    // Check if it's a rate limit error
+    if (error.statusCode === 429 || error.message?.includes("429") || error.message?.includes("rate limit")) {
+      // Implement exponential backoff: 2 minutes on first hit, doubles up to 10 minutes
+      const backoffMinutes = Math.min(2 * Math.pow(2, Math.floor(Math.random() * 3)), 10);
+      const backoffMs = backoffMinutes * 60 * 1000;
+
+      globalSession.rateLimitUntil = Date.now() + backoffMs;
+
+      console.warn(`⏳ Rate limit detected - backing off for ${backoffMinutes} minutes`);
+
+      this.broadcastToAllClients("INIT_STATUS", {
+        status: "device_error",
+        message: `Rate Limit erreicht - ${backoffMinutes} Min. warten`,
+        rateLimitSeconds: backoffMinutes * 60
+      });
+
+      return;
+    }
+
+    // Generic error
+    this.broadcastToAllClients("INIT_STATUS", {
+      status: "device_error",
+      message: `Fehler beim Laden der Programme: ${error.message}`
     });
   }
 });

@@ -45,10 +45,9 @@ Simple config example (add to your MagicMirror `config/config.js`):
         clientId: "YOUR_CLIENT_ID",
         showDeviceIcon: true,
         updateFrequency: 60 * 60 * 1000 // 1 hour
-    },
-}
+    }
+},
 ```
-
 
 ### Authentication / Device Flow
 ![Authentication Workflow visualisation](screenshots/auth_screen.png)

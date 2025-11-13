@@ -80,8 +80,23 @@ Module.register("MMM-HomeConnect2", {
 
     switch (notification) {
       case "MMM-HomeConnect_Update":
-        this.devices = payload;
+        this.devices = payload || [];
         this.updateDom();
+        // After initial device list arrives, request a snapshot of active programs
+        // so RemainingProgramTime / ProgramProgress are populated even before SSE events come in.
+        try {
+          const haIds = this.devices
+            .map((d) => d.haId || d.haid || d.id)
+            .filter((id) => !!id);
+          if (haIds.length > 0) {
+            this.sendSocketNotification("GET_ACTIVE_PROGRAMS", {
+              instanceId: this.instanceId,
+              haIds
+            });
+          }
+        } catch (e) {
+          Log.error(`${this.name} failed requesting active programs: ${e}`);
+        }
         break;
       case "AUTH_INFO":
         // Only update if for this instance or global
@@ -148,6 +163,53 @@ Module.register("MMM-HomeConnect2", {
     let wrapper = "";
     const _self = this;
 
+    function parseRemainingSeconds(device) {
+      const remCandidates = [
+        device.RemainingProgramTime,
+        device.remainingProgramTime,
+        device.remaining_time,
+        device.remaining,
+        device["BSH.Common.Status.RemainingProgramTime"],
+        device["BSH.Common.Option.RemainingProgramTime"]
+      ];
+      for (const v of remCandidates) {
+        if (v === undefined || v === null) continue;
+        if (typeof v === "number" && !Number.isNaN(v)) return v;
+        if (typeof v === "string") {
+          const n = parseInt(v, 10);
+          if (!Number.isNaN(n)) return n;
+          // ISO8601 PT..H..M..S
+          const m = v.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+          if (m) {
+            return (
+              (parseInt(m[1] || "0", 10) * 3600) +
+              (parseInt(m[2] || "0", 10) * 60) +
+              parseInt(m[3] || "0", 10)
+            );
+          }
+        }
+      }
+      return 0;
+    }
+
+    function parseProgress(device) {
+      return (
+        device.ProgramProgress ??
+        device.programProgress ??
+        device.program_progress ??
+        device["BSH.Common.Option.ProgramProgress"] ??
+        device["BSH.Common.Status.ProgramProgress"] ??
+        undefined
+      );
+    }
+
+    function formatDuration(sec) {
+      if (!sec || sec <= 0) return "";
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      return (h > 0 ? `${h}h ` : "") + `${String(m).padStart(2, "0")}m`;
+    }
+
     // Show authentication info if available
     if (this.authInfo && this.authInfo.status === "waiting") {
       div.innerHTML = this.getAuthHTML();
@@ -194,7 +256,9 @@ Module.register("MMM-HomeConnect2", {
       if (device.Lighting) {
         IsShowDevice = true;
       }
-      if (_self.config.showDeviceIfDoorIsOpen && device.DoorOpen) {
+      // Support different door fields: DoorState / DoorOpen
+      const doorOpen = device.DoorOpen || device.DoorState === "Open" || device.doorState === "Open";
+      if (_self.config.showDeviceIfDoorIsOpen && doorOpen) {
         IsShowDevice = true;
       }
       if (_self.config.showDeviceIfFailure && device.Failure) {
@@ -205,19 +269,19 @@ Module.register("MMM-HomeConnect2", {
       }
 
       if (IsShowDevice) {
+        const remainingSec = parseRemainingSeconds(device);
+        const progVal = parseProgress(device);
+        // Show progressbar if we have a remaining time > 0 OR a known progress value (including 0)
         let ProgessBar = "";
-        if (device.RemainingProgramTime > 0 && device.ProgramProgress) {
-          ProgessBar = `<progress value='${device.ProgramProgress}' max='100' width='95%'></progress>`;
+        if (remainingSec > 0 || progVal !== undefined) {
+          const progressDisplay = progVal === undefined ? 0 : progVal;
+          ProgessBar = `<progress value='${progressDisplay}' max='100' width='95%'></progress>`;
         }
 
         const StatusString =
-            device.RemainingProgramTime > 0
-              ? `${_self.translate("DONE_IN")} ${new Date(
-                  device.RemainingProgramTime * 1000
-                )
-                  .toISOString()
-                  .slice(11, 16)}`
-              : "",
+          remainingSec > 0
+            ? `${_self.translate("DONE_IN")} ${formatDuration(remainingSec)}`
+            : "",
           Image = `${device.type}.png`,
           DeviceName = device.name;
         let container = "<div class='deviceContainer'>";
