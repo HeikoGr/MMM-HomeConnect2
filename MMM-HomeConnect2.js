@@ -18,7 +18,9 @@ Module.register("MMM-HomeConnect2", {
     showDeviceIfDoorIsOpen: true,
     showDeviceIfFailure: true,
     showDeviceIfInfoIsAvailable: true,
-    updateFrequency: 1000 * 60 * 60
+    updateFrequency: 1000 * 60 * 60,
+    // Module logging level: none | error | warn | info | debug
+    logLevel: "none"
   },
 
   init() {
