@@ -1105,5 +1105,85 @@ module.exports = NodeHelper.create({
       status: "device_error",
       message: `Fehler beim Laden der Programme: ${error.message}`
     });
-  }
+  },
+
+  /**
+   * Log dryer-specific information for easier debugging.
+   * - only logs appliances that look like dryers (type/name)
+   * - prints active program response and status response if available
+   */
+  logDryerInfo(device, activeProgram, status) {
+    try {
+      const id = device.haId || device.haid || device.id || "unknown";
+      const name = device.name || device.nameplate || "unknown";
+      const type = String(device.type || "").toLowerCase();
+
+      console.log("===== HomeConnect DRYER DEBUG =====");
+      console.log(`Appliance: ${name} (${id})`);
+      console.log(`Raw device object: ${JSON.stringify(device, null, 2)}`);
+
+      if (activeProgram) {
+        console.log("--- active program (programs/active) ---");
+        console.log(JSON.stringify(activeProgram, null, 2));
+        // Common fields to highlight
+        if (activeProgram.remainingProgramTimeInSeconds !== undefined) {
+          console.log(
+            `remainingProgramTimeInSeconds: ${activeProgram.remainingProgramTimeInSeconds}`
+          );
+        } else if (activeProgram.remainingProgramTime !== undefined) {
+          console.log(
+            `remainingProgramTime: ${JSON.stringify(
+              activeProgram.remainingProgramTime,
+              null,
+              2
+            )}`
+          );
+        }
+        if (activeProgram.programProgress !== undefined) {
+          console.log(`programProgress: ${activeProgram.programProgress}`);
+        }
+      }
+
+      if (status) {
+        console.log("--- status endpoint ---");
+        console.log(JSON.stringify(status, null, 2));
+        // try common status fields
+        const rem =
+          status.remainingProgramTime ??
+          status["BSH.Common.Status.RemainingProgramTime"] ??
+          status["BSH.Common.Option.RemainingProgramTime"];
+        if (rem !== undefined) {
+          console.log(`status.remainingProgramTime: ${JSON.stringify(rem, null, 2)}`);
+        }
+        const prog =
+          status.programProgress ??
+          status["BSH.Common.Status.ProgramProgress"] ??
+          status["BSH.Common.Option.ProgramProgress"];
+        if (prog !== undefined) {
+          console.log(`status.programProgress: ${JSON.stringify(prog, null, 2)}`);
+        }
+      }
+
+      console.log("===== End DRYER DEBUG =====");
+    } catch (err) {
+      console.error("logDryerInfo error:", err);
+    }
+  },
+
+  /*
+    Insert calls to logDryerInfo(...) after you process API responses.
+    Examples (adjust to your actual variable names / callbacks):
+  */
+
+  // Example A: after fetching active program for one haId
+  // ...existing code...
+  // const activeProgram = /* result of /programs/active for device */;
+  // logDryerInfo(device, activeProgram, /* optional status object if available */);
+  // ...existing code...
+
+  // Example B: after fetching /status for one haId
+  // ...existing code...
+  // const status = /* result of /status endpoint */;
+  // logDryerInfo(device, /* optional activeProgram if known */, status);
+  // ...existing code...
 });

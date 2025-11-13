@@ -50,7 +50,7 @@ Simple config example (add to your MagicMirror `config/config.js`):
 ```
 
 ### Authentication / Device Flow
-![Authentication Workflow visualisation](screenshots/auth_screen.png)
+![Authentication Workflow visualisation](screenshots/pic01_auth.png)
 
 How authentication works
 - First time: module shows a URL and a short code on the MagicMirror screen.
