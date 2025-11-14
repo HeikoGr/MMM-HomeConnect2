@@ -50,8 +50,8 @@ function moduleLog(level, ...args) {
     } else {
       console.error(prefix, ...args);
     }
-  } catch (e) {
-    // swallow logging errors
+  } catch (error) {
+    console.log("Error in moduleLog:", error);
   }
 }
 

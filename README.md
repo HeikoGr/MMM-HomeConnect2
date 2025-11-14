@@ -3,7 +3,7 @@
 This module connects MagicMirror to BSH (Bosch, Siemens, Neff, Gaggenau, ...) devices. It uses the OAuth2 Device Flow so a browser is not required on the MagicMirror server.
 
 ## Overview / Appliance Status
-![Overview of appliance status](screenshots/screenshot.png)
+![Overview of appliance status](img/screenshot.png)
 
 Key features
 - Headless Device Flow authentication (no local browser needed)
@@ -50,7 +50,7 @@ Simple config example (add to your MagicMirror `config/config.js`):
 ```
 
 ### Authentication / Device Flow
-![Authentication Workflow visualisation](screenshots/pic01_auth.png)
+![Authentication Workflow visualisation](img/pic01_auth.png)
 
 How authentication works
 - First time: module shows a URL and a short code on the MagicMirror screen.

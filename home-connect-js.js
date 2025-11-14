@@ -14,10 +14,8 @@ if (typeof EventSource === "undefined") {
         global.EventSource
       );
     }
-  } catch (e) {
-    // If require fails, keep silent — the original error will be logged later.
-    // You can uncomment the next line to log the install hint:
-    // console.warn("EventSource polyfill not available. Run: npm install eventsource");
+  } catch (error) {
+      console.warn(`EventSource polyfill not available. Run: npm install eventsource. ${error.message}`);
   }
 }
 
