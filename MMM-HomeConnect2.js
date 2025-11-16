@@ -168,19 +168,28 @@ Module.register("MMM-HomeConnect2", {
 
     function parseRemainingSeconds(device) {
       try {
-        if (window && window.HomeConnectDeviceUtils && typeof window.HomeConnectDeviceUtils.parseRemainingSeconds === 'function') {
+        if (
+          window &&
+          window.HomeConnectDeviceUtils &&
+          typeof window.HomeConnectDeviceUtils.parseRemainingSeconds ===
+            "function"
+        ) {
           return window.HomeConnectDeviceUtils.parseRemainingSeconds(device);
         }
-      } catch (e) { }
+      } catch (e) {}
       return 0;
     }
 
     function parseProgress(device) {
       try {
-        if (window && window.HomeConnectDeviceUtils && typeof window.HomeConnectDeviceUtils.parseProgress === 'function') {
+        if (
+          window &&
+          window.HomeConnectDeviceUtils &&
+          typeof window.HomeConnectDeviceUtils.parseProgress === "function"
+        ) {
           return window.HomeConnectDeviceUtils.parseProgress(device);
         }
-      } catch (e) { }
+      } catch (e) {}
       return undefined;
     }
 
@@ -238,7 +247,10 @@ Module.register("MMM-HomeConnect2", {
         IsShowDevice = true;
       }
       // Support different door fields: DoorState / DoorOpen
-      const doorOpen = device.DoorOpen || device.DoorState === "Open" || device.doorState === "Open";
+      const doorOpen =
+        device.DoorOpen ||
+        device.DoorState === "Open" ||
+        device.doorState === "Open";
       if (_self.config.showDeviceIfDoorIsOpen && doorOpen) {
         IsShowDevice = true;
       }
@@ -260,9 +272,9 @@ Module.register("MMM-HomeConnect2", {
         }
 
         const StatusString =
-          remainingSec > 0
-            ? `${_self.translate("DONE_IN")} ${formatDuration(remainingSec)}`
-            : "",
+            remainingSec > 0
+              ? `${_self.translate("DONE_IN")} ${formatDuration(remainingSec)}`
+              : "",
           Image = `${device.type}.png`,
           DeviceName = device.name;
         let container = "<div class='deviceContainer'>";
