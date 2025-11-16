@@ -1,262 +1,38 @@
 let HomeConnect = null;
 const fs = require("fs");
 const ActiveProgramManager = require("./lib/active-program-manager");
+const AuthService = require("./lib/auth-service");
+const DeviceService = require("./lib/device-service");
+const ProgramService = require("./lib/program-service");
+const {
+  deviceAppearsActive,
+  isDeviceConnected
+} = require("./lib/device-utils");
 const NodeHelper = require("node_helper"),
-  // Use built-in fetch when available
-  fetch =
-    typeof globalThis.fetch === "function"
-      ? globalThis.fetch.bind(globalThis)
-      : null;
-const QRCode = require("qrcode"),
   globalSession = {
     isAuthenticated: false,
     isAuthenticating: false,
-    accessToken: null,
-    refreshToken: null,
-    clientInstances: new Set(),
-    lastAuthAttempt: 0,
-    MIN_AUTH_INTERVAL: 60000,
-    // Rate limiting for active program requests
-    rateLimitUntil: 0,
-    lastActiveProgramFetch: 0,
+    accessToken: null, // Access token for API requests
+    refreshToken: null, // Refresh token for obtaining new access tokens
+    clientInstances: new Set(), // Set of client instance IDs using this helper
+    lastAuthAttempt: 0, // Timestamp of the last authentication attempt
+    MIN_AUTH_INTERVAL: 60000, // 1 minute between auth attempts
+    rateLimitUntil: 0, // Timestamp until which rate limiting is active
+    lastActiveProgramFetch: 0, // Timestamp of last active program fetch
     MIN_ACTIVE_PROGRAM_INTERVAL: 10000 // 10 seconds between fetches
   };
 
 // Active-program request dedupe window (ms)
 const ACTIVE_PROGRAM_REQUEST_TTL = 10000; // 10s
-let lastActiveProgramsRequest = { instanceId: null, timestamp: 0 };
-const ACTIVE_PROGRAM_RETRY_DELAY_MS = 5000;
-const ACTIVE_PROGRAM_MAX_RETRIES = 3;
-const LONG_ACTIVE_PROGRAM_REQUEST_MS = 4000;
+let lastActiveProgramsRequest = { instanceId: null, timestamp: 0 }; // Track last request
+const ACTIVE_PROGRAM_RETRY_DELAY_MS = 5000; // 5s
+const ACTIVE_PROGRAM_MAX_RETRIES = 3; // Maximum number of retries for active program requests
 
-const { getNumericValue, getStringValue, deviceAppearsActive, isDeviceConnected } = require("./lib/device-utils");
 const { moduleLog, setModuleLogLevel } = require("./lib/logger");
-
-async function initiateDeviceFlow(clientId) {
-  try {
-    const response = await fetch(
-      "https://api.home-connect.com/security/oauth/device_authorization",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: `client_id=${clientId}`
-      }
-    );
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(
-        `Device authorization failed: ${response.status} - ${errorText}`
-      );
-    }
-
-    const data = await response.json();
-    moduleLog("debug", "Device authorization response:", data);
-    return data;
-  } catch (error) {
-    moduleLog("error", "Device flow initiation failed:", error);
-    throw error;
-  }
-}
-
-function handleTokenSuccess(tokens, sendNotification) {
-  moduleLog("info", "Token received successfully");
-  if (sendNotification) {
-    sendNotification("AUTH_STATUS", {
-      status: "success",
-      message: "Authentication successful"
-    });
-  }
-  return {
-    access_token: tokens.access_token,
-    refresh_token: tokens.refresh_token,
-    expires_in: tokens.expires_in,
-    timestamp: Math.floor(Date.now() / 1000)
-  };
-}
-
-function handleTokenError(error, sendNotification) {
-  moduleLog("warn", "Token response error:", error);
-
-  if (error.error === "authorization_pending") {
-    moduleLog("info", "Waiting for user authorization...");
-    return { action: "retry" };
-  }
-
-  if (error.error === "slow_down") {
-    moduleLog("info", "Server requested slower polling");
-    return { action: "slow_down" };
-  }
-
-  if (error.error === "access_denied") {
-    if (sendNotification) {
-      sendNotification("AUTH_STATUS", {
-        status: "error",
-        message: "User denied authorization"
-      });
-    }
-    return {
-      action: "error",
-      message: "❌ User denied authorization"
-    };
-  }
-
-  if (error.error === "expired_token") {
-    if (sendNotification) {
-      sendNotification("AUTH_STATUS", {
-        status: "error",
-        message: "Device code expired - please restart"
-      });
-    }
-    return {
-      action: "error",
-      message: "❌ Device code expired - please restart"
-    };
-  }
-
-  return { action: "error", message: `Token request failed: ${error.error_description || error.error}` };
-}
-
-async function requestToken(clientId, clientSecret, deviceCode) {
-  return fetch("https://api.home-connect.com/security/oauth/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: `grant_type=device_code&device_code=${deviceCode}&client_id=${clientId}&client_secret=${clientSecret}`
-  });
-}
-
-async function pollForToken(
-  clientId,
-  clientSecret,
-  deviceCode,
-  interval = 5,
-  maxAttempts = 60,
-  sendNotification
-) {
-  return new Promise((resolve, reject) => {
-    let attempts = 0,
-      currentInterval = Math.max(interval, 5);
-
-    moduleLog("info", `Starting token polling with ${currentInterval}s interval...`);
-    const poll = async () => {
-      attempts++;
-      if (attempts > maxAttempts) {
-        reject(
-          new Error(`Token polling timeout after ${maxAttempts} attempts`)
-        );
-        return;
-      }
-      try {
-        moduleLog("debug", `Token polling attempt ${attempts}/${maxAttempts} (interval: ${currentInterval}s)`);
-        if (sendNotification) {
-          sendNotification("AUTH_STATUS", {
-            status: "polling",
-            attempt: attempts,
-            maxAttempts,
-            interval: currentInterval,
-            message: `Waiting for authorization... (attempt ${attempts}/${maxAttempts})`
-          });
-        }
-
-        const response = await requestToken(clientId, clientSecret, deviceCode);
-
-        if (response.ok) {
-          const tokens = await response.json();
-          resolve(handleTokenSuccess(tokens, sendNotification));
-          return;
-        }
-
-        const error = await response.json(),
-          result = handleTokenError(error, sendNotification);
-
-        if (result.action === "retry") {
-          setTimeout(poll, currentInterval * 1000);
-        } else if (result.action === "slow_down") {
-          currentInterval = Math.max(currentInterval + 5, 10);
-          moduleLog("info", `Polling interval increased to ${currentInterval}s`);
-          setTimeout(poll, currentInterval * 1000);
-        } else if (result.action === "error") {
-          reject(new Error(result.message));
-        }
-      } catch (fetchError) {
-        moduleLog("error", "Network error during token polling:", fetchError);
-        setTimeout(poll, currentInterval * 1000);
-      }
-    };
-    setTimeout(poll, currentInterval * 1000);
-  });
-}
-
-async function headlessAuth(clientId, clientSecret, sendNotification) {
-  try {
-    moduleLog("info", "Starting headless authentication (Device Flow)");
-    const deviceAuth = await initiateDeviceFlow(clientId);
-
-    moduleLog("info", "HOME CONNECT AUTHENTICATION");
-    moduleLog("info", "Open the following URL on any device:", deviceAuth.verification_uri);
-    moduleLog("info", "User code:", deviceAuth.user_code);
-
-    /*
-     * generate an SVG QR code
-     */
-    const completeLink =
-      deviceAuth.verification_uri_complete ||
-      `${deviceAuth.verification_uri}?user_code=${deviceAuth.user_code}`;
-    moduleLog("info", "Scan the QR code with your phone to open the verification link");
-    let verificationQrSvg = null;
-    try {
-      verificationQrSvg = await QRCode.toString(completeLink, {
-        type: "svg",
-        errorCorrectionLevel: "H",
-        margin: 1
-      });
-
-      moduleLog("debug", "QR SVG generated");
-    } catch (qrErr) {
-      moduleLog("error", "QR code generation failed:", qrErr.message);
-      // Fallback: print the direct link
-      moduleLog("info", "Direct link:", completeLink);
-    }
-    moduleLog("info", `Code expires in: ${Math.floor(deviceAuth.expires_in / 60)} minutes`);
-    moduleLog("info", `Polling interval: ${deviceAuth.interval || 5} seconds`);
-
-    if (sendNotification) {
-      sendNotification("AUTH_INFO", {
-        status: "waiting",
-        verification_uri: deviceAuth.verification_uri,
-        user_code: deviceAuth.user_code,
-        // Provide the SVG directly so the frontend can render it.
-        verification_qr_svg: verificationQrSvg,
-        // Also include the complete link as fallback for older frontends.
-        verification_uri_complete: completeLink,
-        // Keep expires/interval for the frontend to show timers.
-        expires_in: deviceAuth.expires_in,
-        interval: deviceAuth.interval || 5,
-        expires_in_minutes: Math.floor(deviceAuth.expires_in / 60)
-      });
-    }
-
-    const tokens = await pollForToken(
-      clientId,
-      clientSecret,
-      deviceAuth.device_code,
-      deviceAuth.interval || 5,
-      Math.floor(deviceAuth.expires_in / (deviceAuth.interval || 5)),
-      sendNotification
-    );
-
-    moduleLog("info", "Authentication completed successfully");
-    return tokens;
-  } catch (error) {
-    moduleLog("error", "Headless authentication failed:", error.message);
-    throw error;
-  }
-}
 
 module.exports = NodeHelper.create({
   refreshToken: null,
   hc: null,
-  devices: new Map(),
   authInProgress: false,
   configReceived: false,
   initializationAttempts: 0,
@@ -264,10 +40,27 @@ module.exports = NodeHelper.create({
   instanceId: null,
   subscribed: false,
   activeProgramManager: null,
+  authService: null,
+  deviceService: null,
+  programService: null,
 
   init() {
     moduleLog("info", "init module helper: MMM-HomeConnect (session-based)");
-    // Instantiate the ActiveProgramManager for retry scheduling
+
+    this.authService = new AuthService({
+      logger: moduleLog,
+      broadcastToAllClients: this.broadcastToAllClients.bind(this),
+      setModuleLogLevel,
+      globalSession,
+      maxInitAttempts: this.maxInitAttempts
+    });
+
+    this.deviceService = new DeviceService({
+      logger: moduleLog,
+      broadcastToAllClients: this.broadcastToAllClients.bind(this),
+      globalSession
+    });
+
     try {
       this.activeProgramManager = new ActiveProgramManager({
         fetchFn: this.fetchActiveProgramForDevice.bind(this),
@@ -281,6 +74,13 @@ module.exports = NodeHelper.create({
       moduleLog("error", "Failed to initialize ActiveProgramManager:", err);
       this.activeProgramManager = null;
     }
+
+    this.programService = new ProgramService({
+      logger: moduleLog,
+      globalSession,
+      activeProgramManager: this.activeProgramManager,
+      devices: this.deviceService.devices
+    });
   },
 
   start() {
@@ -289,7 +89,10 @@ module.exports = NodeHelper.create({
 
   stop() {
     moduleLog("info", `Stopping module helper: ${this.name}`);
-    if (this.activeProgramManager && typeof this.activeProgramManager.clearAll === 'function') {
+    if (
+      this.activeProgramManager &&
+      typeof this.activeProgramManager.clearAll === "function"
+    ) {
       this.activeProgramManager.clearAll();
     }
   },
@@ -323,15 +126,18 @@ module.exports = NodeHelper.create({
       instanceId: this.instanceId
     });
 
-    if (this.hc) {
+    if (this.hc && this.deviceService) {
       setTimeout(() => {
-        this.getDevices();
+        this.deviceService.getDevices(this.sendSocketNotification.bind(this));
       }, 1000);
     }
   },
 
   notifyAuthInProgress() {
-    moduleLog("info", "Authentication already in progress for another client instance");
+    moduleLog(
+      "info",
+      "Authentication already in progress for another client instance"
+    );
     this.sendSocketNotification("INIT_STATUS", {
       status: "auth_in_progress",
       message: "Authentication in progress",
@@ -340,7 +146,7 @@ module.exports = NodeHelper.create({
   },
 
   handleConfigNotificationSubsequent() {
-    if (globalSession.isAuthenticated && this.hc) {
+    if (globalSession.isAuthenticated && this.hc && this.deviceService) {
       this.sendSocketNotification("INIT_STATUS", {
         status: "complete",
         message: "Already initialized",
@@ -348,7 +154,9 @@ module.exports = NodeHelper.create({
       });
 
       setTimeout(() => {
-        this.broadcastDevices();
+        this.deviceService.broadcastDevices(
+          this.sendSocketNotification.bind(this)
+        );
       }, 500);
     } else if (globalSession.isAuthenticating) {
       this.notifyAuthInProgress();
@@ -359,8 +167,14 @@ module.exports = NodeHelper.create({
     this.instanceId = payload.instanceId || "default";
     globalSession.clientInstances.add(this.instanceId);
 
-    moduleLog("debug", `Processing CONFIG notification for instance: ${this.instanceId}`);
-    moduleLog("debug", `Registered clients: ${globalSession.clientInstances.size}`);
+    moduleLog(
+      "debug",
+      `Processing CONFIG notification for instance: ${this.instanceId}`
+    );
+    moduleLog(
+      "debug",
+      `Registered clients: ${globalSession.clientInstances.size}`
+    );
 
     if (!this.configReceived) {
       this.config = payload;
@@ -382,8 +196,8 @@ module.exports = NodeHelper.create({
           this.config.baseUrl = this.config.BaseURL;
         }
       }
-      // apply configured log level for module-level logging
-      setModuleLogLevel(this.config?.logLevel || this.config?.loglevel || "none");
+      // apply configured log level for module-level logging via auth service
+      this.authService.setConfig(this.config);
       this.handleConfigNotificationFirstTime();
     } else {
       this.handleConfigNotificationSubsequent();
@@ -391,11 +205,14 @@ module.exports = NodeHelper.create({
   },
 
   handleUpdateRequest() {
-    if (this.hc && !globalSession.isAuthenticating) {
+    if (this.hc && this.deviceService && !globalSession.isAuthenticating) {
       moduleLog("info", "Update request received - fetching devices");
-      this.getDevices();
+      this.deviceService.getDevices(this.sendSocketNotification.bind(this));
     } else {
-      moduleLog("warn", "Update request ignored - HomeConnect not ready or auth in progress");
+      moduleLog(
+        "warn",
+        "Update request ignored - HomeConnect not ready or auth in progress"
+      );
     }
   },
 
@@ -405,16 +222,22 @@ module.exports = NodeHelper.create({
   },
 
   handleGetActivePrograms() {
-
     // No payload previously accepted; ensure function signature backwards compatible
     // If called with an argument (from socketNotificationReceived), use it.
     // Note: socketNotificationReceived will be updated to forward payload.
     const args = Array.from(arguments);
     const payload = args[0] || {};
-    moduleLog("info", "📊 GET_ACTIVE_PROGRAMS request received", payload.instanceId || "(no instance)");
+    moduleLog(
+      "info",
+      "📊 GET_ACTIVE_PROGRAMS request received",
+      payload.instanceId || "(no instance)"
+    );
 
     if (!this.hc) {
-      moduleLog("warn", "HomeConnect not initialized - cannot fetch active programs");
+      moduleLog(
+        "warn",
+        "HomeConnect not initialized - cannot fetch active programs"
+      );
       this.broadcastToAllClients("INIT_STATUS", {
         status: "hc_not_ready",
         message: "HomeConnect not ready"
@@ -451,7 +274,9 @@ module.exports = NodeHelper.create({
 
     // Check if we're currently rate limited
     if (now < globalSession.rateLimitUntil) {
-      const remainingSeconds = Math.ceil((globalSession.rateLimitUntil - now) / 1000);
+      const remainingSeconds = Math.ceil(
+        (globalSession.rateLimitUntil - now) / 1000
+      );
       moduleLog("info", `Rate limited - ${remainingSeconds}s remaining`);
       this.broadcastToAllClients("INIT_STATUS", {
         status: "device_error",
@@ -466,22 +291,23 @@ module.exports = NodeHelper.create({
     const sinceLastFetch = now - globalSession.lastActiveProgramFetch;
     if (sinceLastFetch < globalSession.MIN_ACTIVE_PROGRAM_INTERVAL) {
       const waitMs = globalSession.MIN_ACTIVE_PROGRAM_INTERVAL - sinceLastFetch;
-      moduleLog(
-        "warn",
-        "Throttling active program requests",
-        {
-          requester: requester || "unknown",
-          sinceLastFetchMs: sinceLastFetch,
-          minIntervalMs: globalSession.MIN_ACTIVE_PROGRAM_INTERVAL,
-          waitMs
-        }
-      );
+      moduleLog("warn", "Throttling active program requests", {
+        requester: requester || "unknown",
+        sinceLastFetchMs: sinceLastFetch,
+        minIntervalMs: globalSession.MIN_ACTIVE_PROGRAM_INTERVAL,
+        waitMs
+      });
       return;
     }
 
+    const deviceCount =
+      this.deviceService && this.deviceService.devices
+        ? this.deviceService.devices.size
+        : 0;
+
     moduleLog("debug", "Active program request accepted", {
       requester: requester || "unknown",
-      deviceCount: this.devices.size
+      deviceCount
     });
 
     globalSession.lastActiveProgramFetch = now;
@@ -519,26 +345,7 @@ module.exports = NodeHelper.create({
   },
 
   readRefreshTokenFromFile() {
-    if (!fs.existsSync("./modules/MMM-HomeConnect2/refresh_token.json")) {
-      moduleLog("debug", "No refresh token file found");
-      return null;
-    }
-
-    try {
-      const token = fs
-        .readFileSync("./modules/MMM-HomeConnect2/refresh_token.json", "utf8")
-        .trim();
-
-      if (token && token.length > 0) {
-        moduleLog("info", "Existing refresh token found - length:", token.length);
-        return token;
-      }
-      moduleLog("warn", "Refresh token file is empty");
-      return null;
-    } catch (error) {
-      moduleLog("error", "Could not read refresh token file:", error.message);
-      return null;
-    }
+    return this.authService.readRefreshTokenFromFile();
   },
 
   checkRateLimit() {
@@ -555,19 +362,8 @@ module.exports = NodeHelper.create({
   },
 
   initiateAuthFlow() {
-    const now = Date.now();
-    globalSession.lastAuthAttempt = now;
-
-    /*
-     * Only headless/device flow is supported. Always use headless if there is
-     * no refresh token available.
-     */
+    this.authService.initiateAuthFlow();
     if (!globalSession.isAuthenticating && !globalSession.refreshToken) {
-      moduleLog("info", "No refresh token available - using headless authentication");
-      this.broadcastToAllClients("INIT_STATUS", {
-        status: "need_auth",
-        message: "Authentication required"
-      });
       this.initWithHeadlessAuth();
     }
   },
@@ -599,7 +395,10 @@ module.exports = NodeHelper.create({
   },
 
   handleHeadlessAuthSuccess(tokens) {
-    fs.writeFileSync("./modules/MMM-HomeConnect2/refresh_token.json", tokens.refresh_token);
+    fs.writeFileSync(
+      "./modules/MMM-HomeConnect2/refresh_token.json",
+      tokens.refresh_token
+    );
     moduleLog("info", "Refresh token saved successfully");
 
     globalSession.refreshToken = tokens.refresh_token;
@@ -623,7 +422,10 @@ module.exports = NodeHelper.create({
     });
 
     if (error.message.includes("polling too quickly")) {
-      moduleLog("info", "Rate limiting detected - will not retry automatically");
+      moduleLog(
+        "info",
+        "Rate limiting detected - will not retry automatically"
+      );
       this.broadcastToAllClients("INIT_STATUS", {
         status: "rate_limited",
         message: "Rate limit reached - please restart in 2 minutes"
@@ -643,7 +445,10 @@ module.exports = NodeHelper.create({
       return;
     }
 
-    moduleLog("error", "Max initialization attempts reached - aborting headless authentication");
+    moduleLog(
+      "error",
+      "Max initialization attempts reached - aborting headless authentication"
+    );
     this.broadcastToAllClients("INIT_STATUS", {
       status: "auth_failed",
       message: "Authentication failed - please check manually"
@@ -665,13 +470,10 @@ module.exports = NodeHelper.create({
     );
 
     try {
-      const _self = this,
-        tokens = await headlessAuth(
-          this.config.clientId,
-          this.config.clientSecret,
-          (notification, payload) =>
-            _self.broadcastToAllClients(notification, payload)
-        );
+      const tokens = await this.authService.headlessAuth(
+        (notification, payload) =>
+          this.broadcastToAllClients(notification, payload)
+      );
 
       await this.handleHeadlessAuthSuccess(tokens);
     } catch (error) {
@@ -690,9 +492,11 @@ module.exports = NodeHelper.create({
       message: "Successfully initialized"
     });
 
-    setTimeout(() => {
-      this.getDevices();
-    }, 2000);
+    if (this.deviceService) {
+      setTimeout(() => {
+        this.deviceService.getDevices(this.sendSocketNotification.bind(this));
+      }, 2000);
+    }
   },
 
   handleHomeConnectInitError(error) {
@@ -707,16 +511,22 @@ module.exports = NodeHelper.create({
 
   setupHomeConnectRefreshToken() {
     this.hc.on("newRefreshToken", (refreshToken) => {
-      fs.writeFileSync("./modules/MMM-HomeConnect2/refresh_token.json", refreshToken);
+      fs.writeFileSync(
+        "./modules/MMM-HomeConnect2/refresh_token.json",
+        refreshToken
+      );
       moduleLog("info", "Refresh token updated");
       globalSession.refreshToken = refreshToken;
       // After init has completed (subscriptions established), refresh devices on token update.
       // During initial init (subscribed === false), skip to avoid double fetching.
-      if (this.subscribed) {
+      if (this.subscribed && this.deviceService) {
         moduleLog("info", "Token updated post-init - refreshing device list");
-        this.getDevices();
+        this.deviceService.getDevices(this.sendSocketNotification.bind(this));
       } else {
-        moduleLog("info", "Token updated during initialization - device fetch will run after init");
+        moduleLog(
+          "info",
+          "Token updated during initialization - device fetch will run after init"
+        );
       }
     });
   },
@@ -732,6 +542,14 @@ module.exports = NodeHelper.create({
         this.config.clientSecret,
         refreshToken
       );
+
+      // attach client to services
+      if (this.deviceService) {
+        this.deviceService.attachClient(this.hc);
+      }
+      if (this.programService) {
+        this.programService.attachClient(this.hc);
+      }
 
       const initTimeout = setTimeout(() => {
         moduleLog("error", "HomeConnect initialization timeout");
@@ -758,186 +576,6 @@ module.exports = NodeHelper.create({
     });
   },
 
-  fetchDeviceStatus(device) {
-    // Use client helper only; fallback raw command removed.
-    if (this.hc && typeof this.hc.getStatus === 'function') {
-      this.hc
-        .getStatus(device.haId)
-        .then((res) => {
-          if (res.success && res.data && Array.isArray(res.data.status)) {
-            res.data.status.forEach((event) => {
-              if (this.hc && typeof this.hc.applyEventToDevice === 'function') {
-                this.hc.applyEventToDevice(device, event);
-              }
-            });
-          }
-          this.broadcastDevices();
-        })
-        .catch((err) => moduleLog("error", `Status error for ${device.name}:`, err));
-      return;
-    }
-
-    // If the client wrapper is not available, report and skip.
-    moduleLog("error", `HomeConnect client missing getStatus wrapper - cannot fetch status for ${device.name}`);
-  },
-
-  fetchDeviceSettings(device) {
-    if (this.hc && typeof this.hc.getSettings === 'function') {
-      this.hc
-        .getSettings(device.haId)
-        .then((res) => {
-          if (res.success && res.data && Array.isArray(res.data.settings)) {
-            res.data.settings.forEach((event) => {
-              if (this.hc && typeof this.hc.applyEventToDevice === 'function') {
-                this.hc.applyEventToDevice(device, event);
-              }
-            });
-          }
-          this.broadcastDevices();
-        })
-        .catch((err) => moduleLog("error", `Settings error for ${device.name}:`, err));
-      return;
-    }
-
-    moduleLog("error", `HomeConnect client missing getSettings wrapper - cannot fetch settings for ${device.name}`);
-  },
-
-  processDevice(device, index) {
-    moduleLog("debug", `Processing device ${index + 1}: ${device.name} (${device.haId})`);
-    moduleLog("debug", `Raw connected flag for ${device.name}:`, device.connected);
-    this.devices.set(device.haId, device);
-
-    const connected = isDeviceConnected(device);
-    const appearsActive = deviceAppearsActive(device);
-
-    if (connected) {
-      moduleLog("info", `Device ${device.name} is connected - fetching status`);
-      this.fetchDeviceStatus(device);
-      this.fetchDeviceSettings(device);
-    } else if (appearsActive) {
-      // Fallback: device reports activity (remaining time/progress/operation state)
-      // even though the top-level connected flag is false. Fetch status/settings
-      // to refresh the device object and attempt to get runtime information.
-      moduleLog("info", `Device ${device.name} not marked connected but appears active - fetching status/settings as fallback`, { rawConnected: device.connected });
-      this.fetchDeviceStatus(device);
-      this.fetchDeviceSettings(device);
-    } else {
-      moduleLog("warn", `Device ${device.name} is not connected`);
-    }
-  },
-
-  subscribeToDeviceEvents() {
-    if (!this.subscribed) {
-      moduleLog("info", "Subscribing to device events...");
-      this.hc.subscribe("NOTIFY", (e) => {
-        this.deviceEvent(e);
-      });
-      this.hc.subscribe("STATUS", (e) => {
-        this.deviceEvent(e);
-      });
-      this.hc.subscribe("EVENT", (e) => {
-        this.deviceEvent(e);
-      });
-      this.subscribed = true;
-      moduleLog("info", "Event subscriptions established");
-    } else {
-      moduleLog("debug", "Already subscribed to device events - skipping duplicate subscription");
-    }
-  },
-
-  sortDevices() {
-    const array = [...this.devices.entries()],
-      sortedArray = array.sort((a, b) => (a[1].name > b[1].name ? 1 : -1));
-    this.devices = new Map(sortedArray);
-  },
-
-  handleGetDevicesSuccess(result) {
-    moduleLog(
-      "info",
-      `API response received - Found ${result.body.data.homeappliances.length} appliances`
-    );
-
-    if (result.body.data.homeappliances.length === 0) {
-      moduleLog("warn", "No appliances found - check Home Connect app");
-      this.broadcastToAllClients("INIT_STATUS", {
-        status: "no_devices",
-        message: "No devices found - check Home Connect app"
-      });
-    }
-
-    result.body.data.homeappliances.forEach((device, index) => {
-      this.processDevice(device, index);
-    });
-
-    this.subscribeToDeviceEvents();
-    this.sortDevices();
-
-    moduleLog("info", "Device processing complete - broadcasting to frontend");
-    this.broadcastDevices();
-
-    this.broadcastToAllClients("INIT_STATUS", {
-      status: "complete",
-      message: `${result.body.data.homeappliances.length} device(s) loaded`
-    });
-  },
-
-  handleGetDevicesError(error) {
-    moduleLog("error", "Failed to get devices:", error && error.stack ? error.stack : error);
-
-    this.broadcastToAllClients("INIT_STATUS", {
-      status: "device_error",
-      message: `Device error: ${error.message}`
-    });
-
-    if (error.message.includes("fetch") || error.message.includes("network")) {
-      moduleLog("info", "Network error detected - retrying in 30 seconds");
-      setTimeout(() => {
-        this.getDevices();
-      }, 30000);
-    }
-  },
-
-  getDevices() {
-    if (!this.hc) {
-      console.error("❌ HomeConnect not initialized - cannot get devices");
-      this.broadcastToAllClients("INIT_STATUS", {
-        status: "hc_not_ready",
-        message: "HomeConnect not ready"
-      });
-      return;
-    }
-
-    moduleLog("info", "Fetching devices from Home Connect API...");
-
-    this.broadcastToAllClients("INIT_STATUS", {
-      status: "fetching_devices",
-      message: "Fetching devices..."
-    });
-
-    // Require client wrapper; raw command fallback removed.
-    if (this.hc && typeof this.hc.getHomeAppliances === 'function') {
-      this.hc
-        .getHomeAppliances()
-        .then((res) => {
-          if (res && res.success && res.data) {
-            // shape into previous swagger-like result for compatibility
-            const fakeResult = { body: { data: res.data } };
-            this.handleGetDevicesSuccess(fakeResult);
-          } else {
-            const err = new Error(res && res.error ? res.error : 'Failed to fetch appliances');
-            err.statusCode = res && res.statusCode ? res.statusCode : null;
-            this.handleGetDevicesError(err);
-          }
-        })
-        .catch((err) => this.handleGetDevicesError(err));
-      return;
-    }
-
-    const err = new Error('HomeConnect client missing getHomeAppliances wrapper - cannot fetch devices');
-    moduleLog('error', err.message);
-    this.handleGetDevicesError(err);
-  },
-
   retryAuthentication() {
     moduleLog("info", "Manual authentication retry");
     globalSession.isAuthenticated = false;
@@ -949,9 +587,14 @@ module.exports = NodeHelper.create({
     this.configReceived = false;
     this.initializationAttempts = 0;
     this.hc = null;
-    this.devices.clear();
+    if (this.deviceService) {
+      this.deviceService.devices.clear();
+    }
     this.subscribed = false;
-    if (this.activeProgramManager && typeof this.activeProgramManager.clearAll === 'function') {
+    if (
+      this.activeProgramManager &&
+      typeof this.activeProgramManager.clearAll === "function"
+    ) {
       this.activeProgramManager.clearAll();
     }
 
@@ -966,100 +609,41 @@ module.exports = NodeHelper.create({
   },
 
   deviceEvent(data) {
-    const _self = this;
-    try {
-      const eventObj = JSON.parse(data.data);
-      eventObj.items.forEach((item) => {
-        if (item.uri) {
-          const haId = item.uri.split("/")[3];
-          if (_self.hc && typeof _self.hc.applyEventToDevice === 'function') {
-            _self.hc.applyEventToDevice(_self.devices.get(haId), item);
-          } else {
-            moduleLog('warn', 'No event parser available for device events; update homeconnect-api client');
-          }
-        }
-      });
-      _self.broadcastDevices();
-    } catch (error) {
-      moduleLog("error", "Error processing device event:", error);
-    }
+    if (!this.deviceService) return;
+    this.deviceService.deviceEvent(
+      data,
+      this.sendSocketNotification.bind(this)
+    );
   },
 
   broadcastDevices() {
-    moduleLog("debug", `Broadcasting ${this.devices.size} devices to ${globalSession.clientInstances.size} clients`);
-    globalSession.clientInstances.forEach(() => {
-      this.sendSocketNotification(
-        "MMM-HomeConnect_Update",
-        Array.from(this.devices.values())
-      );
-    });
+    if (!this.deviceService) return;
+    this.deviceService.broadcastDevices(this.sendSocketNotification.bind(this));
   },
 
   async fetchActiveProgramForDevice(haId, deviceName) {
-    const started = Date.now();
-    try {
-      moduleLog("debug", `Fetching active program for ${deviceName} (${haId})`);
-      // Prefer client wrapper if available
-      if (this.hc && typeof this.hc.getActiveProgram === 'function') {
-        const res = await this.hc.getActiveProgram(haId);
-        if (res.success) {
-          const durationMs = Date.now() - started;
-          moduleLog("debug", `Active program data received for ${deviceName} in ${durationMs}ms`);
-          if (durationMs > LONG_ACTIVE_PROGRAM_REQUEST_MS) {
-            moduleLog("warn", `Slow active program response for ${deviceName}: ${durationMs}ms`);
-          }
-          return { haId, success: true, data: res.data };
-        }
-        // No active program or non-fatal response
-        if (res.statusCode === 404) {
-          const durationMs = Date.now() - started;
-          moduleLog("debug", `No active program payload for ${deviceName} (status 404, ${durationMs}ms)`);
-          return { haId, success: false, error: "No active program" };
-        }
-        // propagate rate limit / other errors upwards where necessary
-        if (res.statusCode === 429) {
-          moduleLog("warn", `Rate limit hit for ${deviceName}`);
-          const err = new Error(res.error || 'rate limit');
-          err.statusCode = 429;
-          throw err;
-        }
-        const durationMs = Date.now() - started;
-        moduleLog("debug", `Active program request for ${deviceName} failed (${res.statusCode || 'n/a'}) in ${durationMs}ms`);
-        return { haId, success: false, error: res.error || 'Unknown error' };
-      }
-
-      // No raw command fallback: client wrapper required.
-      const err = new Error('HomeConnect client missing getActiveProgram wrapper');
-      moduleLog('error', err.message);
-      return { haId, success: false, error: err.message };
-    } catch (error) {
-      // Handle 404 - no active program running
-      if (error.statusCode === 404 || error.status === 404 || (error.message && error.message.includes("404"))) {
-        moduleLog("debug", `No active program for ${deviceName}`);
-        return { haId, success: false, error: "No active program" };
-      }
-
-      // Handle rate limiting (429)
-      if (error.statusCode === 429 || error.status === 429 || (error.message && (error.message.includes("429") || error.message.includes("rate limit")))) {
-        moduleLog("warn", `Rate limit hit for ${deviceName}`);
-        throw error; // Propagate to trigger backoff
-      }
-
-      const durationMs = Date.now() - started;
-      moduleLog("error", `Error fetching active program for ${deviceName} after ${durationMs}ms:`, error.message || error);
-      return { haId, success: false, error: error.message || "Unknown error" };
-    }
+    if (!this.programService)
+      return { haId, success: false, error: "ProgramService not available" };
+    return this.programService.fetchActiveProgramForDevice(haId, deviceName);
   },
 
   async fetchActiveProgramsForAllDevices(requestingInstanceId) {
-    const deviceArray = Array.from(this.devices.values());
+    if (!this.deviceService) {
+      moduleLog("debug", "DeviceService not available - cannot fetch programs");
+      return;
+    }
+
+    const deviceArray = Array.from(this.deviceService.devices.values());
 
     if (deviceArray.length === 0) {
       moduleLog("debug", "No devices to fetch active programs for");
       return;
     }
 
-    moduleLog("info", `Fetching active programs for ${deviceArray.length} device(s)`);
+    moduleLog(
+      "info",
+      `Fetching active programs for ${deviceArray.length} device(s)`
+    );
 
     this.broadcastToAllClients("INIT_STATUS", {
       status: "fetching_programs",
@@ -1082,13 +666,20 @@ module.exports = NodeHelper.create({
         const appearsActive = deviceAppearsActive(device);
         if (connected || appearsActive) {
           if (!connected && appearsActive) {
-            moduleLog("info", `Device ${device.name} not marked connected but appears active - using fallback to fetch program`, { rawConnected: device.connected });
+            moduleLog(
+              "info",
+              `Device ${device.name} not marked connected but appears active - using fallback to fetch program`,
+              { rawConnected: device.connected }
+            );
           }
           moduleLog(
             "debug",
             `Requesting active program ${results.length + 1}/${deviceArray.length} for ${device.name}`
           );
-          const result = await this.fetchActiveProgramForDevice(device.haId, device.name);
+          const result = await this.fetchActiveProgramForDevice(
+            device.haId,
+            device.name
+          );
           moduleLog("debug", `Active program response for ${device.name}:`, {
             success: result.success,
             hasData: !!(result.data && Object.keys(result.data).length),
@@ -1097,30 +688,43 @@ module.exports = NodeHelper.create({
           results.push(result);
 
           // Small delay between requests to avoid rate limiting
-          await new Promise(resolve => setTimeout(resolve, 500));
+          await new Promise((resolve) => setTimeout(resolve, 500));
         } else {
-          moduleLog("debug", `Skipping ${device.name} - not connected`, { rawConnected: device.connected });
+          moduleLog("debug", `Skipping ${device.name} - not connected`, {
+            rawConnected: device.connected
+          });
         }
       }
 
       // Process successful results
       const programData = {};
-      results.forEach(result => {
+      results.forEach((result) => {
         if (result.success && result.data) {
-          const payload = this.applyProgramResult(result);
+          const payload = this.programService
+            ? this.programService.applyProgramResult(result)
+            : null;
           if (payload) {
             programData[result.haId] = payload;
-            if (this.activeProgramManager && typeof this.activeProgramManager.clear === 'function') {
+            if (
+              this.activeProgramManager &&
+              typeof this.activeProgramManager.clear === "function"
+            ) {
               this.activeProgramManager.clear(result.haId);
             } else {
-              moduleLog("warn", `ActiveProgramManager missing - cannot clear retry for ${result.haId}`);
+              moduleLog(
+                "warn",
+                `ActiveProgramManager missing - cannot clear retry for ${result.haId}`
+              );
             }
           }
         } else if (result.error === "No active program") {
-          const device = this.devices.get(result.haId);
+          const device = this.deviceService.devices.get(result.haId);
           if (device) {
             const appearsActive = deviceAppearsActive(device);
-            moduleLog("debug", `Device ${device.name} reported no active program (appearsActive=${appearsActive})`);
+            moduleLog(
+              "debug",
+              `Device ${device.name} reported no active program (appearsActive=${appearsActive})`
+            );
             if (appearsActive) {
               retryCandidates.push(device);
             }
@@ -1135,89 +739,48 @@ module.exports = NodeHelper.create({
           "info",
           `Scheduling retries for ${retryCandidates.length} device(s) awaiting active program data`
         );
-        if (this.activeProgramManager && typeof this.activeProgramManager.schedule === 'function') {
-          this.activeProgramManager.schedule(retryCandidates, requestingInstanceId);
+        if (
+          this.activeProgramManager &&
+          typeof this.activeProgramManager.schedule === "function"
+        ) {
+          this.activeProgramManager.schedule(
+            retryCandidates,
+            requestingInstanceId
+          );
         } else {
-          moduleLog("error", "ActiveProgramManager not available - cannot schedule retries");
+          moduleLog(
+            "error",
+            "ActiveProgramManager not available - cannot schedule retries"
+          );
         }
       } else {
         moduleLog("debug", "No retry candidates detected for active programs");
       }
-
     } catch (error) {
       this.handleActiveProgramFetchError(error);
     }
   },
 
   handleActiveProgramFetchError(error) {
-    moduleLog("error", "Failed to fetch active programs:", error.message);
-
-    // Check if it's a rate limit error
-    if (error.statusCode === 429 || error.message?.includes("429") || error.message?.includes("rate limit")) {
-      // Implement exponential backoff: 2 minutes on first hit, doubles up to 10 minutes
-      const backoffMinutes = Math.min(2 * Math.pow(2, Math.floor(Math.random() * 3)), 10);
-      const backoffMs = backoffMinutes * 60 * 1000;
-
-      globalSession.rateLimitUntil = Date.now() + backoffMs;
-
-      moduleLog("warn", `Rate limit detected - backing off for ${backoffMinutes} minutes`);
-
-      this.broadcastToAllClients("INIT_STATUS", {
-        status: "device_error",
-        message: `Rate limit detected - wait ${backoffMinutes} minutes`,
-        rateLimitSeconds: backoffMinutes * 60
-      });
-
-      return;
-    }
-
-    // Generic error
-    this.broadcastToAllClients("INIT_STATUS", {
-      status: "device_error",
-      message: `Error loading programs: ${error.message}`
-    });
+    if (!this.programService) return;
+    this.programService.handleActiveProgramFetchError(
+      error,
+      this.broadcastToAllClients.bind(this)
+    );
   },
 
-
   applyProgramResult(result) {
-    const device = this.devices.get(result.haId);
-    if (!device || !result.data) {
-      return null;
-    }
-
-    if (result.data.options) {
-      moduleLog(
-        "debug",
-        `Applying ${result.data.options.length} option update(s) for ${device.name}`
-      );
-      result.data.options.forEach(option => {
-        if (this.hc && typeof this.hc.applyEventToDevice === 'function') {
-          this.hc.applyEventToDevice(device, option);
-        }
-      });
-    }
-
-    return {
-      name: device.name,
-      program: result.data
-    };
+    if (!this.programService) return null;
+    return this.programService.applyProgramResult(result);
   },
 
   broadcastProgramData(programData, requestingInstanceId) {
-    const deviceNames = Object.values(programData).map((item) => item.name);
-    moduleLog("info", `Active programs fetched: ${deviceNames.length} with data`);
-    moduleLog("debug", "Active program payload", {
-      devicesWithProgram: deviceNames
-    });
-
-    // Broadcast updated device data so RemainingProgramTime/Progress changes are reflected everywhere
-    this.broadcastDevices();
-
-    this.broadcastToAllClients("ACTIVE_PROGRAMS_DATA", {
-      programs: programData,
-      timestamp: Date.now(),
-      instanceId: requestingInstanceId
-    });
+    if (!this.programService) return;
+    this.programService.broadcastProgramData(
+      programData,
+      requestingInstanceId,
+      this.broadcastDevices.bind(this),
+      this.broadcastToAllClients.bind(this)
+    );
   }
-
 });
