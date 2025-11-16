@@ -15,7 +15,7 @@ if (typeof EventSource === "undefined") {
       );
     }
   } catch (error) {
-      console.warn(`EventSource polyfill not available. Run: npm install eventsource. ${error.message}`);
+    console.warn(`EventSource polyfill not available. Run: npm install eventsource. ${error.message}`);
   }
 }
 
@@ -400,11 +400,19 @@ class HomeConnect extends EventEmitter {
       case "BSH.Common.Option.ProgramProgress":
         device.ProgramProgress = value;
         break;
-      case "BSH.Common.Status.OperationState":
-        if (value === "BSH.Common.EnumType.OperationState.Finished") {
+      case "BSH.Common.Status.OperationState": {
+        const stateValue =
+          typeof value === "string"
+            ? value
+            : value && typeof value.value === "string"
+              ? value.value
+              : value;
+        device.OperationState = stateValue;
+        if (stateValue === "BSH.Common.EnumType.OperationState.Finished") {
           device.RemainingProgramTime = 0;
         }
         break;
+      }
       case "Cooking.Common.Setting.Lighting":
         device.Lighting = value;
         break;
