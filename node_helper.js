@@ -24,6 +24,81 @@ const QRCode = require("qrcode"),
 // Active-program request dedupe window (ms)
 const ACTIVE_PROGRAM_REQUEST_TTL = 10000; // 10s
 let lastActiveProgramsRequest = { instanceId: null, timestamp: 0 };
+const ACTIVE_PROGRAM_RETRY_DELAY_MS = 5000;
+const ACTIVE_PROGRAM_MAX_RETRIES = 3;
+const LONG_ACTIVE_PROGRAM_REQUEST_MS = 4000;
+
+function getNumericValue(optionValue) {
+  if (optionValue === null || optionValue === undefined) {
+    return null;
+  }
+  if (typeof optionValue === "number") {
+    return optionValue;
+  }
+  if (typeof optionValue === "object") {
+    if (typeof optionValue.value === "number") {
+      return optionValue.value;
+    }
+    if (typeof optionValue.displayValue === "number") {
+      return optionValue.displayValue;
+    }
+  }
+  const parsed = Number(optionValue);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getStringValue(optionValue) {
+  if (optionValue === null || optionValue === undefined) {
+    return null;
+  }
+  if (typeof optionValue === "string") {
+    return optionValue;
+  }
+  if (typeof optionValue === "object") {
+    if (typeof optionValue.value === "string") {
+      return optionValue.value;
+    }
+    if (typeof optionValue.displayValue === "string") {
+      return optionValue.displayValue;
+    }
+  }
+  return null;
+}
+
+function deviceAppearsActive(device) {
+  if (!device) return false;
+  const remainingSeconds = getNumericValue(device.RemainingProgramTime);
+  if (typeof remainingSeconds === "number" && remainingSeconds > 0) {
+    return true;
+  }
+  const progressValue = getNumericValue(device.ProgramProgress);
+  if (typeof progressValue === "number" && progressValue > 0 && progressValue < 100) {
+    return true;
+  }
+  const operationState = getStringValue(device.OperationState);
+  if (operationState && /(Run|Active|DelayedStart)/i.test(operationState)) {
+    return true;
+  }
+  return false;
+}
+
+function isDeviceConnected(device) {
+  if (!device) return false;
+  const v = device.connected;
+  // Accept boolean true
+  if (v === true) return true;
+  // Accept common string/enum shapes
+  if (typeof v === "string") {
+    const s = v.toLowerCase();
+    if (s === "true" || s === "connected" || s === "online" || s === "available") return true;
+  }
+  // Accept numeric truthy values (1, non-zero)
+  if (typeof v === "number") {
+    return v !== 0;
+  }
+  // Fallback: treat any truthy value as connected
+  return !!v;
+}
 
 // Module-level log level (updated when config is received)
 let moduleLogLevel = "none";
@@ -286,6 +361,7 @@ module.exports = NodeHelper.create({
   maxInitAttempts: 3,
   instanceId: null,
   subscribed: false,
+  activeProgramRetryTimers: new Map(),
 
   init() {
     moduleLog("info", "init module helper: MMM-HomeConnect (session-based)");
@@ -297,6 +373,12 @@ module.exports = NodeHelper.create({
 
   stop() {
     moduleLog("info", `Stopping module helper: ${this.name}`);
+    this.activeProgramRetryTimers.forEach((state) => {
+      if (state && state.timeoutId) {
+        clearTimeout(state.timeoutId);
+      }
+    });
+    this.activeProgramRetryTimers.clear();
   },
 
   handleConfigNotificationFirstTime() {
@@ -439,7 +521,11 @@ module.exports = NodeHelper.create({
     ) {
       moduleLog(
         "info",
-        `Ignoring GET_ACTIVE_PROGRAMS from ${requester} - recently served ${lastActiveProgramsRequest.instanceId}`
+        `Ignoring GET_ACTIVE_PROGRAMS from ${requester} - recently served ${lastActiveProgramsRequest.instanceId}`,
+        {
+          lastRequestAgeMs: now - lastActiveProgramsRequest.timestamp,
+          dedupeWindowMs: ACTIVE_PROGRAM_REQUEST_TTL
+        }
       );
       return;
     }
@@ -447,6 +533,7 @@ module.exports = NodeHelper.create({
     // Record this request as the most-recent
     if (requester) {
       lastActiveProgramsRequest = { instanceId: requester, timestamp: now };
+      moduleLog("debug", `Recorded active program request for ${requester}`);
     }
 
     // Check if we're currently rate limited
@@ -463,10 +550,26 @@ module.exports = NodeHelper.create({
     }
 
     // Check minimum interval between requests
-    if (now - globalSession.lastActiveProgramFetch < globalSession.MIN_ACTIVE_PROGRAM_INTERVAL) {
-      moduleLog("warn", "Throttling active program requests");
+    const sinceLastFetch = now - globalSession.lastActiveProgramFetch;
+    if (sinceLastFetch < globalSession.MIN_ACTIVE_PROGRAM_INTERVAL) {
+      const waitMs = globalSession.MIN_ACTIVE_PROGRAM_INTERVAL - sinceLastFetch;
+      moduleLog(
+        "warn",
+        "Throttling active program requests",
+        {
+          requester: requester || "unknown",
+          sinceLastFetchMs: sinceLastFetch,
+          minIntervalMs: globalSession.MIN_ACTIVE_PROGRAM_INTERVAL,
+          waitMs
+        }
+      );
       return;
     }
+
+    moduleLog("debug", "Active program request accepted", {
+      requester: requester || "unknown",
+      deviceCount: this.devices.size
+    });
 
     globalSession.lastActiveProgramFetch = now;
     // Pass requester instanceId so we can scope the response
@@ -788,10 +891,21 @@ module.exports = NodeHelper.create({
 
   processDevice(device, index) {
     moduleLog("debug", `Processing device ${index + 1}: ${device.name} (${device.haId})`);
+    moduleLog("debug", `Raw connected flag for ${device.name}:`, device.connected);
     this.devices.set(device.haId, device);
 
-    if (device.connected === true) {
+    const connected = isDeviceConnected(device);
+    const appearsActive = deviceAppearsActive(device);
+
+    if (connected) {
       moduleLog("info", `Device ${device.name} is connected - fetching status`);
+      this.fetchDeviceStatus(device);
+      this.fetchDeviceSettings(device);
+    } else if (appearsActive) {
+      // Fallback: device reports activity (remaining time/progress/operation state)
+      // even though the top-level connected flag is false. Fetch status/settings
+      // to refresh the device object and attempt to get runtime information.
+      moduleLog("info", `Device ${device.name} not marked connected but appears active - fetching status/settings as fallback`, { rawConnected: device.connected });
       this.fetchDeviceStatus(device);
       this.fetchDeviceSettings(device);
     } else {
@@ -924,6 +1038,12 @@ module.exports = NodeHelper.create({
     this.hc = null;
     this.devices.clear();
     this.subscribed = false;
+    this.activeProgramRetryTimers.forEach((state) => {
+      if (state && state.timeoutId) {
+        clearTimeout(state.timeoutId);
+      }
+    });
+    this.activeProgramRetryTimers.clear();
 
     if (fs.existsSync("./modules/MMM-HomeConnect2/refresh_token.json")) {
       fs.unlinkSync("./modules/MMM-HomeConnect2/refresh_token.json");
@@ -966,18 +1086,24 @@ module.exports = NodeHelper.create({
   },
 
   async fetchActiveProgramForDevice(haId, deviceName) {
+    const started = Date.now();
     try {
       moduleLog("debug", `Fetching active program for ${deviceName} (${haId})`);
       // Prefer client wrapper if available
       if (this.hc && typeof this.hc.getActiveProgram === 'function') {
         const res = await this.hc.getActiveProgram(haId);
         if (res.success) {
-          moduleLog("debug", `Active program data received for ${deviceName}`);
+          const durationMs = Date.now() - started;
+          moduleLog("debug", `Active program data received for ${deviceName} in ${durationMs}ms`);
+          if (durationMs > LONG_ACTIVE_PROGRAM_REQUEST_MS) {
+            moduleLog("warn", `Slow active program response for ${deviceName}: ${durationMs}ms`);
+          }
           return { haId, success: true, data: res.data };
         }
         // No active program or non-fatal response
         if (res.statusCode === 404) {
-          moduleLog("debug", `No active program for ${deviceName}`);
+          const durationMs = Date.now() - started;
+          moduleLog("debug", `No active program payload for ${deviceName} (status 404, ${durationMs}ms)`);
           return { haId, success: false, error: "No active program" };
         }
         // propagate rate limit / other errors upwards where necessary
@@ -987,6 +1113,8 @@ module.exports = NodeHelper.create({
           err.statusCode = 429;
           throw err;
         }
+        const durationMs = Date.now() - started;
+        moduleLog("debug", `Active program request for ${deviceName} failed (${res.statusCode || 'n/a'}) in ${durationMs}ms`);
         return { haId, success: false, error: res.error || 'Unknown error' };
       }
 
@@ -1007,7 +1135,8 @@ module.exports = NodeHelper.create({
         throw error; // Propagate to trigger backoff
       }
 
-      moduleLog("error", `Error fetching active program for ${deviceName}:`, error.message || error);
+      const durationMs = Date.now() - started;
+      moduleLog("error", `Error fetching active program for ${deviceName} after ${durationMs}ms:`, error.message || error);
       return { haId, success: false, error: error.message || "Unknown error" };
     }
   },
@@ -1030,15 +1159,37 @@ module.exports = NodeHelper.create({
 
     try {
       const results = [];
+      const retryCandidates = [];
 
       // Fetch sequentially to avoid overwhelming the API
       for (const device of deviceArray) {
-        if (device.connected === true) {
+        // Fallback: if device is not connected according to the API but appears
+        // active (e.g. reports RemainingProgramTime/ProgramProgress/OperationState),
+        // still attempt to fetch the active program. This mirrors the iOS app
+        // behavior where program state can take a short while to reflect in
+        // the /homeappliances list connected flag.
+        const connected = isDeviceConnected(device);
+        const appearsActive = deviceAppearsActive(device);
+        if (connected || appearsActive) {
+          if (!connected && appearsActive) {
+            moduleLog("info", `Device ${device.name} not marked connected but appears active - using fallback to fetch program`, { rawConnected: device.connected });
+          }
+          moduleLog(
+            "debug",
+            `Requesting active program ${results.length + 1}/${deviceArray.length} for ${device.name}`
+          );
           const result = await this.fetchActiveProgramForDevice(device.haId, device.name);
+          moduleLog("debug", `Active program response for ${device.name}:`, {
+            success: result.success,
+            hasData: !!(result.data && Object.keys(result.data).length),
+            error: result.error || null
+          });
           results.push(result);
 
           // Small delay between requests to avoid rate limiting
           await new Promise(resolve => setTimeout(resolve, 500));
+        } else {
+          moduleLog("debug", `Skipping ${device.name} - not connected`, { rawConnected: device.connected });
         }
       }
 
@@ -1046,35 +1197,34 @@ module.exports = NodeHelper.create({
       const programData = {};
       results.forEach(result => {
         if (result.success && result.data) {
+          const payload = this.applyProgramResult(result);
+          if (payload) {
+            programData[result.haId] = payload;
+            this.clearActiveProgramRetry(result.haId);
+          }
+        } else if (result.error === "No active program") {
           const device = this.devices.get(result.haId);
           if (device) {
-            // Extract relevant options
-            if (result.data.options) {
-              result.data.options.forEach(option => {
-                if (this.hc && typeof this.hc.applyEventToDevice === 'function') {
-                  this.hc.applyEventToDevice(device, option);
-                }
-              });
+            const appearsActive = deviceAppearsActive(device);
+            moduleLog("debug", `Device ${device.name} reported no active program (appearsActive=${appearsActive})`);
+            if (appearsActive) {
+              retryCandidates.push(device);
             }
-            programData[result.haId] = {
-              name: device.name,
-              program: result.data
-            };
           }
         }
       });
 
-      moduleLog("info", `Active programs fetched: ${Object.keys(programData).length} with data`);
+      this.broadcastProgramData(programData, requestingInstanceId);
 
-      // Broadcast updated device data
-      this.broadcastDevices();
-
-      // Send program-specific data only to the requesting instance (if provided)
-      this.broadcastToAllClients("ACTIVE_PROGRAMS_DATA", {
-        programs: programData,
-        timestamp: Date.now(),
-        instanceId: requestingInstanceId
-      });
+      if (retryCandidates.length) {
+        moduleLog(
+          "info",
+          `Scheduling retries for ${retryCandidates.length} device(s) awaiting active program data`
+        );
+        this.queueActiveProgramRetries(retryCandidates, requestingInstanceId);
+      } else {
+        moduleLog("debug", "No retry candidates detected for active programs");
+      }
 
     } catch (error) {
       this.handleActiveProgramFetchError(error);
@@ -1109,5 +1259,127 @@ module.exports = NodeHelper.create({
       message: `Error loading programs: ${error.message}`
     });
   },
+
+  clearActiveProgramRetry(haId) {
+    const retryState = this.activeProgramRetryTimers.get(haId);
+    if (retryState && retryState.timeoutId) {
+      clearTimeout(retryState.timeoutId);
+    }
+    this.activeProgramRetryTimers.delete(haId);
+  },
+
+  queueActiveProgramRetries(devices, requestingInstanceId) {
+    devices.forEach((device) => {
+      if (!device || !device.haId) {
+        return;
+      }
+      const currentState = this.activeProgramRetryTimers.get(device.haId);
+      const nextAttempt = (currentState?.attempt || 0) + 1;
+      if (nextAttempt > ACTIVE_PROGRAM_MAX_RETRIES) {
+        moduleLog("debug", `Max retry attempts reached for ${device.name}`);
+        this.activeProgramRetryTimers.delete(device.haId);
+        return;
+      }
+      if (currentState && currentState.timeoutId) {
+        moduleLog("debug", `Retry already scheduled for ${device.name} (attempt ${currentState.attempt})`);
+        return;
+      }
+      moduleLog(
+        "info",
+        `Retrying active program for ${device.name} in ${ACTIVE_PROGRAM_RETRY_DELAY_MS}ms (attempt ${nextAttempt}/${ACTIVE_PROGRAM_MAX_RETRIES})`
+      );
+      const timeoutId = setTimeout(() => {
+        this.executeActiveProgramRetry(device, requestingInstanceId, nextAttempt);
+      }, ACTIVE_PROGRAM_RETRY_DELAY_MS);
+      this.activeProgramRetryTimers.set(device.haId, {
+        attempt: nextAttempt,
+        timeoutId,
+        instanceId: requestingInstanceId
+      });
+    });
+  },
+
+  async executeActiveProgramRetry(device, requestingInstanceId, attempt) {
+    if (!device) {
+      return;
+    }
+    this.activeProgramRetryTimers.set(device.haId, {
+      attempt,
+      timeoutId: null,
+      instanceId: requestingInstanceId
+    });
+
+    try {
+      moduleLog(
+        "debug",
+        `Executing active program retry for ${device.name} (attempt ${attempt}/${ACTIVE_PROGRAM_MAX_RETRIES})`
+      );
+      const result = await this.fetchActiveProgramForDevice(device.haId, device.name);
+      moduleLog("debug", `Retry response for ${device.name}:`, {
+        success: result.success,
+        error: result.error || null
+      });
+
+      if (result.success && result.data) {
+        this.clearActiveProgramRetry(device.haId);
+        const payload = this.applyProgramResult(result);
+        if (payload) {
+          this.broadcastProgramData({ [result.haId]: payload }, requestingInstanceId);
+        }
+        return;
+      }
+
+      if (attempt < ACTIVE_PROGRAM_MAX_RETRIES && deviceAppearsActive(device)) {
+        this.queueActiveProgramRetries([device], requestingInstanceId);
+        return;
+      }
+
+      this.clearActiveProgramRetry(device.haId);
+    } catch (error) {
+      moduleLog("error", `Retry fetch failed for ${device.name}:`, error.message || error);
+      this.clearActiveProgramRetry(device.haId);
+    }
+  },
+
+  applyProgramResult(result) {
+    const device = this.devices.get(result.haId);
+    if (!device || !result.data) {
+      return null;
+    }
+
+    if (result.data.options) {
+      moduleLog(
+        "debug",
+        `Applying ${result.data.options.length} option update(s) for ${device.name}`
+      );
+      result.data.options.forEach(option => {
+        if (this.hc && typeof this.hc.applyEventToDevice === 'function') {
+          this.hc.applyEventToDevice(device, option);
+        }
+      });
+    }
+
+    return {
+      name: device.name,
+      program: result.data
+    };
+  },
+
+  broadcastProgramData(programData, requestingInstanceId) {
+    const deviceNames = Object.values(programData).map((item) => item.name);
+    moduleLog("info", `Active programs fetched: ${deviceNames.length} with data`);
+    moduleLog("debug", "Active program payload", {
+      devicesWithProgram: deviceNames
+    });
+
+    // Broadcast updated device data so RemainingProgramTime/Progress changes are reflected everywhere
+    this.broadcastDevices();
+
+    this.broadcastToAllClients("ACTIVE_PROGRAMS_DATA", {
+      programs: programData,
+      timestamp: Date.now(),
+      instanceId: requestingInstanceId
+    });
+  }
 
 });
