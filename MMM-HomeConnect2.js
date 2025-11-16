@@ -45,7 +45,8 @@ Module.register("MMM-HomeConnect2", {
   },
 
   getScripts() {
-    return [];
+    // Use full module-relative path so the MagicMirror loader can find the file
+    return ["modules/MMM-HomeConnect2/lib/device-utils-client.js"];
   },
 
   getStyles() {
@@ -166,43 +167,21 @@ Module.register("MMM-HomeConnect2", {
     const _self = this;
 
     function parseRemainingSeconds(device) {
-      const remCandidates = [
-        device.RemainingProgramTime,
-        device.remainingProgramTime,
-        device.remaining_time,
-        device.remaining,
-        device["BSH.Common.Status.RemainingProgramTime"],
-        device["BSH.Common.Option.RemainingProgramTime"]
-      ];
-      for (const v of remCandidates) {
-        if (v === undefined || v === null) continue;
-        if (typeof v === "number" && !Number.isNaN(v)) return v;
-        if (typeof v === "string") {
-          const n = parseInt(v, 10);
-          if (!Number.isNaN(n)) return n;
-          // ISO8601 PT..H..M..S
-          const m = v.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
-          if (m) {
-            return (
-              (parseInt(m[1] || "0", 10) * 3600) +
-              (parseInt(m[2] || "0", 10) * 60) +
-              parseInt(m[3] || "0", 10)
-            );
-          }
+      try {
+        if (window && window.HomeConnectDeviceUtils && typeof window.HomeConnectDeviceUtils.parseRemainingSeconds === 'function') {
+          return window.HomeConnectDeviceUtils.parseRemainingSeconds(device);
         }
-      }
+      } catch (e) { }
       return 0;
     }
 
     function parseProgress(device) {
-      return (
-        device.ProgramProgress ??
-        device.programProgress ??
-        device.program_progress ??
-        device["BSH.Common.Option.ProgramProgress"] ??
-        device["BSH.Common.Status.ProgramProgress"] ??
-        undefined
-      );
+      try {
+        if (window && window.HomeConnectDeviceUtils && typeof window.HomeConnectDeviceUtils.parseProgress === 'function') {
+          return window.HomeConnectDeviceUtils.parseProgress(device);
+        }
+      } catch (e) { }
+      return undefined;
     }
 
     function formatDuration(sec) {

@@ -1,5 +1,6 @@
 let HomeConnect = null;
 const fs = require("fs");
+const ActiveProgramManager = require("./lib/active-program-manager");
 const NodeHelper = require("node_helper"),
   // Use built-in fetch when available
   fetch =
@@ -28,107 +29,8 @@ const ACTIVE_PROGRAM_RETRY_DELAY_MS = 5000;
 const ACTIVE_PROGRAM_MAX_RETRIES = 3;
 const LONG_ACTIVE_PROGRAM_REQUEST_MS = 4000;
 
-function getNumericValue(optionValue) {
-  if (optionValue === null || optionValue === undefined) {
-    return null;
-  }
-  if (typeof optionValue === "number") {
-    return optionValue;
-  }
-  if (typeof optionValue === "object") {
-    if (typeof optionValue.value === "number") {
-      return optionValue.value;
-    }
-    if (typeof optionValue.displayValue === "number") {
-      return optionValue.displayValue;
-    }
-  }
-  const parsed = Number(optionValue);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function getStringValue(optionValue) {
-  if (optionValue === null || optionValue === undefined) {
-    return null;
-  }
-  if (typeof optionValue === "string") {
-    return optionValue;
-  }
-  if (typeof optionValue === "object") {
-    if (typeof optionValue.value === "string") {
-      return optionValue.value;
-    }
-    if (typeof optionValue.displayValue === "string") {
-      return optionValue.displayValue;
-    }
-  }
-  return null;
-}
-
-function deviceAppearsActive(device) {
-  if (!device) return false;
-  const remainingSeconds = getNumericValue(device.RemainingProgramTime);
-  if (typeof remainingSeconds === "number" && remainingSeconds > 0) {
-    return true;
-  }
-  const progressValue = getNumericValue(device.ProgramProgress);
-  if (typeof progressValue === "number" && progressValue > 0 && progressValue < 100) {
-    return true;
-  }
-  const operationState = getStringValue(device.OperationState);
-  if (operationState && /(Run|Active|DelayedStart)/i.test(operationState)) {
-    return true;
-  }
-  return false;
-}
-
-function isDeviceConnected(device) {
-  if (!device) return false;
-  const v = device.connected;
-  // Accept boolean true
-  if (v === true) return true;
-  // Accept common string/enum shapes
-  if (typeof v === "string") {
-    const s = v.toLowerCase();
-    if (s === "true" || s === "connected" || s === "online" || s === "available") return true;
-  }
-  // Accept numeric truthy values (1, non-zero)
-  if (typeof v === "number") {
-    return v !== 0;
-  }
-  // Fallback: treat any truthy value as connected
-  return !!v;
-}
-
-// Module-level log level (updated when config is received)
-let moduleLogLevel = "none";
-
-function setModuleLogLevel(level) {
-  if (!level) return;
-  moduleLogLevel = String(level).toLowerCase();
-}
-
-function moduleLog(level, ...args) {
-  const levels = { debug: 0, info: 1, warn: 2, error: 3, none: 4 };
-  const cfg = moduleLogLevel in levels ? moduleLogLevel : "none";
-  const lvl = level in levels ? level : "info";
-  if (levels[lvl] < levels[cfg]) return; // skip if below configured level
-  const prefix = "[MMM-HomeConnect]";
-  try {
-    if (lvl === "debug") {
-      if (typeof console.debug === "function") console.debug(prefix, ...args);
-      else console.log(prefix, ...args);
-    } else if (lvl === "info") {
-      console.log(prefix, ...args);
-    } else if (lvl === "warn") {
-      console.warn(prefix, ...args);
-    } else {
-      console.error(prefix, ...args);
-    }
-  } catch (error) {
-    console.log("Error in moduleLog:", error);
-  }
-}
+const { getNumericValue, getStringValue, deviceAppearsActive, isDeviceConnected } = require("./lib/device-utils");
+const { moduleLog, setModuleLogLevel } = require("./lib/logger");
 
 async function initiateDeviceFlow(clientId) {
   try {
@@ -361,10 +263,24 @@ module.exports = NodeHelper.create({
   maxInitAttempts: 3,
   instanceId: null,
   subscribed: false,
-  activeProgramRetryTimers: new Map(),
+  activeProgramManager: null,
 
   init() {
     moduleLog("info", "init module helper: MMM-HomeConnect (session-based)");
+    // Instantiate the ActiveProgramManager for retry scheduling
+    try {
+      this.activeProgramManager = new ActiveProgramManager({
+        fetchFn: this.fetchActiveProgramForDevice.bind(this),
+        broadcastFn: this.broadcastProgramData.bind(this),
+        logger: moduleLog,
+        maxRetries: ACTIVE_PROGRAM_MAX_RETRIES,
+        retryDelayMs: ACTIVE_PROGRAM_RETRY_DELAY_MS
+      });
+      moduleLog("debug", "ActiveProgramManager initialized");
+    } catch (err) {
+      moduleLog("error", "Failed to initialize ActiveProgramManager:", err);
+      this.activeProgramManager = null;
+    }
   },
 
   start() {
@@ -373,12 +289,9 @@ module.exports = NodeHelper.create({
 
   stop() {
     moduleLog("info", `Stopping module helper: ${this.name}`);
-    this.activeProgramRetryTimers.forEach((state) => {
-      if (state && state.timeoutId) {
-        clearTimeout(state.timeoutId);
-      }
-    });
-    this.activeProgramRetryTimers.clear();
+    if (this.activeProgramManager && typeof this.activeProgramManager.clearAll === 'function') {
+      this.activeProgramManager.clearAll();
+    }
   },
 
   handleConfigNotificationFirstTime() {
@@ -812,7 +725,7 @@ module.exports = NodeHelper.create({
     return new Promise((resolve, reject) => {
       moduleLog("info", "Initializing HomeConnect with token...");
       if (!HomeConnect) {
-        HomeConnect = require("./home-connect-js.js");
+        HomeConnect = require("./lib/homeconnect-api.js");
       }
       this.hc = new HomeConnect(
         this.config.clientId,
@@ -1038,12 +951,9 @@ module.exports = NodeHelper.create({
     this.hc = null;
     this.devices.clear();
     this.subscribed = false;
-    this.activeProgramRetryTimers.forEach((state) => {
-      if (state && state.timeoutId) {
-        clearTimeout(state.timeoutId);
-      }
-    });
-    this.activeProgramRetryTimers.clear();
+    if (this.activeProgramManager && typeof this.activeProgramManager.clearAll === 'function') {
+      this.activeProgramManager.clearAll();
+    }
 
     if (fs.existsSync("./modules/MMM-HomeConnect2/refresh_token.json")) {
       fs.unlinkSync("./modules/MMM-HomeConnect2/refresh_token.json");
@@ -1065,7 +975,7 @@ module.exports = NodeHelper.create({
           if (_self.hc && typeof _self.hc.applyEventToDevice === 'function') {
             _self.hc.applyEventToDevice(_self.devices.get(haId), item);
           } else {
-            moduleLog('warn', 'No event parser available for device events; update home-connect-js client');
+            moduleLog('warn', 'No event parser available for device events; update homeconnect-api client');
           }
         }
       });
@@ -1200,7 +1110,11 @@ module.exports = NodeHelper.create({
           const payload = this.applyProgramResult(result);
           if (payload) {
             programData[result.haId] = payload;
-            this.clearActiveProgramRetry(result.haId);
+            if (this.activeProgramManager && typeof this.activeProgramManager.clear === 'function') {
+              this.activeProgramManager.clear(result.haId);
+            } else {
+              moduleLog("warn", `ActiveProgramManager missing - cannot clear retry for ${result.haId}`);
+            }
           }
         } else if (result.error === "No active program") {
           const device = this.devices.get(result.haId);
@@ -1221,7 +1135,11 @@ module.exports = NodeHelper.create({
           "info",
           `Scheduling retries for ${retryCandidates.length} device(s) awaiting active program data`
         );
-        this.queueActiveProgramRetries(retryCandidates, requestingInstanceId);
+        if (this.activeProgramManager && typeof this.activeProgramManager.schedule === 'function') {
+          this.activeProgramManager.schedule(retryCandidates, requestingInstanceId);
+        } else {
+          moduleLog("error", "ActiveProgramManager not available - cannot schedule retries");
+        }
       } else {
         moduleLog("debug", "No retry candidates detected for active programs");
       }
@@ -1260,86 +1178,6 @@ module.exports = NodeHelper.create({
     });
   },
 
-  clearActiveProgramRetry(haId) {
-    const retryState = this.activeProgramRetryTimers.get(haId);
-    if (retryState && retryState.timeoutId) {
-      clearTimeout(retryState.timeoutId);
-    }
-    this.activeProgramRetryTimers.delete(haId);
-  },
-
-  queueActiveProgramRetries(devices, requestingInstanceId) {
-    devices.forEach((device) => {
-      if (!device || !device.haId) {
-        return;
-      }
-      const currentState = this.activeProgramRetryTimers.get(device.haId);
-      const nextAttempt = (currentState?.attempt || 0) + 1;
-      if (nextAttempt > ACTIVE_PROGRAM_MAX_RETRIES) {
-        moduleLog("debug", `Max retry attempts reached for ${device.name}`);
-        this.activeProgramRetryTimers.delete(device.haId);
-        return;
-      }
-      if (currentState && currentState.timeoutId) {
-        moduleLog("debug", `Retry already scheduled for ${device.name} (attempt ${currentState.attempt})`);
-        return;
-      }
-      moduleLog(
-        "info",
-        `Retrying active program for ${device.name} in ${ACTIVE_PROGRAM_RETRY_DELAY_MS}ms (attempt ${nextAttempt}/${ACTIVE_PROGRAM_MAX_RETRIES})`
-      );
-      const timeoutId = setTimeout(() => {
-        this.executeActiveProgramRetry(device, requestingInstanceId, nextAttempt);
-      }, ACTIVE_PROGRAM_RETRY_DELAY_MS);
-      this.activeProgramRetryTimers.set(device.haId, {
-        attempt: nextAttempt,
-        timeoutId,
-        instanceId: requestingInstanceId
-      });
-    });
-  },
-
-  async executeActiveProgramRetry(device, requestingInstanceId, attempt) {
-    if (!device) {
-      return;
-    }
-    this.activeProgramRetryTimers.set(device.haId, {
-      attempt,
-      timeoutId: null,
-      instanceId: requestingInstanceId
-    });
-
-    try {
-      moduleLog(
-        "debug",
-        `Executing active program retry for ${device.name} (attempt ${attempt}/${ACTIVE_PROGRAM_MAX_RETRIES})`
-      );
-      const result = await this.fetchActiveProgramForDevice(device.haId, device.name);
-      moduleLog("debug", `Retry response for ${device.name}:`, {
-        success: result.success,
-        error: result.error || null
-      });
-
-      if (result.success && result.data) {
-        this.clearActiveProgramRetry(device.haId);
-        const payload = this.applyProgramResult(result);
-        if (payload) {
-          this.broadcastProgramData({ [result.haId]: payload }, requestingInstanceId);
-        }
-        return;
-      }
-
-      if (attempt < ACTIVE_PROGRAM_MAX_RETRIES && deviceAppearsActive(device)) {
-        this.queueActiveProgramRetries([device], requestingInstanceId);
-        return;
-      }
-
-      this.clearActiveProgramRetry(device.haId);
-    } catch (error) {
-      moduleLog("error", `Retry fetch failed for ${device.name}:`, error.message || error);
-      this.clearActiveProgramRetry(device.haId);
-    }
-  },
 
   applyProgramResult(result) {
     const device = this.devices.get(result.haId);
