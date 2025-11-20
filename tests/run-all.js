@@ -7,33 +7,7 @@ const path = require("path");
 
 function runNode(file) {
     const abs = path.join(__dirname, file);
-    const result = spawnSync(process.execPath, [abs], {
-        stdio: "inherit"
-    });
-    if (result.status !== 0) {
-        // Cleanup: close any EventSource connections and cancel token refresh timeout
-        try {
-            if (hc.tokenRefreshTimeout) {
-                clearTimeout(hc.tokenRefreshTimeout);
-                hc.tokenRefreshTimeout = null;
-            }
-            if (hc.eventSource && typeof hc.eventSource.close === 'function') {
-                try { hc.eventSource.close(); } catch (e) { }
-                hc.eventSource = null;
-            }
-            if (hc.eventSources && typeof hc.eventSources === 'object') {
-                for (const k of Object.keys(hc.eventSources)) {
-                    try {
-                        const es = hc.eventSources[k];
-                        if (es && typeof es.close === 'function') es.close();
-                    } catch (e) { }
-                }
-                hc.eventSources = {};
-            }
-        } catch (cleanupErr) {
-            console.warn('Live smoke test cleanup error', cleanupErr && cleanupErr.message ? cleanupErr.message : cleanupErr);
-        }
-    }
+    spawnSync(process.execPath, [abs], { stdio: "inherit" });
 }
 
 function runUnitTests() {
@@ -66,11 +40,10 @@ async function runLiveSmokeTest() {
             } else if (parsed && typeof parsed === "object" && parsed.refresh_token) {
                 tokenValue = parsed.refresh_token;
             }
-        } catch (jsonErr) {
-            // not JSON, treat as plain token
+        } catch {
             tokenValue = raw.trim();
         }
-    } catch (readErr) {
+    } catch {
         console.log("Could not read refresh_token.json – skipping live test.");
         return;
     }
@@ -113,7 +86,7 @@ async function runLiveSmokeTest() {
                             clientSecret = clientSecret || mmConfig.clientSecret || mmConfig.client_Secret;
                         }
                     }
-                } catch (reqErr) {
+                } catch {
                     // Fallback: parse file contents for common patterns
                     try {
                         const raw = fs.readFileSync(cfgPath, "utf8");
@@ -121,12 +94,12 @@ async function runLiveSmokeTest() {
                         if (idMatch) clientId = idMatch[1].trim();
                         const secretMatch = raw.match(/client[_-]?Secret\s*[:=]\s*["']([^"']+)["']/i);
                         if (secretMatch) clientSecret = secretMatch[1].trim();
-                    } catch (readErr) {
+                    } catch {
                         // ignore
                     }
                 }
             }
-        } catch (err) {
+        } catch {
             // ignore and fall through to ENV-based check
         }
     }
@@ -154,8 +127,6 @@ async function runLiveSmokeTest() {
                 appliances = res.data.homeappliances;
             } else if (Array.isArray(res.data)) {
                 appliances = res.data;
-            } else if (res.data && typeof res.data === 'object' && res.data.homeappliances && Array.isArray(res.data.homeappliances)) {
-                appliances = res.data.homeappliances;
             }
         }
 
@@ -221,7 +192,7 @@ async function runLiveSmokeTest() {
                     hc.tokenRefreshTimeout = null;
                 }
                 if (hc.eventSource && typeof hc.eventSource.close === 'function') {
-                    try { hc.eventSource.close(); } catch (e) { }
+                    try { hc.eventSource.close(); } catch { /* ignore close error */ }
                     hc.eventSource = null;
                 }
                 if (hc.eventSources && typeof hc.eventSources === 'object') {
@@ -229,7 +200,7 @@ async function runLiveSmokeTest() {
                         try {
                             const es = hc.eventSources[k];
                             if (es && typeof es.close === 'function') es.close();
-                        } catch (e) { }
+                        } catch { /* ignore close error */ }
                     }
                     hc.eventSources = {};
                 }

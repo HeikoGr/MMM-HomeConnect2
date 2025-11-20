@@ -1,4 +1,4 @@
-/* global Module, Log */
+/* global Module, Log */ // eslint-disable-line no-redeclare
 Module.register("MMM-HomeConnect2", {
   updated: 0,
   devices: [],
@@ -167,29 +167,32 @@ Module.register("MMM-HomeConnect2", {
     const _self = this;
 
     function parseRemainingSeconds(device) {
-      try {
-        if (
-          window &&
-          window.HomeConnectDeviceUtils &&
-          typeof window.HomeConnectDeviceUtils.parseRemainingSeconds ===
-            "function"
-        ) {
+      if (
+        typeof window !== "undefined" &&
+        window.HomeConnectDeviceUtils &&
+        typeof window.HomeConnectDeviceUtils.parseRemainingSeconds === "function"
+      ) {
+        try {
           return window.HomeConnectDeviceUtils.parseRemainingSeconds(device);
+        } catch {
+          /* ignore */
         }
-      } catch (e) {}
+      }
       return 0;
     }
 
     function parseProgress(device) {
-      try {
-        if (
-          window &&
-          window.HomeConnectDeviceUtils &&
-          typeof window.HomeConnectDeviceUtils.parseProgress === "function"
-        ) {
+      if (
+        typeof window !== "undefined" &&
+        window.HomeConnectDeviceUtils &&
+        typeof window.HomeConnectDeviceUtils.parseProgress === "function"
+      ) {
+        try {
           return window.HomeConnectDeviceUtils.parseProgress(device);
+        } catch {
+          /* ignore */
         }
-      } catch (e) {}
+      }
       return undefined;
     }
 
@@ -272,9 +275,9 @@ Module.register("MMM-HomeConnect2", {
         }
 
         const StatusString =
-            remainingSec > 0
-              ? `${_self.translate("DONE_IN")} ${formatDuration(remainingSec)}`
-              : "",
+          remainingSec > 0
+            ? `${_self.translate("DONE_IN")} ${formatDuration(remainingSec)}`
+            : "",
           Image = `${device.type}.png`,
           DeviceName = device.name;
         let container = "<div class='deviceContainer'>";

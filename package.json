@@ -5,6 +5,9 @@
   "main": "MMM-HomeConnect2.js",
   "author": "HeikoGr",
   "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/HeikoGr/MMM-HomeConnect2.git"
