@@ -8,6 +8,7 @@ const {
   deviceAppearsActive,
   isDeviceConnected
 } = require("./lib/device-utils");
+/* eslint-disable n/no-missing-require */
 const NodeHelper = require("node_helper"),
   globalSession = {
     isAuthenticated: false,
