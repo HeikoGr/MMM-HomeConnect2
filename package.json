@@ -22,7 +22,7 @@
   ],
   "license": "MIT",
   "scripts": {
-    "lint": "eslint --ext .js || true && prettier --check .",
+    "lint": "eslint --ext .js && prettier --check .",
     "lint:fix": "eslint --fix && prettier --write .",
     "test": "node tests/run-all.js",
     "test:spelling": "cspell .",
@@ -39,7 +39,9 @@
     "qrcode": "^1.5.4"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.1",
     "eslint": "^9.39.1",
+    "eslint-plugin-n": "^17.23.1",
     "globals": "^16.5.0",
     "prettier": "^3.6.2",
     "prettier-plugin-jinja-template": "^2.1.0"
