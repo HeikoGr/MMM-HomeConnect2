@@ -12,14 +12,14 @@ Module.register("MMM-HomeConnect2", {
     header: "Home Connect Appliances",
     clientId: "",
     clientSecret: "",
-    useHeadlessAuth: false, // Enable headless Device Flow authentication
+
     baseUrl: "https://api.home-connect.com/api",
     showDeviceIcon: true,
     showAlwaysAllDevices: false,
     showDeviceIfDoorIsOpen: true,
     showDeviceIfFailure: true,
     showDeviceIfInfoIsAvailable: true,
-    updateFrequency: 1000 * 60 * 60,
+    updateFrequency: 1000 * 60 * 1, // Update every 1 minute
     // Module logging level: none | error | warn | info | debug
     logLevel: "none"
   },
@@ -223,15 +223,13 @@ Module.register("MMM-HomeConnect2", {
 
     // Show loading message if no devices yet
     if (!this.devices || this.devices.length === 0) {
-      if (this.config.useHeadlessAuth) {
-        div.innerHTML =
-          "<div class='small'>" +
-          `<i class='fa fa-cog fa-spin'></i> ${_self.translate("SESSION_BASED_AUTH")}<br>` +
-          `<span class='dimmed'>${_self.translate("LOADING_APPLIANCES")}...</span>` +
-          "</div>";
-      } else {
-        div.innerHTML = `<span class='small'>${_self.translate("LOADING_APPLIANCES")}...</span>`;
-      }
+
+      div.innerHTML =
+        "<div class='small'>" +
+        `<i class='fa fa-cog fa-spin'></i> ${_self.translate("SESSION_BASED_AUTH")}<br>` +
+        `<span class='dimmed'>${_self.translate("LOADING_APPLIANCES")}...</span>` +
+        "</div>";
+
       return div;
     }
 
@@ -333,7 +331,7 @@ Module.register("MMM-HomeConnect2", {
         }
 
         const StatusString =
-            remainingSec > 0 ? `${_self.translate("DONE_IN")} ${formatDuration(remainingSec)}` : "",
+          remainingSec > 0 ? `${_self.translate("DONE_IN")} ${formatDuration(remainingSec)}` : "",
           Image = `${device.type}.png`,
           DeviceName = device.name;
         let container = "<div class='deviceContainer'>";
