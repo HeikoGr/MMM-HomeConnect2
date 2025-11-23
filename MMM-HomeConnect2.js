@@ -7,41 +7,61 @@ Module.register("MMM-HomeConnect2", {
   authStatus: null,
   instanceId: null,
   deviceRuntimeHints: {},
+  lastActiveProgramRequestTs: 0,
 
   defaults: {
     header: "Home Connect Appliances",
     clientId: "",
     clientSecret: "",
 
-    baseUrl: "https://api.home-connect.com/api",
     showDeviceIcon: true,
     showAlwaysAllDevices: false,
     showDeviceIfDoorIsOpen: true,
     showDeviceIfFailure: true,
     showDeviceIfInfoIsAvailable: true,
-    updateFrequency: 1000 * 60 * 1, // Update every 1 minute
+    updateFrequency: 1000 * 60 * 60, // Default hourly update (only used if polling enabled)
+    enableUpdatePolling: false, // Disable periodic polling by default; rely on SSE
+    enableServerPolling: false, // Disable server polling for device status by default
+    enableProgramScheduler: false, // Disable program scheduler by default
+    enableSSEHeartbeat: true, // Enable SSE heartbeat checks by default
+    sseHeartbeatCheckIntervalMs: 60 * 1000, // 1 minute
+    sseHeartbeatStaleThresholdMs: 3 * 60 * 1000, // 3 minutes
+    globalEventSubscribeDelayMs: 5000, // Optional delay before registering global SSE streams
+    eventSourceRetryBaseDelayMs: 15 * 1000, // Base retry delay after SSE errors
+    eventSourceAuthErrorDelayMs: 30 * 1000, // Retry delay for auth-related SSE errors (401/429)
+    minActiveProgramIntervalMs: 1 * 30 * 1000, // 30 seconds between active program fetches
+    enableCacheRefreshPolling: true, // Frontend-only cache refresh (no Bosch calls)
+    cacheRefreshIntervalMs: 30 * 1000, // 30 seconds
+    frontendActiveProgramRequestIntervalMs: 60 * 1000, // Min delay between frontend GET_ACTIVE_PROGRAMS requests
+    ssePreSubscribeRefreshMs: 5 * 60 * 1000, // Refresh token if older than 5 min before SSE subscribe
     // Module logging level: none | error | warn | info | debug
-    logLevel: "none"
-  },
-
-  init() {
-    Log.log(`${this.name} is in init!`);
+    logLevel: "debug"
   },
 
   start() {
-    Log.log(`${this.name} is starting!`);
-
     // Generate a unique instance ID
     this.instanceId = `hc_${Math.random().toString(36).substr(2, 9)}`;
-    Log.log(`${this.name} instance ID: ${this.instanceId}`);
 
-    this.updateTimer = setInterval(() => {
-      this.sendSocketNotification("UPDATEREQUEST", null);
-    }, this.config.updateFrequency);
+    if (this.config.enableUpdatePolling) {
+      const pollMs = this.config.updateFrequency || this.defaults.updateFrequency;
+      Log.log(`${this.name} update polling enabled (interval ${pollMs}ms)`);
+      this.updateTimer = setInterval(() => {
+        this.sendSocketNotification("UPDATEREQUEST", null);
+      }, pollMs);
+    }
+
+    if (this.config.enableCacheRefreshPolling) {
+      const cachePollMs =
+        this.config.cacheRefreshIntervalMs || this.defaults.cacheRefreshIntervalMs;
+      this.cacheRefreshTimer = setInterval(() => {
+        this.sendSocketNotification("REQUEST_DEVICE_CACHE", {
+          instanceId: this.instanceId
+        });
+      }, cachePollMs);
+    }
   },
 
   loaded(callback) {
-    Log.log(`${this.name} is loaded!`);
     callback();
   },
 
@@ -84,17 +104,7 @@ Module.register("MMM-HomeConnect2", {
         this.updateDom();
         // After initial device list arrives, request a snapshot of active programs
         // so RemainingProgramTime / ProgramProgress are populated even before SSE events come in.
-        try {
-          const haIds = this.devices.map((d) => d.haId || d.haid || d.id).filter((id) => !!id);
-          if (haIds.length > 0) {
-            this.sendSocketNotification("GET_ACTIVE_PROGRAMS", {
-              instanceId: this.instanceId,
-              haIds
-            });
-          }
-        } catch (e) {
-          Log.error(`${this.name} failed requesting active programs: ${e}`);
-        }
+        this.scheduleActiveProgramSnapshot();
         break;
       case "AUTH_INFO":
         // Only update if for this instance or global
@@ -135,18 +145,13 @@ Module.register("MMM-HomeConnect2", {
     }
   },
 
-  suspend() {
-    Log.log(`${this.name} suspended`);
-  },
-
   resume() {
-    Log.log(`${this.name} resumed`);
     // On resume, trigger a revalidation: request a fresh device update and
     // explicitly request active program snapshots so UI resumes reflecting
     // currently running programs immediately.
     try {
       this.sendSocketNotification("UPDATEREQUEST");
-      this.sendSocketNotification("GET_ACTIVE_PROGRAMS", { instanceId: this.instanceId });
+      // this.sendSocketNotification("GET_ACTIVE_PROGRAMS", { instanceId: this.instanceId });
     } catch (e) {
       Log.error(`${this.name} resume actions failed: ${e}`);
     }
@@ -157,7 +162,40 @@ Module.register("MMM-HomeConnect2", {
       clearInterval(this.updateTimer);
       this.updateTimer = null;
     }
-    Log.log(`${this.name} stopped`);
+    if (this.cacheRefreshTimer) {
+      clearInterval(this.cacheRefreshTimer);
+      this.cacheRefreshTimer = null;
+    }
+  },
+
+  scheduleActiveProgramSnapshot() {
+    try {
+      const haIds = this.devices.map((d) => d.haId || d.haid || d.id).filter((id) => !!id);
+      if (!haIds.length) {
+        return;
+      }
+
+      const interval =
+        typeof this.config.frontendActiveProgramRequestIntervalMs === "number"
+          ? Math.max(0, this.config.frontendActiveProgramRequestIntervalMs)
+          : this.defaults.frontendActiveProgramRequestIntervalMs;
+      const now = Date.now();
+      const elapsed = now - (this.lastActiveProgramRequestTs || 0);
+
+      if (!interval || interval <= 0 || !this.lastActiveProgramRequestTs || elapsed >= interval) {
+        this.lastActiveProgramRequestTs = now;
+        this.sendSocketNotification("GET_ACTIVE_PROGRAMS", {
+          instanceId: this.instanceId,
+          haIds
+        });
+        return;
+      }
+
+      // Wait until the throttle window expires before sending another request
+      return;
+    } catch (e) {
+      Log.error(`${this.name} failed scheduling active programs: ${e}`);
+    }
   },
 
   getDom() {
@@ -223,7 +261,6 @@ Module.register("MMM-HomeConnect2", {
 
     // Show loading message if no devices yet
     if (!this.devices || this.devices.length === 0) {
-
       div.innerHTML =
         "<div class='small'>" +
         `<i class='fa fa-cog fa-spin'></i> ${_self.translate("SESSION_BASED_AUTH")}<br>` +
@@ -331,7 +368,7 @@ Module.register("MMM-HomeConnect2", {
         }
 
         const StatusString =
-          remainingSec > 0 ? `${_self.translate("DONE_IN")} ${formatDuration(remainingSec)}` : "",
+            remainingSec > 0 ? `${_self.translate("DONE_IN")} ${formatDuration(remainingSec)}` : "",
           Image = `${device.type}.png`,
           DeviceName = device.name;
         let container = "<div class='deviceContainer'>";
