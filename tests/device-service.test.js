@@ -6,8 +6,7 @@ const DeviceService = require("../lib/device-service");
 function createDeviceService(overrides = {}) {
   const globalSession = { clientInstances: new Set(["test"]) };
   const logs = [];
-  const logger = (level, ...args) =>
-    logs.push({ level, message: args.join(" ") });
+  const logger = (level, ...args) => logs.push({ level, message: args.join(" ") });
   const notifications = [];
   const broadcastToAllClients = (n, p) => notifications.push({ n, p });
   const service = new DeviceService({

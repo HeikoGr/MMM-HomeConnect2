@@ -73,3 +73,28 @@
 progress {
   inline-size: 20em;
 }
+
+.hc-progress-label {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 11px;
+  vertical-align: middle;
+  color: #ffffff;
+}
+
+.hc-finished {
+  color: #b2ffb2;
+  font-weight: bold;
+  font-size: 12px;
+}
+
+/* Indeterminate styling: keep native progress but add subtle animation fallback */
+progress[max]:not([value]) {
+  /* browsers show indeterminate natively; ensure visibility */
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.1) 0%,
+    rgba(255, 255, 255, 0.25) 50%,
+    rgba(255, 255, 255, 0.1) 100%
+  );
+}

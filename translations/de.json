@@ -15,5 +15,7 @@
   "AUTH_SECONDS": "Sekunden",
   "AUTH_FAILED_TITLE": "Authentifizierung fehlgeschlagen",
   "AUTH_FAILED_INFO": "Bitte starten Sie MagicMirror neu, um es erneut zu versuchen.",
-  "SESSION_BASED_AUTH": "Session-basierte Authentifizierung aktiv"
+  "SESSION_BASED_AUTH": "Session-basierte Authentifizierung aktiv",
+  "PROGRAM_FINISHED": "Programm fertig",
+  "IN_PROGRESS": "Läuft"
 }

@@ -6,6 +6,7 @@ Module.register("MMM-HomeConnect2", {
   authInfo: null,
   authStatus: null,
   instanceId: null,
+  deviceRuntimeHints: {},
 
   defaults: {
     header: "Home Connect Appliances",
@@ -46,7 +47,7 @@ Module.register("MMM-HomeConnect2", {
 
   getScripts() {
     // Use full module-relative path so the MagicMirror loader can find the file
-    return ["modules/MMM-HomeConnect2/lib/device-utils-client.js"];
+    return ["modules/MMM-HomeConnect2/lib/device-utils.js"];
   },
 
   getStyles() {
@@ -73,11 +74,7 @@ Module.register("MMM-HomeConnect2", {
 
   socketNotificationReceived(notification, payload) {
     // Only respond to messages for this instance (if instanceId present)
-    if (
-      payload &&
-      payload.instanceId &&
-      payload.instanceId !== this.instanceId
-    ) {
+    if (payload && payload.instanceId && payload.instanceId !== this.instanceId) {
       return;
     }
 
@@ -88,9 +85,7 @@ Module.register("MMM-HomeConnect2", {
         // After initial device list arrives, request a snapshot of active programs
         // so RemainingProgramTime / ProgramProgress are populated even before SSE events come in.
         try {
-          const haIds = this.devices
-            .map((d) => d.haId || d.haid || d.id)
-            .filter((id) => !!id);
+          const haIds = this.devices.map((d) => d.haId || d.haid || d.id).filter((id) => !!id);
           if (haIds.length > 0) {
             this.sendSocketNotification("GET_ACTIVE_PROGRAMS", {
               instanceId: this.instanceId,
@@ -118,14 +113,9 @@ Module.register("MMM-HomeConnect2", {
       case "INIT_STATUS":
         // Process session status updates
         if (!payload.instanceId || payload.instanceId === this.instanceId) {
-          Log.log(
-            `${this.name} Init Status: ${payload.status} - ${payload.message}`
-          );
+          Log.log(`${this.name} Init Status: ${payload.status} - ${payload.message}`);
 
-          if (
-            payload.status === "session_active" ||
-            payload.status === "complete"
-          ) {
+          if (payload.status === "session_active" || payload.status === "complete") {
             // Session active - normal display
             this.authInfo = null;
             this.authStatus = null;
@@ -151,6 +141,15 @@ Module.register("MMM-HomeConnect2", {
 
   resume() {
     Log.log(`${this.name} resumed`);
+    // On resume, trigger a revalidation: request a fresh device update and
+    // explicitly request active program snapshots so UI resumes reflecting
+    // currently running programs immediately.
+    try {
+      this.sendSocketNotification("UPDATEREQUEST");
+      this.sendSocketNotification("GET_ACTIVE_PROGRAMS", { instanceId: this.instanceId });
+    } catch (e) {
+      Log.error(`${this.name} resume actions failed: ${e}`);
+    }
   },
 
   stop() {
@@ -165,6 +164,7 @@ Module.register("MMM-HomeConnect2", {
     const div = document.createElement("div");
     let wrapper = "";
     const _self = this;
+    const runtimeHints = this.deviceRuntimeHints || (this.deviceRuntimeHints = {});
 
     function parseRemainingSeconds(device) {
       if (
@@ -178,7 +178,7 @@ Module.register("MMM-HomeConnect2", {
           /* ignore */
         }
       }
-      return 0;
+      return null;
     }
 
     function parseProgress(device) {
@@ -251,9 +251,7 @@ Module.register("MMM-HomeConnect2", {
       }
       // Support different door fields: DoorState / DoorOpen
       const doorOpen =
-        device.DoorOpen ||
-        device.DoorState === "Open" ||
-        device.doorState === "Open";
+        device.DoorOpen || device.DoorState === "Open" || device.doorState === "Open";
       if (_self.config.showDeviceIfDoorIsOpen && doorOpen) {
         IsShowDevice = true;
       }
@@ -267,17 +265,75 @@ Module.register("MMM-HomeConnect2", {
       if (IsShowDevice) {
         const remainingSec = parseRemainingSeconds(device);
         const progVal = parseProgress(device);
-        // Show progressbar if we have a remaining time > 0 OR a known progress value (including 0)
+        const deviceKey = device.haId || device.haid || device.id || device.name || "unknown";
+        // Track if this appliance has recently reported an active program so we only mark it finished with real data
+        const hint = runtimeHints[deviceKey] || (runtimeHints[deviceKey] = { hadActive: false });
+
+        // Normalize program progress to a number if possible
+        let progNumeric;
+        if (progVal !== undefined && progVal !== null) {
+          const parsed = Number(progVal);
+          progNumeric = Number.isFinite(parsed)
+            ? Math.max(0, Math.min(100, Math.round(parsed)))
+            : undefined;
+        }
+
+        const opStateRaw = device.OperationState || device.operationState || null;
+        const opStateString =
+          typeof opStateRaw === "string"
+            ? opStateRaw
+            : opStateRaw && typeof opStateRaw.value === "string"
+              ? opStateRaw.value
+              : null;
+        const opStateLabel = opStateString ? opStateString.split(".").pop() : "";
+        const opStateFinished = /Finished/i.test(opStateLabel || "");
+        const opStateActive = /(Run|Active|DelayedStart|InProgress)/i.test(opStateLabel || "");
+
+        if (opStateActive) {
+          hint.hadActive = true;
+        }
+        if (remainingSec !== null && remainingSec > 0) {
+          hint.hadActive = true;
+        }
+        if (progNumeric !== undefined && progNumeric > 0 && progNumeric < 100) {
+          hint.hadActive = true;
+        }
+
+        // Finished detection
+        const finishedViaZero = hint.hadActive && remainingSec === 0;
+        const isFinished = opStateFinished || progNumeric === 100 || finishedViaZero;
+        if (isFinished && (opStateFinished || progNumeric === 100 || finishedViaZero)) {
+          hint.hadActive = false;
+        }
+
+        // Determine percent: prefer explicit progress, otherwise estimate from initialRemaining if available
+        let percent;
+        if (progNumeric !== undefined) {
+          percent = progNumeric;
+        } else if (
+          device._initialRemaining &&
+          Number.isFinite(Number(device._initialRemaining)) &&
+          Number(device._initialRemaining) > 0 &&
+          remainingSec > 0
+        ) {
+          const init = Number(device._initialRemaining);
+          percent = Math.max(0, Math.min(100, Math.round(((init - remainingSec) / init) * 100)));
+        }
+
+        // If we have remaining but no percent -> show indeterminate
+        const isIndeterminate = percent === undefined && remainingSec > 0;
+
         let ProgessBar = "";
-        if (remainingSec > 0 || progVal !== undefined) {
-          const progressDisplay = progVal === undefined ? 0 : progVal;
-          ProgessBar = `<progress value='${progressDisplay}' max='100' width='95%'></progress>`;
+        if (isFinished) {
+          ProgessBar = `<div class='hc-finished'>${_self.translate("PROGRAM_FINISHED")}</div>`;
+        } else if (isIndeterminate) {
+          ProgessBar = `<progress max='100' width='95%'></progress><span class='hc-progress-label'>${_self.translate("IN_PROGRESS")}</span>`;
+        } else if (percent !== undefined) {
+          ProgessBar = `<progress value='${percent}' max='100' width='95%'></progress><span class='hc-progress-label'>${percent}%</span>`;
         }
 
         const StatusString =
-          remainingSec > 0
-            ? `${_self.translate("DONE_IN")} ${formatDuration(remainingSec)}`
-            : "",
+            remainingSec > 0 ? `${_self.translate("DONE_IN")} ${formatDuration(remainingSec)}` : "",
           Image = `${device.type}.png`,
           DeviceName = device.name;
         let container = "<div class='deviceContainer'>";
@@ -370,9 +426,7 @@ Module.register("MMM-HomeConnect2", {
 
     // Progress bar
     if (this.authStatus.attempt && this.authStatus.maxAttempts) {
-      const progress = Math.round(
-        (this.authStatus.attempt / this.authStatus.maxAttempts) * 100
-      );
+      const progress = Math.round((this.authStatus.attempt / this.authStatus.maxAttempts) * 100);
       html += "<div class='progress-container'>";
       html += "<div class='progress-bar'>";
       html += `<div class='progress-fill' style='width: ${progress}%'></div>`;

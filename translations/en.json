@@ -15,5 +15,7 @@
   "AUTH_SECONDS": "seconds",
   "AUTH_FAILED_TITLE": "Authentication failed",
   "AUTH_FAILED_INFO": "Please restart MagicMirror to try again.",
-  "SESSION_BASED_AUTH": "Session-based authentication active"
+  "SESSION_BASED_AUTH": "Session-based authentication active",
+  "PROGRAM_FINISHED": "Program finished",
+  "IN_PROGRESS": "In progress"
 }
