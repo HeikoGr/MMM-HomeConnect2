@@ -20,9 +20,6 @@ const NodeHelper = require("node_helper"),
     MIN_ACTIVE_PROGRAM_INTERVAL: 10000 // 10 seconds between fetches
   };
 
-// Active-program request dedupe window (ms)
-const ACTIVE_PROGRAM_REQUEST_TTL = 10000; // 10s
-let lastActiveProgramsRequest = { instanceId: null, timestamp: 0 }; // Track last request
 const ACTIVE_PROGRAM_RETRY_DELAY_MS = 5000; // 5s
 const ACTIVE_PROGRAM_MAX_RETRIES = 3; // Maximum number of retries for active program requests
 
@@ -232,30 +229,6 @@ module.exports = NodeHelper.create({
 
     const now = Date.now();
     const requester = payload.instanceId || null;
-
-    // Dedupe: if another instance recently requested active programs, ignore
-    if (
-      requester &&
-      lastActiveProgramsRequest.timestamp + ACTIVE_PROGRAM_REQUEST_TTL > now &&
-      lastActiveProgramsRequest.instanceId &&
-      lastActiveProgramsRequest.instanceId !== requester
-    ) {
-      moduleLog(
-        "info",
-        `Ignoring GET_ACTIVE_PROGRAMS from ${requester} - recently served ${lastActiveProgramsRequest.instanceId}`,
-        {
-          lastRequestAgeMs: now - lastActiveProgramsRequest.timestamp,
-          dedupeWindowMs: ACTIVE_PROGRAM_REQUEST_TTL
-        }
-      );
-      return;
-    }
-
-    // Record this request as the most-recent
-    if (requester) {
-      lastActiveProgramsRequest = { instanceId: requester, timestamp: now };
-      moduleLog("debug", `Recorded active program request for ${requester}`);
-    }
 
     // Check if we're currently rate limited
     if (now < globalSession.rateLimitUntil) {
