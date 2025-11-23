@@ -6,8 +6,7 @@ const ProgramService = require("../lib/program-service");
 function createProgramService(overrides = {}) {
   const globalSession = { rateLimitUntil: 0 };
   const logs = [];
-  const logger = (level, ...args) =>
-    logs.push({ level, message: args.join(" ") });
+  const logger = (level, ...args) => logs.push({ level, message: args.join(" ") });
   const devices = new Map([
     [
       "ha-1",
