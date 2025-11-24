@@ -8,6 +8,7 @@ Module.register("MMM-HomeConnect2", {
   instanceId: null,
   deviceRuntimeHints: {},
   lastActiveProgramRequestTs: 0,
+  debugStats: null,
 
   defaults: {
     header: "Home Connect Appliances",
@@ -19,44 +20,17 @@ Module.register("MMM-HomeConnect2", {
     showDeviceIfDoorIsOpen: true,
     showDeviceIfFailure: true,
     showDeviceIfInfoIsAvailable: true,
-    updateFrequency: 1000 * 60 * 60, // Default hourly update (only used if polling enabled)
-    enableUpdatePolling: false, // Disable periodic polling by default; rely on SSE
-    enableServerPolling: false, // Disable server polling for device status by default
-    enableProgramScheduler: false, // Disable program scheduler by default
     enableSSEHeartbeat: true, // Enable SSE heartbeat checks by default
     sseHeartbeatCheckIntervalMs: 60 * 1000, // 1 minute
     sseHeartbeatStaleThresholdMs: 3 * 60 * 1000, // 3 minutes
-    globalEventSubscribeDelayMs: 5000, // Optional delay before registering global SSE streams
-    eventSourceRetryBaseDelayMs: 15 * 1000, // Base retry delay after SSE errors
-    eventSourceAuthErrorDelayMs: 30 * 1000, // Retry delay for auth-related SSE errors (401/429)
-    minActiveProgramIntervalMs: 1 * 30 * 1000, // 30 seconds between active program fetches
-    enableCacheRefreshPolling: true, // Frontend-only cache refresh (no Bosch calls)
-    cacheRefreshIntervalMs: 30 * 1000, // 30 seconds
-    frontendActiveProgramRequestIntervalMs: 60 * 1000, // Min delay between frontend GET_ACTIVE_PROGRAMS requests
-    ssePreSubscribeRefreshMs: 5 * 60 * 1000, // Refresh token if older than 5 min before SSE subscribe
+    minActiveProgramIntervalMs: 10 * 60 * 1000, // 10 minutes between active program fetches (backend throttle)
     // Module logging level: none | error | warn | info | debug
-    logLevel: "debug"
+    logLevel: ""
   },
 
   start() {
     // Generate a unique instance ID
     this.instanceId = `hc_${Math.random().toString(36).substr(2, 9)}`;
-
-    if (this.config.enableUpdatePolling) {
-      const pollMs = this.config.updateFrequency || this.defaults.updateFrequency;
-      Log.log(`${this.name} update polling enabled (interval ${pollMs}ms)`);
-      this.updateTimer = setInterval(() => {
-        this.requestStateRefresh({ forceRefresh: true });
-      }, pollMs);
-    }
-
-    if (this.config.enableCacheRefreshPolling) {
-      const cachePollMs =
-        this.config.cacheRefreshIntervalMs || this.defaults.cacheRefreshIntervalMs;
-      this.cacheRefreshTimer = setInterval(() => {
-        this.requestStateRefresh();
-      }, cachePollMs);
-    }
   },
 
   requestStateRefresh(options = {}) {
@@ -104,47 +78,45 @@ Module.register("MMM-HomeConnect2", {
       return;
     }
 
+    const safePayload = payload || {};
+
     switch (notification) {
       case "MMM-HomeConnect_Update":
-        this.devices = payload || [];
+        this.devices = safePayload || [];
         this.updateDom();
         // After initial device list arrives, request a snapshot of active programs
         // so RemainingProgramTime / ProgramProgress are populated even before SSE events come in.
         this.scheduleActiveProgramSnapshot();
         break;
       case "AUTH_INFO":
-        // Only update if for this instance or global
-        if (!payload.instanceId || payload.instanceId === this.instanceId) {
-          this.authInfo = payload;
-          this.updateDom();
-        }
+        this.authInfo = safePayload;
+        this.updateDom();
         break;
       case "AUTH_STATUS":
-        // Only update if for this instance or global
-        if (!payload.instanceId || payload.instanceId === this.instanceId) {
-          this.authStatus = payload;
-          this.updateDom();
-        }
+        this.authStatus = safePayload;
+        this.updateDom();
         break;
-      case "INIT_STATUS":
-        // Process session status updates
-        if (!payload.instanceId || payload.instanceId === this.instanceId) {
-          Log.log(`${this.name} Init Status: ${payload.status} - ${payload.message}`);
+      case "INIT_STATUS": {
+        Log.log(`${this.name} Init Status: ${safePayload.status} - ${safePayload.message}`);
+        this.lastInitStatus = safePayload;
 
-          if (payload.status === "session_active" || payload.status === "complete") {
-            // Session active - normal display
-            this.authInfo = null;
-            this.authStatus = null;
-            this.updateDom();
-          } else if (payload.status === "auth_in_progress") {
-            // Authentication already in progress
-            this.authStatus = {
-              status: "polling",
-              message: payload.message
-            };
-            this.updateDom();
-          }
+        if (safePayload.status === "session_active" || safePayload.status === "complete") {
+          // Session active - normal display
+          this.authInfo = null;
+          this.authStatus = null;
+        } else if (safePayload.status === "auth_in_progress") {
+          // Authentication already in progress (special auth UI)
+          this.authStatus = {
+            status: "polling",
+            message: safePayload.message
+          };
         }
+        this.updateDom();
+        break;
+      }
+      case "DEBUG_STATS":
+        this.debugStats = safePayload || {};
+        this.updateDom();
         break;
       default:
         break;
@@ -163,14 +135,8 @@ Module.register("MMM-HomeConnect2", {
   },
 
   stop() {
-    if (this.updateTimer) {
-      clearInterval(this.updateTimer);
-      this.updateTimer = null;
-    }
-    if (this.cacheRefreshTimer) {
-      clearInterval(this.cacheRefreshTimer);
-      this.cacheRefreshTimer = null;
-    }
+    // No periodic frontend polling timers needed; state is driven by SSE and
+    // rare backend polling when SSE is unhealthy.
   },
 
   scheduleActiveProgramSnapshot() {
@@ -180,23 +146,17 @@ Module.register("MMM-HomeConnect2", {
         return;
       }
 
-      const interval =
-        typeof this.config.frontendActiveProgramRequestIntervalMs === "number"
-          ? Math.max(0, this.config.frontendActiveProgramRequestIntervalMs)
-          : this.defaults.frontendActiveProgramRequestIntervalMs;
       const now = Date.now();
       const elapsed = now - (this.lastActiveProgramRequestTs || 0);
+      const minInterval =
+        typeof this.config.minActiveProgramIntervalMs === "number"
+          ? Math.max(0, this.config.minActiveProgramIntervalMs)
+          : this.defaults.minActiveProgramIntervalMs;
 
-      if (!interval || interval <= 0 || !this.lastActiveProgramRequestTs || elapsed >= interval) {
+      if (!this.lastActiveProgramRequestTs || elapsed >= minInterval) {
         this.lastActiveProgramRequestTs = now;
-        this.requestStateRefresh({
-          haIds
-        });
-        return;
+        this.requestStateRefresh({ haIds });
       }
-
-      // Wait until the throttle window expires before sending another request
-      return;
     } catch (e) {
       Log.error(`${this.name} failed scheduling active programs: ${e}`);
     }
@@ -265,12 +225,12 @@ Module.register("MMM-HomeConnect2", {
 
     // Show loading message if no devices yet
     if (!this.devices || this.devices.length === 0) {
-      div.innerHTML =
+      const loadingHtml =
         "<div class='small'>" +
         `<i class='fa fa-cog fa-spin'></i> ${_self.translate("SESSION_BASED_AUTH")}<br>` +
         `<span class='dimmed'>${_self.translate("LOADING_APPLIANCES")}...</span>` +
         "</div>";
-
+      div.innerHTML = loadingHtml;
       return div;
     }
 
@@ -372,7 +332,7 @@ Module.register("MMM-HomeConnect2", {
         }
 
         const StatusString =
-            remainingSec > 0 ? `${_self.translate("DONE_IN")} ${formatDuration(remainingSec)}` : "",
+          remainingSec > 0 ? `${_self.translate("DONE_IN")} ${formatDuration(remainingSec)}` : "",
           Image = `${device.type}.png`,
           DeviceName = device.name;
         let container = "<div class='deviceContainer'>";
@@ -413,6 +373,12 @@ Module.register("MMM-HomeConnect2", {
     if (wrapper === "") {
       wrapper = `<div class='dimmed small'>${_self.translate("NO_ACTIVE_APPLIANCES")}</div>`;
     }
+
+    const debugPanel = this.getDebugPanel();
+    if (debugPanel) {
+      wrapper += debugPanel;
+    }
+
     div.innerHTML = wrapper;
     return div;
   },
@@ -482,6 +448,46 @@ Module.register("MMM-HomeConnect2", {
     html += "</div>";
 
     return html;
+  },
+
+  getDebugPanel() {
+    const logLevel = (this.config?.logLevel || this.defaults.logLevel || "none").toLowerCase();
+    if (logLevel !== "debug" || !this.debugStats) {
+      return "";
+    }
+    const formatTime = (ts) => (ts ? new Date(ts).toLocaleTimeString() : "n/a");
+    const rows = [];
+
+    // Status from INIT_STATUS gets rendered only in debug mode
+    if (this.lastInitStatus && this.lastInitStatus.message) {
+      rows.push(
+        `<div class='hc-debug-row'><span class='hc-debug-label'>last init status:</span> ${this.lastInitStatus.message
+        }</div>`
+      );
+    }
+
+    rows.push(
+      `<div class='hc-debug-row'><span class='hc-debug-label'>SSE:</span> ${formatTime(
+        this.debugStats.lastSseEventTs
+      )}</div>`
+    );
+    rows.push(
+      `<div class='hc-debug-row'><span class='hc-debug-label'>API:</span> ${formatTime(
+        this.debugStats.lastApiCallTs
+      )}</div>`
+    );
+    const counters = this.debugStats.apiCounters || {};
+    const counterEntries = Object.entries(counters);
+    if (counterEntries.length) {
+      rows.push("<div class='hc-debug-subtitle'>API counts</div>");
+      counterEntries.sort(([a], [b]) => a.localeCompare(b));
+      counterEntries.forEach(([name, value]) => {
+        rows.push(
+          `<div class='hc-debug-row'><span class='hc-debug-label'>${name}</span> ${value}</div>`
+        );
+      });
+    }
+    return `<div class='hc-debug-panel'>${rows.join("")}</div>`;
   },
 
   getAuthErrorHTML() {
