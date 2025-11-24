@@ -46,7 +46,7 @@ Module.register("MMM-HomeConnect2", {
       const pollMs = this.config.updateFrequency || this.defaults.updateFrequency;
       Log.log(`${this.name} update polling enabled (interval ${pollMs}ms)`);
       this.updateTimer = setInterval(() => {
-        this.sendSocketNotification("UPDATEREQUEST", null);
+        this.requestStateRefresh({ forceRefresh: true });
       }, pollMs);
     }
 
@@ -54,11 +54,17 @@ Module.register("MMM-HomeConnect2", {
       const cachePollMs =
         this.config.cacheRefreshIntervalMs || this.defaults.cacheRefreshIntervalMs;
       this.cacheRefreshTimer = setInterval(() => {
-        this.sendSocketNotification("REQUEST_DEVICE_CACHE", {
-          instanceId: this.instanceId
-        });
+        this.requestStateRefresh();
       }, cachePollMs);
     }
+  },
+
+  requestStateRefresh(options = {}) {
+    const payload = {
+      instanceId: this.instanceId,
+      ...options
+    };
+    this.sendSocketNotification("REQUEST_DEVICE_REFRESH", payload);
   },
 
   loaded(callback) {
@@ -150,8 +156,7 @@ Module.register("MMM-HomeConnect2", {
     // explicitly request active program snapshots so UI resumes reflecting
     // currently running programs immediately.
     try {
-      this.sendSocketNotification("UPDATEREQUEST");
-      // this.sendSocketNotification("GET_ACTIVE_PROGRAMS", { instanceId: this.instanceId });
+      this.requestStateRefresh({ forceRefresh: true });
     } catch (e) {
       Log.error(`${this.name} resume actions failed: ${e}`);
     }
@@ -184,8 +189,7 @@ Module.register("MMM-HomeConnect2", {
 
       if (!interval || interval <= 0 || !this.lastActiveProgramRequestTs || elapsed >= interval) {
         this.lastActiveProgramRequestTs = now;
-        this.sendSocketNotification("GET_ACTIVE_PROGRAMS", {
-          instanceId: this.instanceId,
+        this.requestStateRefresh({
           haIds
         });
         return;
