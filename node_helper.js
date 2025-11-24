@@ -196,29 +196,46 @@ module.exports = NodeHelper.create({
     }
   },
 
-  handleUpdateRequest() {
-    if (this.hc && this.deviceService && !globalSession.isAuthenticating) {
-      moduleLog("info", "Update request received - fetching devices");
-      this.deviceService.getDevices(this.sendSocketNotification.bind(this));
-    } else {
-      moduleLog("warn", "Update request ignored - HomeConnect not ready or auth in progress");
-    }
-  },
-
-  handleCacheRefreshRequest(payload) {
-    const requester = payload && payload.instanceId ? payload.instanceId : "unknown";
+  handleStateRefreshRequest(payload = {}) {
+    const requester = payload.instanceId || this.instanceId || "unknown";
     if (!this.deviceService) {
-      moduleLog("warn", "Cache refresh requested but DeviceService unavailable", {
+      moduleLog("warn", "State refresh requested but DeviceService unavailable", {
         requester
       });
       return;
     }
 
-    moduleLog("debug", "Cache refresh requested - broadcasting cached devices", {
-      requester,
-      deviceCount: this.deviceService.devices.size
+    const forceRefresh = Boolean(payload.forceRefresh);
+    const haIds = Array.isArray(payload.haIds) ? payload.haIds : null;
+    const hasDevices = this.deviceService.devices && this.deviceService.devices.size > 0;
+    const sseHealthy =
+      this.deviceService.subscribed && !this.deviceService.heartbeatStale && hasDevices;
+    const shouldFetchDevices = forceRefresh || !sseHealthy;
+
+    if (shouldFetchDevices && this.hc && !globalSession.isAuthenticating) {
+      moduleLog("info", "State refresh requires polling Home Connect", {
+        requester,
+        forceRefresh,
+        sseHealthy
+      });
+      this.deviceService.getDevices(this.sendSocketNotification.bind(this));
+    } else if (hasDevices) {
+      moduleLog("debug", "State refresh served from cache (SSE data)", {
+        requester,
+        forceRefresh,
+        sseHealthy
+      });
+      this.deviceService.broadcastDevices(this.sendSocketNotification.bind(this));
+    } else {
+      moduleLog("warn", "State refresh unable to respond - no device data available", {
+        requester
+      });
+    }
+
+    this.handleGetActivePrograms({
+      instanceId: requester,
+      haIds
     });
-    this.deviceService.broadcastDevices(this.sendSocketNotification.bind(this));
   },
 
   handleRetryAuth() {
@@ -227,30 +244,25 @@ module.exports = NodeHelper.create({
   },
 
   handleGetActivePrograms() {
-    // No payload previously accepted; ensure function signature backwards compatible
-    // If called with an argument (from socketNotificationReceived), use it.
-    // Note: socketNotificationReceived will be updated to forward payload.
     const args = Array.from(arguments);
     const payload = args[0] || {};
-    moduleLog(
-      "info",
-      "📊 GET_ACTIVE_PROGRAMS request received",
-      payload.instanceId || "(no instance)"
-    );
+    const requester = payload.instanceId || null;
+    const haIds = Array.isArray(payload.haIds) ? payload.haIds : null;
+
+    moduleLog("info", "📊 GET_ACTIVE_PROGRAMS request received", requester || "(no instance)");
 
     if (!this.hc) {
       moduleLog("warn", "HomeConnect not initialized - cannot fetch active programs");
       this.broadcastToAllClients("INIT_STATUS", {
         status: "hc_not_ready",
-        message: "HomeConnect not ready"
+        message: "HomeConnect not ready",
+        instanceId: requester
       });
       return;
     }
 
     const now = Date.now();
-    const requester = payload.instanceId || null;
 
-    // Check if we're currently rate limited
     if (now < globalSession.rateLimitUntil) {
       const remainingSeconds = Math.ceil((globalSession.rateLimitUntil - now) / 1000);
       moduleLog("info", `Rate limited - ${remainingSeconds}s remaining`);
@@ -263,7 +275,6 @@ module.exports = NodeHelper.create({
       return;
     }
 
-    // Check minimum interval between requests
     const sinceLastFetch = now - globalSession.lastActiveProgramFetch;
     if (
       globalSession.MIN_ACTIVE_PROGRAM_INTERVAL > 0 &&
@@ -277,17 +288,29 @@ module.exports = NodeHelper.create({
       return;
     }
 
-    const deviceCount =
-      this.deviceService && this.deviceService.devices ? this.deviceService.devices.size : 0;
+    const deviceArray =
+      this.deviceService && this.deviceService.devices
+        ? Array.from(this.deviceService.devices.values())
+        : [];
+    const targetDevices = haIds && haIds.length
+      ? deviceArray.filter((device) => haIds.includes(device.haId))
+      : deviceArray;
+
+    if (targetDevices.length === 0) {
+      moduleLog("debug", "No devices matched active program request", {
+        requester: requester || "unknown",
+        requestedHaIds: haIds
+      });
+      return;
+    }
 
     moduleLog("debug", "Active program request accepted", {
       requester: requester || "unknown",
-      deviceCount
+      deviceCount: targetDevices.length
     });
 
     globalSession.lastActiveProgramFetch = now;
-    // Pass requester instanceId so we can scope the response
-    this.fetchActiveProgramsForAllDevices(requester);
+    this.fetchActiveProgramsForDevices(targetDevices, requester);
   },
 
   socketNotificationReceived(notification, payload) {
@@ -296,12 +319,8 @@ module.exports = NodeHelper.create({
         this.handleConfigNotification(payload);
         break;
 
-      case "UPDATEREQUEST":
-        this.handleUpdateRequest();
-        break;
-
-      case "REQUEST_DEVICE_CACHE":
-        this.handleCacheRefreshRequest(payload || {});
+      case "REQUEST_DEVICE_REFRESH":
+        this.handleStateRefreshRequest(payload);
         break;
 
       case "RETRY_AUTH":
@@ -684,16 +703,14 @@ module.exports = NodeHelper.create({
     return this.programService.fetchActiveProgramForDevice(haId, deviceName);
   },
 
-  async fetchActiveProgramsForAllDevices(requestingInstanceId) {
+  async fetchActiveProgramsForDevices(deviceArray, requestingInstanceId) {
     if (!this.deviceService) {
       moduleLog("debug", "DeviceService not available - cannot fetch programs");
       return;
     }
 
-    const deviceArray = Array.from(this.deviceService.devices.values());
-
-    if (deviceArray.length === 0) {
-      moduleLog("debug", "No devices to fetch active programs for");
+    if (!Array.isArray(deviceArray) || deviceArray.length === 0) {
+      moduleLog("debug", "No target devices provided for fetching active programs");
       return;
     }
 
