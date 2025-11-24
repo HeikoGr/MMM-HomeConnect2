@@ -17,7 +17,7 @@ const NodeHelper = require("node_helper"),
     MIN_AUTH_INTERVAL: 60000, // 1 minute between auth attempts
     rateLimitUntil: 0, // Timestamp until which rate limiting is active
     lastActiveProgramFetch: 0, // Timestamp of last active program fetch
-    MIN_ACTIVE_PROGRAM_INTERVAL: 10000 // 10 seconds between fetches
+    MIN_ACTIVE_PROGRAM_INTERVAL: 10 * 60 * 1000 // 10 minutes between fetches
   };
 
 const ACTIVE_PROGRAM_RETRY_DELAY_MS = 5000; // 5s
@@ -40,6 +40,11 @@ module.exports = NodeHelper.create({
   programService: null,
   serverPollTimer: null,
   activeProgramSchedulerTimer: null,
+  debugStats: {
+    lastApiCallTs: null,
+    lastSseEventTs: null,
+    apiCounters: {}
+  },
 
   init() {
     moduleLog("info", "init module helper: MMM-HomeConnect (session-based)");
@@ -55,7 +60,11 @@ module.exports = NodeHelper.create({
     this.deviceService = new DeviceService({
       logger: moduleLog,
       broadcastToAllClients: this.broadcastToAllClients.bind(this),
-      globalSession
+      globalSession,
+      debugHooks: {
+        recordApiCall: this.recordApiCall.bind(this),
+        recordSseEvent: this.recordSseEvent.bind(this)
+      }
     });
 
     try {
@@ -76,7 +85,10 @@ module.exports = NodeHelper.create({
       logger: moduleLog,
       globalSession,
       activeProgramManager: this.activeProgramManager,
-      devices: this.deviceService.devices
+      devices: this.deviceService.devices,
+      debugHooks: {
+        recordApiCall: this.recordApiCall.bind(this)
+      }
     });
   },
 
@@ -169,6 +181,17 @@ module.exports = NodeHelper.create({
     moduleLog("debug", `Processing CONFIG notification for instance: ${this.instanceId}`);
     moduleLog("debug", `Registered clients: ${globalSession.clientInstances.size}`);
 
+    // Wenn bereits Debug-Informationen gesammelt wurden, sofort einen Snapshot
+    // an alle bekannten Clients senden, damit auch frisch geladene Instanzen
+    // das Debug-Panel ohne weitere Events sehen.
+    try {
+      if (this.debugStats && (this.debugStats.lastApiCallTs || this.debugStats.lastSseEventTs)) {
+        this.broadcastDebugStats();
+      }
+    } catch (e) {
+      moduleLog("warn", "Failed to broadcast initial debug stats", e);
+    }
+
     if (!this.configReceived) {
       this.config = payload;
       // Normalize legacy config keys (support both snake_case and camelCase)
@@ -243,13 +266,13 @@ module.exports = NodeHelper.create({
     this.retryAuthentication();
   },
 
-  handleGetActivePrograms() {
-    const args = Array.from(arguments);
-    const payload = args[0] || {};
+  handleGetActivePrograms(payload = {}) {
     const requester = payload.instanceId || null;
     const haIds = Array.isArray(payload.haIds) ? payload.haIds : null;
 
-    moduleLog("info", "📊 GET_ACTIVE_PROGRAMS request received", requester || "(no instance)");
+    const requesterLabel = requester || "unknown";
+
+    moduleLog("info", "📊 GET_ACTIVE_PROGRAMS request received", requesterLabel);
 
     if (!this.hc) {
       moduleLog("warn", "HomeConnect not initialized - cannot fetch active programs");
@@ -283,7 +306,7 @@ module.exports = NodeHelper.create({
       const waitMs = globalSession.MIN_ACTIVE_PROGRAM_INTERVAL - sinceLastFetch;
       moduleLog(
         "debug",
-        `Throttling GET_ACTIVE_PROGRAMS for ${requester || "unknown"} - wait ${waitMs}ms`
+        `Throttling GET_ACTIVE_PROGRAMS for ${requesterLabel} - wait ${waitMs}ms`
       );
       return;
     }
@@ -298,14 +321,14 @@ module.exports = NodeHelper.create({
 
     if (targetDevices.length === 0) {
       moduleLog("debug", "No devices matched active program request", {
-        requester: requester || "unknown",
+        requester: requesterLabel,
         requestedHaIds: haIds
       });
       return;
     }
 
     moduleLog("debug", "Active program request accepted", {
-      requester: requester || "unknown",
+      requester: requesterLabel,
       deviceCount: targetDevices.length
     });
 
@@ -314,13 +337,15 @@ module.exports = NodeHelper.create({
   },
 
   socketNotificationReceived(notification, payload) {
+    const safePayload = payload || {};
+
     switch (notification) {
       case "CONFIG":
-        this.handleConfigNotification(payload);
+        this.handleConfigNotification(safePayload);
         break;
 
       case "REQUEST_DEVICE_REFRESH":
-        this.handleStateRefreshRequest(payload);
+        this.handleStateRefreshRequest(safePayload);
         break;
 
       case "RETRY_AUTH":
@@ -328,7 +353,10 @@ module.exports = NodeHelper.create({
         break;
 
       case "GET_ACTIVE_PROGRAMS":
-        this.handleGetActivePrograms(payload);
+        this.handleGetActivePrograms(safePayload);
+        break;
+
+      default:
         break;
     }
   },
@@ -340,6 +368,29 @@ module.exports = NodeHelper.create({
         instanceId
       });
     });
+  },
+
+  broadcastDebugStats() {
+    this.broadcastToAllClients("DEBUG_STATS", {
+      lastApiCallTs: this.debugStats.lastApiCallTs,
+      lastSseEventTs: this.debugStats.lastSseEventTs,
+      apiCounters: { ...this.debugStats.apiCounters }
+    });
+  },
+
+  recordApiCall(apiName) {
+    if (!apiName) return;
+    const now = Date.now();
+    this.debugStats.lastApiCallTs = now;
+    const counters = this.debugStats.apiCounters || {};
+    counters[apiName] = (counters[apiName] || 0) + 1;
+    this.debugStats.apiCounters = counters;
+    this.broadcastDebugStats();
+  },
+
+  recordSseEvent() {
+    this.debugStats.lastSseEventTs = Date.now();
+    this.broadcastDebugStats();
   },
 
   readRefreshTokenFromFile() {
@@ -367,8 +418,6 @@ module.exports = NodeHelper.create({
   },
 
   checkTokenAndInitialize() {
-    moduleLog("debug", "Checking for existing refresh token...");
-
     const token = this.readRefreshTokenFromFile();
 
     if (token) {
@@ -482,64 +531,11 @@ module.exports = NodeHelper.create({
     });
 
     if (this.deviceService) {
+      // Perform a single initial device fetch; further updates are normally
+      // driven by SSE, with fallback polling only when SSE is unhealthy.
       setTimeout(() => {
         this.deviceService.getDevices(this.sendSocketNotification.bind(this));
       }, 2000);
-    }
-
-    // Start a server-side periodic device poll to keep device list fresh even when
-    // no frontend client is actively triggering updates. Interval can be configured
-    // via `config.serverPollIntervalMs`; default is 5 minutes.
-    try {
-      const enableServerPoll = this.config && this.config.enableServerPolling;
-      if (enableServerPoll) {
-        const pollMs = (this.config && this.config.serverPollIntervalMs) || 5 * 60 * 1000;
-        if (this.serverPollTimer) clearInterval(this.serverPollTimer);
-        this.serverPollTimer = setInterval(() => {
-          moduleLog("debug", "server poll: fetching devices");
-          if (this.deviceService) {
-            try {
-              this.deviceService.getDevices(this.sendSocketNotification.bind(this));
-            } catch (e) {
-              moduleLog("error", "server poll failed:", e && e.stack ? e.stack : e);
-            }
-          }
-        }, pollMs);
-        moduleLog("info", `Server polling enabled (interval ${pollMs}ms)`);
-      } else if (this.serverPollTimer) {
-        clearInterval(this.serverPollTimer);
-        this.serverPollTimer = null;
-        moduleLog("info", "Server polling disabled via config");
-      }
-
-      // Periodic force-fetch of active programs. Respects existing dedupe/rate limits
-      // inside `handleGetActivePrograms`. Interval can be configured via
-      // `config.forceActiveProgramIntervalMs`; default is 60s.
-      const enableProgramScheduler = this.config && this.config.enableProgramScheduler;
-      if (enableProgramScheduler) {
-        const activeProgramIntervalMs =
-          (this.config && this.config.forceActiveProgramIntervalMs) || 60 * 1000;
-        if (this.activeProgramSchedulerTimer) clearInterval(this.activeProgramSchedulerTimer);
-        this.activeProgramSchedulerTimer = setInterval(() => {
-          moduleLog("debug", "server scheduler: requesting active programs");
-          try {
-            // Call the existing handler which enforces dedupe and MIN_ACTIVE_PROGRAM_INTERVAL
-            this.handleGetActivePrograms({ instanceId: "server-scheduler" });
-          } catch (e) {
-            moduleLog("error", "active program scheduler failed:", e && e.stack ? e.stack : e);
-          }
-        }, activeProgramIntervalMs);
-        moduleLog(
-          "info",
-          `Active-program scheduler enabled (interval ${activeProgramIntervalMs}ms)`
-        );
-      } else if (this.activeProgramSchedulerTimer) {
-        clearInterval(this.activeProgramSchedulerTimer);
-        this.activeProgramSchedulerTimer = null;
-        moduleLog("info", "Active-program scheduler disabled via config");
-      }
-    } catch (e) {
-      moduleLog("error", "Failed to start server-side polls:", e && e.stack ? e.stack : e);
     }
   },
 
@@ -614,7 +610,7 @@ module.exports = NodeHelper.create({
         moduleLog("info", "Token updated post-init - refreshing device list");
         this.deviceService.getDevices(this.sendSocketNotification.bind(this));
       } else {
-        moduleLog("info", "Token updated during initialization - device fetch will run after init");
+        moduleLog("info", "Token updated during initialization");
       }
     });
   },
@@ -844,8 +840,7 @@ module.exports = NodeHelper.create({
     const minInterval =
       this.config && typeof this.config.minActiveProgramIntervalMs === "number"
         ? Math.max(0, this.config.minActiveProgramIntervalMs)
-        : 10000;
+        : 10 * 60 * 1000;
     globalSession.MIN_ACTIVE_PROGRAM_INTERVAL = minInterval;
-    moduleLog("info", `Min active program interval set to ${minInterval}ms`);
   }
 });

@@ -41,34 +41,34 @@ function createDeviceService(overrides = {}) {
     assert.strictEqual(errEvent.p.status, "device_error");
   }
 
-  // SSE global subscription respects configured delay
+  // SSE global subscription establishes immediately and is idempotent
   {
     const { service: sseService } = createDeviceService();
     const subscribeCalls = [];
     const hcMock = {
       subscribe: (type) => subscribeCalls.push(type),
       refreshTokens: () => Promise.resolve(),
-      setEventSourceRetryConfig: () => {},
-      closeEventSources: () => {}
+      closeEventSources: () => { }
     };
     sseService.attachClient(hcMock);
-    sseService.setConfig({
-      globalEventSubscribeDelayMs: 40,
-      enableSSEHeartbeat: false
-    });
+    sseService.setConfig({ enableSSEHeartbeat: false });
 
-    sseService.subscribeToDeviceEvents(() => {});
-    await wait(10);
-    // Trigger another subscribe attempt before the delay expires; timer should continue
-    sseService.subscribeToDeviceEvents(() => {});
+    const handler = () => { };
 
-    assert.strictEqual(subscribeCalls.length, 0, "Global subscribe should wait for delay timer");
-
-    await wait(50);
+    sseService.subscribeToDeviceEvents(handler);
     assert.deepStrictEqual(
       subscribeCalls,
       ["NOTIFY", "STATUS", "EVENT"],
-      "Global subscriptions should execute after delay"
+      "Expected a single immediate subscription for NOTIFY/STATUS/EVENT"
+    );
+
+    // Calling subscribeToDeviceEvents again with the same handler should not
+    // create additional subscriptions.
+    sseService.subscribeToDeviceEvents(handler);
+    assert.deepStrictEqual(
+      subscribeCalls,
+      ["NOTIFY", "STATUS", "EVENT"],
+      "Expected no additional subscriptions when reusing same handler"
     );
   }
 
@@ -77,12 +77,12 @@ function createDeviceService(overrides = {}) {
     const { service } = createDeviceService();
     const closeCalls = [];
     const oldClient = {
-      setEventSourceRetryConfig: () => {},
+      setEventSourceRetryConfig: () => { },
       closeEventSources: (opts) => closeCalls.push(opts)
     };
     const newClient = {
-      setEventSourceRetryConfig: () => {},
-      closeEventSources: () => {}
+      setEventSourceRetryConfig: () => { },
+      closeEventSources: () => { }
     };
 
     service.attachClient(oldClient);
