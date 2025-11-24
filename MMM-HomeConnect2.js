@@ -289,7 +289,12 @@ Module.register("MMM-HomeConnect2", {
         const opStateActive = /(Run|Active|DelayedStart|InProgress)/i.test(opStateLabel || "");
         const opStatePaused = /Pause/i.test(opStateLabel || "");
 
-        if (opStateActive) {
+        // If the device is powered off, treat it as not active and clear any previous activity hint
+        if (device.PowerState === "Off") {
+          hint.hadActive = false;
+        }
+
+        if (opStateActive && device.PowerState !== "Off") {
           hint.hadActive = true;
         }
         if (remainingSec !== null && remainingSec > 0) {
@@ -342,12 +347,12 @@ Module.register("MMM-HomeConnect2", {
         }
         container += "<div class='deviceStatusIcons'>";
 
-        // Program state icon has priority over power icon
+        // Program state icon has priority over power icon, but never when device is off
         let programIcon = "";
-        if (opStatePaused) {
+        if (device.PowerState !== "Off" && opStatePaused) {
           programIcon =
             "<i class='fa fa-pause deviceStatusIcon' title='Program paused'></i>";
-        } else if (opStateActive && !opStateFinished) {
+        } else if (device.PowerState !== "Off" && opStateActive && !opStateFinished) {
           programIcon =
             "<i class='fa fa-play deviceStatusIcon' title='Program running'></i>";
         }
@@ -358,7 +363,11 @@ Module.register("MMM-HomeConnect2", {
           statusIcons.push(programIcon);
         } else if (device.PowerState === "On" || device.PowerState === "Standby") {
           statusIcons.push(
-            `<i class='fa fa-plug deviceStatusIcon' title='${device.PowerState}'></i>`
+            `<i class='fa fa-toggle-on deviceStatusIcon' title='${device.PowerState}'></i>`
+          );
+        } else if (device.PowerState === "Off") {
+          statusIcons.push(
+            "<i class='fa fa-toggle-off deviceStatusIcon' title='Power off'></i>"
           );
         }
 
