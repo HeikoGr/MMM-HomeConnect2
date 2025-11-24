@@ -287,6 +287,7 @@ Module.register("MMM-HomeConnect2", {
         const opStateLabel = opStateString ? opStateString.split(".").pop() : "";
         const opStateFinished = /Finished/i.test(opStateLabel || "");
         const opStateActive = /(Run|Active|DelayedStart|InProgress)/i.test(opStateLabel || "");
+        const opStatePaused = /Pause/i.test(opStateLabel || "");
 
         if (opStateActive) {
           hint.hadActive = true;
@@ -340,21 +341,43 @@ Module.register("MMM-HomeConnect2", {
           container += `<img src='modules/MMM-HomeConnect2/Icons/${Image}' class='device_img'>`;
         }
         container += "<div class='deviceStatusIcons'>";
-        [
-          device.PowerState === "On" || device.PowerState === "Standby"
-            ? `<i class='fa fa-plug deviceStatusIcon' title='${device.PowerState}'></i>`
-            : "",
-          device.DoorState === "Open"
-            ? "<i class='fa fa-door-open deviceStatusIcon' title='Door Open'></i>"
-            : "",
-          device.Lighting === true
-            ? "<i class='fa fa-lightbulb-o deviceStatusIcon' title='Light On'></i>"
-            : ""
-        ].forEach((icon) => {
-          if (icon) {
-            container += icon;
-          }
+
+        // Program state icon has priority over power icon
+        let programIcon = "";
+        if (opStatePaused) {
+          programIcon =
+            "<i class='fa fa-pause deviceStatusIcon' title='Program paused'></i>";
+        } else if (opStateActive && !opStateFinished) {
+          programIcon =
+            "<i class='fa fa-play deviceStatusIcon' title='Program running'></i>";
+        }
+
+        const statusIcons = [];
+
+        if (programIcon) {
+          statusIcons.push(programIcon);
+        } else if (device.PowerState === "On" || device.PowerState === "Standby") {
+          statusIcons.push(
+            `<i class='fa fa-plug deviceStatusIcon' title='${device.PowerState}'></i>`
+          );
+        }
+
+        if (device.DoorState === "Open") {
+          statusIcons.push(
+            "<i class='fa fa-door-open deviceStatusIcon' title='Door Open'></i>"
+          );
+        }
+
+        if (device.Lighting === true) {
+          statusIcons.push(
+            "<i class='fa fa-lightbulb-o deviceStatusIcon' title='Light On'></i>"
+          );
+        }
+
+        statusIcons.forEach((icon) => {
+          container += icon;
         });
+
         container += "</div>";
         container += `<div class='deviceName bright small'>${DeviceName}<br>`;
         container += "</div>"; // End deviceName
