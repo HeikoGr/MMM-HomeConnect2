@@ -123,13 +123,34 @@ Module.register("MMM-HomeConnect2", {
     }
   },
 
+  suspend() {
+    this.suspended = true;
+  },
+
   resume() {
+    this.suspended = false;
     // On resume, trigger a revalidation: request a fresh device update and
     // explicitly request active program snapshots so UI resumes reflecting
     // currently running programs immediately.
     try {
       this.lastActiveProgramRequestTs = 0;
       this.requestStateRefresh({ forceRefresh: true, bypassActiveProgramThrottle: true });
+
+      const haIds = this.devices
+        .map((d) => d.haId || d.haid || d.id)
+        .filter((id) => typeof id === "string" && id.length);
+
+      setTimeout(() => {
+        try {
+          this.sendSocketNotification("GET_ACTIVE_PROGRAMS", {
+            instanceId: this.instanceId,
+            haIds,
+            force: true
+          });
+        } catch (err) {
+          Log.error(`${this.name} resume fallback active program request failed: ${err}`);
+        }
+      }, 1500);
     } catch (e) {
       Log.error(`${this.name} resume actions failed: ${e}`);
     }
