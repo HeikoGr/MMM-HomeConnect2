@@ -128,7 +128,8 @@ Module.register("MMM-HomeConnect2", {
     // explicitly request active program snapshots so UI resumes reflecting
     // currently running programs immediately.
     try {
-      this.requestStateRefresh({ forceRefresh: true });
+      this.lastActiveProgramRequestTs = 0;
+      this.requestStateRefresh({ forceRefresh: true, bypassActiveProgramThrottle: true });
     } catch (e) {
       Log.error(`${this.name} resume actions failed: ${e}`);
     }

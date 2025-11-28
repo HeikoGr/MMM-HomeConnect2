@@ -229,6 +229,7 @@ module.exports = NodeHelper.create({
     }
 
     const forceRefresh = Boolean(payload.forceRefresh);
+    const bypassActiveProgramThrottle = Boolean(payload.bypassActiveProgramThrottle);
     const haIds = Array.isArray(payload.haIds) ? payload.haIds : null;
     const hasDevices = this.deviceService.devices && this.deviceService.devices.size > 0;
     const sseHealthy =
@@ -257,7 +258,8 @@ module.exports = NodeHelper.create({
 
     this.handleGetActivePrograms({
       instanceId: requester,
-      haIds
+      haIds,
+      force: bypassActiveProgramThrottle
     });
   },
 
@@ -269,6 +271,7 @@ module.exports = NodeHelper.create({
   handleGetActivePrograms(payload = {}) {
     const requester = payload.instanceId || null;
     const haIds = Array.isArray(payload.haIds) ? payload.haIds : null;
+    const force = Boolean(payload.force);
 
     const requesterLabel = requester || "unknown";
 
@@ -286,7 +289,7 @@ module.exports = NodeHelper.create({
 
     const now = Date.now();
 
-    if (now < globalSession.rateLimitUntil) {
+    if (!force && now < globalSession.rateLimitUntil) {
       const remainingSeconds = Math.ceil((globalSession.rateLimitUntil - now) / 1000);
       moduleLog("info", `Rate limited - ${remainingSeconds}s remaining`);
       this.broadcastToAllClients("INIT_STATUS", {
@@ -300,6 +303,7 @@ module.exports = NodeHelper.create({
 
     const sinceLastFetch = now - globalSession.lastActiveProgramFetch;
     if (
+      !force &&
       globalSession.MIN_ACTIVE_PROGRAM_INTERVAL > 0 &&
       sinceLastFetch < globalSession.MIN_ACTIVE_PROGRAM_INTERVAL
     ) {
@@ -329,7 +333,8 @@ module.exports = NodeHelper.create({
 
     moduleLog("debug", "Active program request accepted", {
       requester: requesterLabel,
-      deviceCount: targetDevices.length
+      deviceCount: targetDevices.length,
+      force
     });
 
     globalSession.lastActiveProgramFetch = now;
