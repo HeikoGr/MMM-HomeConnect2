@@ -56,18 +56,20 @@ function createDeviceService(overrides = {}) {
     const handler = () => { };
 
     sseService.subscribeToDeviceEvents(handler);
-    assert.deepStrictEqual(
-      subscribeCalls,
-      ["NOTIFY", "STATUS", "EVENT"],
+    await wait(0);
+    assert.strictEqual(
+      JSON.stringify(subscribeCalls),
+      JSON.stringify(["NOTIFY", "STATUS", "EVENT"]),
       "Expected a single immediate subscription for NOTIFY/STATUS/EVENT"
     );
 
     // Calling subscribeToDeviceEvents again with the same handler should not
     // create additional subscriptions.
     sseService.subscribeToDeviceEvents(handler);
-    assert.deepStrictEqual(
-      subscribeCalls,
-      ["NOTIFY", "STATUS", "EVENT"],
+    await wait(0);
+    assert.strictEqual(
+      JSON.stringify(subscribeCalls),
+      JSON.stringify(["NOTIFY", "STATUS", "EVENT"]),
       "Expected no additional subscriptions when reusing same handler"
     );
   }
