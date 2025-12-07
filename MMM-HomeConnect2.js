@@ -25,7 +25,8 @@ Module.register("MMM-HomeConnect2", {
     sseHeartbeatStaleThresholdMs: 3 * 60 * 1000, // 3 minutes
     minActiveProgramIntervalMs: 10 * 60 * 1000, // 10 minutes between active program fetches (backend throttle)
     // Module logging level: none | error | warn | info | debug
-    logLevel: ""
+    logLevel: "",
+    fetchHomeworks: false // Set to false to skip homework API calls
   },
 
   start() {
