@@ -26,14 +26,14 @@
   padding: 5px;
 }
 
-.deviceContainer>img {
+.deviceContainer > img {
   text-align: center;
   align-self: center;
   width: 60px;
   height: 60px;
 }
 
-.deviceContainer>div {
+.deviceContainer > div {
   text-align: left;
   align-self: center;
 }
@@ -91,10 +91,12 @@ progress {
 /* Indeterminate styling: keep native progress but add subtle animation fallback */
 progress[max]:not([value]) {
   /* browsers show indeterminate natively; ensure visibility */
-  background: linear-gradient(90deg,
-      rgba(255, 255, 255, 0.1) 0%,
-      rgba(255, 255, 255, 0.25) 50%,
-      rgba(255, 255, 255, 0.1) 100%);
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.1) 0%,
+    rgba(255, 255, 255, 0.25) 50%,
+    rgba(255, 255, 255, 0.1) 100%
+  );
 }
 
 .hc-debug-panel {
@@ -114,7 +116,7 @@ progress[max]:not([value]) {
   gap: 12px;
 }
 
-.hc-debug-panel-row+.hc-debug-panel-row {
+.hc-debug-panel-row + .hc-debug-panel-row {
   margin-top: 4px;
 }
 

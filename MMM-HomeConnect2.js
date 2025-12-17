@@ -360,7 +360,7 @@ Module.register("MMM-HomeConnect2", {
         }
 
         const StatusString =
-          remainingSec > 0 ? `${_self.translate("DONE_IN")} ${formatDuration(remainingSec)}` : "",
+            remainingSec > 0 ? `${_self.translate("DONE_IN")} ${formatDuration(remainingSec)}` : "",
           Image = `${device.type}.png`,
           DeviceName = device.name;
         let container = "<div class='deviceContainer'>";
@@ -372,11 +372,9 @@ Module.register("MMM-HomeConnect2", {
         // Program state icon has priority over power icon, but never when device is off
         let programIcon = "";
         if (device.PowerState !== "Off" && opStatePaused) {
-          programIcon =
-            "<i class='fa fa-pause deviceStatusIcon' title='Program paused'></i>";
+          programIcon = "<i class='fa fa-pause deviceStatusIcon' title='Program paused'></i>";
         } else if (device.PowerState !== "Off" && opStateActive && !opStateFinished) {
-          programIcon =
-            "<i class='fa fa-play deviceStatusIcon' title='Program running'></i>";
+          programIcon = "<i class='fa fa-play deviceStatusIcon' title='Program running'></i>";
         }
 
         const statusIcons = [];
@@ -388,21 +386,15 @@ Module.register("MMM-HomeConnect2", {
             `<i class='fa fa-toggle-on deviceStatusIcon' title='${device.PowerState}'></i>`
           );
         } else if (device.PowerState === "Off") {
-          statusIcons.push(
-            "<i class='fa fa-toggle-off deviceStatusIcon' title='Power off'></i>"
-          );
+          statusIcons.push("<i class='fa fa-toggle-off deviceStatusIcon' title='Power off'></i>");
         }
 
         if (device.DoorState === "Open") {
-          statusIcons.push(
-            "<i class='fa fa-door-open deviceStatusIcon' title='Door Open'></i>"
-          );
+          statusIcons.push("<i class='fa fa-door-open deviceStatusIcon' title='Door Open'></i>");
         }
 
         if (device.Lighting === true) {
-          statusIcons.push(
-            "<i class='fa fa-lightbulb-o deviceStatusIcon' title='Light On'></i>"
-          );
+          statusIcons.push("<i class='fa fa-lightbulb-o deviceStatusIcon' title='Light On'></i>");
         }
 
         statusIcons.forEach((icon) => {
@@ -515,7 +507,8 @@ Module.register("MMM-HomeConnect2", {
     // Status from INIT_STATUS gets rendered only in debug mode
     if (this.lastInitStatus && this.lastInitStatus.message) {
       rows.push(
-        `<div class='hc-debug-row'><span class='hc-debug-label'>last init status:</span> ${this.lastInitStatus.message
+        `<div class='hc-debug-row'><span class='hc-debug-label'>last init status:</span> ${
+          this.lastInitStatus.message
         }</div>`
       );
     }

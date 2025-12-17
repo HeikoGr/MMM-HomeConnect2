@@ -48,12 +48,12 @@ function createDeviceService(overrides = {}) {
     const hcMock = {
       subscribe: (type) => subscribeCalls.push(type),
       refreshTokens: () => Promise.resolve(),
-      closeEventSources: () => { }
+      closeEventSources: () => {}
     };
     sseService.attachClient(hcMock);
     sseService.setConfig({ enableSSEHeartbeat: false });
 
-    const handler = () => { };
+    const handler = () => {};
 
     sseService.subscribeToDeviceEvents(handler);
     await wait(0);
@@ -79,12 +79,12 @@ function createDeviceService(overrides = {}) {
     const { service } = createDeviceService();
     const closeCalls = [];
     const oldClient = {
-      setEventSourceRetryConfig: () => { },
+      setEventSourceRetryConfig: () => {},
       closeEventSources: (opts) => closeCalls.push(opts)
     };
     const newClient = {
-      setEventSourceRetryConfig: () => { },
-      closeEventSources: () => { }
+      setEventSourceRetryConfig: () => {},
+      closeEventSources: () => {}
     };
 
     service.attachClient(oldClient);
