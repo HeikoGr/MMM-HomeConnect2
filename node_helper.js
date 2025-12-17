@@ -308,10 +308,7 @@ module.exports = NodeHelper.create({
       sinceLastFetch < globalSession.MIN_ACTIVE_PROGRAM_INTERVAL
     ) {
       const waitMs = globalSession.MIN_ACTIVE_PROGRAM_INTERVAL - sinceLastFetch;
-      moduleLog(
-        "debug",
-        `Throttling GET_ACTIVE_PROGRAMS for ${requesterLabel} - wait ${waitMs}ms`
-      );
+      moduleLog("debug", `Throttling GET_ACTIVE_PROGRAMS for ${requesterLabel} - wait ${waitMs}ms`);
       return;
     }
 
@@ -319,9 +316,10 @@ module.exports = NodeHelper.create({
       this.deviceService && this.deviceService.devices
         ? Array.from(this.deviceService.devices.values())
         : [];
-    const targetDevices = haIds && haIds.length
-      ? deviceArray.filter((device) => haIds.includes(device.haId))
-      : deviceArray;
+    const targetDevices =
+      haIds && haIds.length
+        ? deviceArray.filter((device) => haIds.includes(device.haId))
+        : deviceArray;
 
     if (targetDevices.length === 0) {
       moduleLog("debug", "No devices matched active program request", {
