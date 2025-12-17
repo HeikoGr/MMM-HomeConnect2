@@ -1,4 +1,6 @@
 refresh_token.json
+cache/
 node_modules/
-.DS_Store
-.vscode/
+config/custom.css
+config/config.js
+config/.env
