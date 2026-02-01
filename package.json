@@ -29,7 +29,8 @@
     "lint:fix": "eslint --fix && prettier --write .",
     "test": "node tests/run-all.js",
     "test:spelling": "cspell .",
-    "check": "node check.js ../../config/config.js || true"
+    "check": "node check.js ../../config/config.js || true",
+    "mmcheck": "node tests/magicmirror-check.mjs"
   },
   "lint-staged": {
     "*.{js,json,css,html}": [
@@ -40,14 +41,14 @@
   "dependencies": {
     "eventsource": "^4.1.0",
     "qrcode": "^1.5.4",
-    "undici": "^7.18.2"
+    "undici": "^7.19.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
     "eslint": "^9.39.2",
     "eslint-plugin-n": "^17.23.2",
-    "globals": "^17.0.0",
-    "prettier": "^3.8.0"
+    "globals": "^17.3.0",
+    "prettier": "^3.8.1"
   },
   "bugs": {
     "url": "https://github.com/HeikoGr/MMM-HomeConnect2/issues"
