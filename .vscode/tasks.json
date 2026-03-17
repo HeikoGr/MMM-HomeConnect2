@@ -67,7 +67,7 @@
     {
       "label": "lint + prettier",
       "type": "shell",
-      "command": "node --run lint && npx prettier --write .",
+      "command": "node --run lint:fix",
       "presentation": {
         "echo": true,
         "reveal": "always",
