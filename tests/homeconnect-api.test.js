@@ -49,6 +49,58 @@ function setGlobalBuiltin(name, value) {
   assert.strictEqual(device._remainingObservedAt, undefined);
   assert.strictEqual(device.RemainingProgramTimeIsEstimated, undefined);
 
+  hc.applyEventToDevice(device, {
+    key: "Refrigeration.Common.Status.Door.Freezer",
+    value: "BSH.Common.EnumType.DoorState.Open"
+  });
+  assert.strictEqual(device.DoorState, "Open");
+  assert.strictEqual(device.RefrigerationDoorStates.Freezer, "Freezer: Open");
+
+  hc.applyEventToDevice(device, {
+    key: "ConsumerProducts.CoffeeMaker.Option.BeanAmount",
+    value: "ConsumerProducts.CoffeeMaker.EnumType.BeanAmount.Strong"
+  });
+  assert.strictEqual(
+    device.DeviceStatusByKey["ConsumerProducts.CoffeeMaker.Option.BeanAmount"],
+    "Bean Amount: Strong"
+  );
+
+  hc.applyEventToDevice(device, {
+    key: "ConsumerProducts.CoffeeMaker.Event.WaterTankEmpty",
+    value: true
+  });
+  assert.strictEqual(
+    device.DeviceAlertsByKey["ConsumerProducts.CoffeeMaker.Event.WaterTankEmpty"],
+    "Water Tank Empty"
+  );
+
+  hc.applyEventToDevice(device, {
+    key: "Cooking.Common.Option.Hood.VentingLevel",
+    value: "Cooking.Hood.EnumType.Stage.FanStage02"
+  });
+  assert.strictEqual(
+    device.DeviceStatusByKey["Cooking.Common.Option.Hood.VentingLevel"],
+    "Venting Level: Fan Stage 02"
+  );
+
+  hc.applyEventToDevice(device, {
+    key: "Cooking.Oven.Event.PreheatFinished",
+    value: true
+  });
+  assert.strictEqual(
+    device.DeviceAlertsByKey["Cooking.Oven.Event.PreheatFinished"],
+    "Preheat Finished"
+  );
+
+  hc.applyEventToDevice(device, {
+    key: "ConsumerProducts.CleaningRobot.Event.RobotIsStuck",
+    value: true
+  });
+  assert.strictEqual(
+    device.DeviceAlertsByKey["ConsumerProducts.CleaningRobot.Event.RobotIsStuck"],
+    "Robot Is Stuck"
+  );
+
   console.log("homeconnect-api.test.js OK");
 })();
 
@@ -148,6 +200,13 @@ function setGlobalBuiltin(name, value) {
     );
     assert.ok(thirdGet);
     assert.strictEqual(thirdGet.headers.get("accept-language"), "en-GB");
+
+    await hc.getAvailablePrograms("ha-1");
+    const fourthGet = requests.find(
+      (request) => request.method === "GET" && request.url.includes("/programs/available")
+    );
+    assert.ok(fourthGet);
+    assert.strictEqual(fourthGet.headers.get("accept-language"), "en-GB");
   } finally {
     if (hc) {
       if (hc.tokenRefreshTimeout) {

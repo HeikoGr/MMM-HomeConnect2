@@ -19,5 +19,8 @@
   "PROGRAM_FINISHED": "Program finished",
   "IN_PROGRESS": "In progress",
   "APPROX_PREFIX": "approx.",
-  "SELECTED_PROGRAM": "Selected program"
+  "SELECTED_PROGRAM": "Selected program",
+  "AVAILABLE_PROGRAMS": "Programs",
+  "AVAILABLE_OPTIONS": "Options",
+  "ACTIVE_ALERTS": "Alerts"
 }

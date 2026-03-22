@@ -13,6 +13,7 @@ function createProgramService(overrides = {}) {
       {
         haId: "ha-1",
         name: "Washer",
+        type: "Washer",
         optionsApplied: []
       }
     ]
@@ -91,6 +92,17 @@ function createProgramService(overrides = {}) {
             displayvalue: "Cupboard-dry reached"
           }
         ]
+      },
+      availableProgram: {
+        key: "LaundryCare.Dryer.Program.Synthetic",
+        options: [
+          {
+            key: "LaundryCare.Dryer.Option.DryingTarget",
+            constraints: {
+              allowedvalues: ["LaundryCare.Dryer.EnumType.DryingTarget.CupboardDryPlus"]
+            }
+          }
+        ]
       }
     };
     service.applyProgramResult(result);
@@ -98,10 +110,42 @@ function createProgramService(overrides = {}) {
     assert.strictEqual(device.ActiveProgramSource, "selected");
     assert.strictEqual(device.ActiveProgramPhase, "Cupboard-dry reached");
     assert.deepStrictEqual(device.ActiveProgramDetails, [
-      "Cupboard Dry Plus",
-      "Less Ironing",
+      "Drying Target: Cupboard Dry Plus",
+      "Less Ironing: 60 min",
       "Gentle Dry"
     ]);
+    assert.deepStrictEqual(device.AvailableOptionDetails, ["Drying Target"]);
+  }
+
+  // applyProgramResult: stores available programs and constraints when no active program exists
+  {
+    const { service, devices } = createProgramService();
+    const result = {
+      haId: "ha-1",
+      source: "available",
+      data: {
+        programs: [
+          { key: "ConsumerProducts.CoffeeMaker.Program.Beverage.Coffee", name: "Coffee" },
+          { key: "ConsumerProducts.CoffeeMaker.Program.Beverage.Espresso", name: "Espresso" }
+        ],
+        programDefinition: {
+          key: "ConsumerProducts.CoffeeMaker.Program.Beverage.Coffee",
+          options: [
+            {
+              key: "ConsumerProducts.CoffeeMaker.Option.FillQuantity",
+              unit: "ml",
+              constraints: { min: 60, max: 260 }
+            }
+          ]
+        }
+      }
+    };
+
+    service.applyProgramResult(result);
+    const device = devices.get("ha-1");
+    assert.deepStrictEqual(device.AvailablePrograms, ["Coffee", "Espresso"]);
+    assert.deepStrictEqual(device.AvailableOptionDetails, ["Fill Quantity: 60-260 ml"]);
+    assert.strictEqual(device.ActiveProgramName, undefined);
   }
 
   // fetchActiveProgramForDevice: falls back to selected program on 404 active program
@@ -124,6 +168,92 @@ function createProgramService(overrides = {}) {
     assert.strictEqual(result.success, true);
     assert.strictEqual(result.source, "selected");
     assert.strictEqual(result.data.name, "Synthetics");
+  }
+
+  // fetchActiveProgramForDevice: does not fall back to available programs for washers
+  {
+    const { service } = createProgramService();
+    service.attachClient({
+      getActiveProgram: async () => ({ success: false, statusCode: 404, error: "Not found" }),
+      getSelectedProgram: async () => ({ success: false, statusCode: 404, error: "Not found" }),
+      getAvailablePrograms: async () => ({
+        success: true,
+        data: {
+          programs: [
+            { key: "Cooking.Common.Program.Hood.Venting", name: "Fan setting" },
+            { key: "Cooking.Common.Program.Hood.Automatic", name: "Automatic" }
+          ]
+        }
+      }),
+      getAvailableProgram: async () => ({
+        success: true,
+        data: {
+          key: "Cooking.Common.Program.Hood.Venting",
+          options: [
+            {
+              key: "Cooking.Common.Option.Hood.VentingLevel",
+              constraints: {
+                allowedvalues: ["Cooking.Hood.EnumType.Stage.FanStage01"]
+              }
+            }
+          ]
+        }
+      }),
+      applyEventToDevice() {}
+    });
+
+    const result = await service.fetchActiveProgramForDevice("ha-1", "Washer");
+    assert.strictEqual(result.success, false);
+    assert.strictEqual(result.error, "No active program");
+  }
+
+  // fetchActiveProgramForDevice: still falls back to available programs for non-blocked types
+  {
+    const devices = new Map([
+      [
+        "ha-hood",
+        {
+          haId: "ha-hood",
+          name: "Hood",
+          type: "Cooktop",
+          optionsApplied: []
+        }
+      ]
+    ]);
+    const { service } = createProgramService({ devices });
+    service.attachClient({
+      getActiveProgram: async () => ({ success: false, statusCode: 404, error: "Not found" }),
+      getSelectedProgram: async () => ({ success: false, statusCode: 404, error: "Not found" }),
+      getAvailablePrograms: async () => ({
+        success: true,
+        data: {
+          programs: [
+            { key: "Cooking.Common.Program.Hood.Venting", name: "Fan setting" },
+            { key: "Cooking.Common.Program.Hood.Automatic", name: "Automatic" }
+          ]
+        }
+      }),
+      getAvailableProgram: async () => ({
+        success: true,
+        data: {
+          key: "Cooking.Common.Program.Hood.Venting",
+          options: [
+            {
+              key: "Cooking.Common.Option.Hood.VentingLevel",
+              constraints: {
+                allowedvalues: ["Cooking.Hood.EnumType.Stage.FanStage01"]
+              }
+            }
+          ]
+        }
+      }),
+      applyEventToDevice() {}
+    });
+
+    const result = await service.fetchActiveProgramForDevice("ha-hood", "Hood");
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.source, "available");
+    assert.strictEqual(result.data.programs.length, 2);
   }
 
   // handleActiveProgramFetchError: rate limit sets rateLimitUntil

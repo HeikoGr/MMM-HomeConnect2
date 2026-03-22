@@ -19,5 +19,8 @@
   "PROGRAM_FINISHED": "Program færdig",
   "IN_PROGRESS": "Igang",
   "APPROX_PREFIX": "ca.",
-  "SELECTED_PROGRAM": "Valgt program"
+  "SELECTED_PROGRAM": "Valgt program",
+  "AVAILABLE_PROGRAMS": "Programmer",
+  "AVAILABLE_OPTIONS": "Valgmuligheder",
+  "ACTIVE_ALERTS": "Advarsler"
 }
