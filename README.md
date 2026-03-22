@@ -2,10 +2,10 @@
 
 This module connects MagicMirror to BSH (Bosch, Siemens, Neff, Gaggenau, ...) devices. It uses the OAuth2 Device Flow so a browser is not required on the MagicMirror server.
 
-## Overview / Appliance Status
+## Overview
 ![Overview of appliance status](img/screenshot.png)
 
-Key features
+## Features
 - Headless Device Flow authentication (no local browser needed)
 - On-screen instructions and code for user authentication
 - Token storage and automatic refresh
@@ -28,14 +28,16 @@ git pull
 npm install
 ```
 
-##  Requirements
+## Requirements
 
-- You need to have a registred Home Connect Account with eMail and password with connected Home Connect devices.
+- You need to have a registered Home Connect account with email and password and connected Home Connect devices.
 - You also need to register for a Home Connect Developer Account [Home Connect Registration](https://developer.home-connect.com/user/register).
-- You also need to register an Application in the developer portal to get a Client ID
-- a Client Secret is not needed for headless authentication.
+- You also need to register an application in the developer portal to get a Client ID.
+- A client secret is optional for this headless flow. If your Home Connect application provides one, you can still configure it.
 
-Simple config example (add to your MagicMirror `config/config.js`):
+## Configuration
+
+Simple config example for your MagicMirror `config/config.js`:
 
 ```js
 {
@@ -43,16 +45,37 @@ Simple config example (add to your MagicMirror `config/config.js`):
     position: "top_left",
     config: {
         clientId: "YOUR_CLIENT_ID",
+        apiLanguage: "en",
         showDeviceIcon: true,
-        updateFrequency: 60 * 60 * 1000 // 1 hour
+        showDeviceIfInfoIsAvailable: true,
+        progressRefreshIntervalMs: 30 * 1000,
+        minActiveProgramIntervalMs: 10 * 60 * 1000
     }
 },
 ```
 
+Common module options
+- apiLanguage: Preferred Home Connect API language. Examples: en, de, da, en-GB.
+- showDeviceIfInfoIsAvailable: Also display devices when program or status information is available even if the device is otherwise idle.
+- showAlwaysAllDevices: Always render all appliances, even when they are currently idle.
+- progressRefreshIntervalMs: Frontend-only refresh interval for countdown/progress rendering.
+- minActiveProgramIntervalMs: Backend throttle for active-program snapshot requests.
+- logLevel: Module log verbosity: none, error, warn, info, debug.
+
+Display behavior
+- By default the module focuses on appliances with meaningful state such as active programs, failures, open doors, lighting, or other available program/status data.
+- Set showAlwaysAllDevices to true if you prefer a static list of all appliances.
+- Set logLevel to debug to show the built-in debug panel and progress-source diagnostics in the frontend.
+
+Typical frontend states
+- Running appliances show their current program, remaining time, and a progress indicator.
+- Appliances with a selected program can still be shown when showDeviceIfInfoIsAvailable is enabled.
+- Authentication, loading, empty-state, and debug-panel views are covered by the frontend render tests.
+
 ### Authentication / Device Flow
 ![Authentication Workflow visualisation](img/pic01_auth.png)
 
-How authentication works
+How authentication works:
 - First time: module shows a URL and a short code on the MagicMirror screen.
 - Open that URL on any device, enter the code and grant access.
 - The module saves tokens locally and uses them to call the API.
@@ -62,7 +85,14 @@ If the token expires, the module will automatically refresh it when possible.
 Troubleshooting
 - If you see "polling too quickly" errors, wait a minute and try again.
 - Check logs with `pm2 logs mm` or in your terminal.
-- Token file: `modules/MMM-HomeConnect2/refresh_token.json` (do not commit this file).
+- Token file: `MMM-HomeConnect2/refresh_token.json` in the module directory (do not commit this file).
+
+Testing
+- `npm test` runs the deterministic unit test suite.
+- The unit test suite includes backend helpers and frontend render coverage for typical device and auth states.
+- The optional live smoke test is disabled by default.
+- To enable it, run `HC_RUN_LIVE_SMOKE_TEST=1 npm test`.
+- For the live smoke test you can optionally provide `HC_CLIENT_ID` and `HC_CLIENT_SECRET`. If `HC_CLIENT_ID` is missing, the runner tries to read the MagicMirror config.
 
 Security
 - Keep `clientSecret` and `refresh_token.json` private. Do not commit them to git.

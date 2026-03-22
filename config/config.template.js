@@ -16,8 +16,11 @@ let config = {
       position: "top_right",
       config: {
         clientId: "YOUR_CLIENT_ID",
+        apiLanguage: "en",
         showDeviceIcon: true,
-        updateFrequency: 60 * 60 * 1000 // 1 hour
+        showDeviceIfInfoIsAvailable: true,
+        progressRefreshIntervalMs: 30 * 1000,
+        minActiveProgramIntervalMs: 10 * 60 * 1000
       }
     }
   ]

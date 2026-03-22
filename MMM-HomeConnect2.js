@@ -9,11 +9,13 @@ Module.register("MMM-HomeConnect2", {
   deviceRuntimeHints: {},
   lastActiveProgramRequestTs: 0,
   debugStats: null,
+  progressRefreshTimer: null,
 
   defaults: {
     header: "Home Connect Appliances",
     clientId: "",
     clientSecret: "",
+    apiLanguage: "",
 
     showDeviceIcon: true,
     showAlwaysAllDevices: false,
@@ -23,6 +25,7 @@ Module.register("MMM-HomeConnect2", {
     enableSSEHeartbeat: true, // Enable SSE heartbeat checks by default
     sseHeartbeatCheckIntervalMs: 60 * 1000, // 1 minute
     sseHeartbeatStaleThresholdMs: 3 * 60 * 1000, // 3 minutes
+    progressRefreshIntervalMs: 30 * 1000,
     minActiveProgramIntervalMs: 10 * 60 * 1000, // 10 minutes between active program fetches (backend throttle)
     // Module logging level: none | error | warn | info | debug
     logLevel: ""
@@ -31,6 +34,33 @@ Module.register("MMM-HomeConnect2", {
   start() {
     // Generate a unique instance ID
     this.instanceId = `hc_${Math.random().toString(36).substr(2, 9)}`;
+    this.ensureProgressRefreshTimer();
+  },
+
+  ensureProgressRefreshTimer() {
+    if (this.progressRefreshTimer) {
+      return;
+    }
+
+    const refreshIntervalMs =
+      typeof this.config?.progressRefreshIntervalMs === "number"
+        ? Math.max(5000, this.config.progressRefreshIntervalMs)
+        : this.defaults.progressRefreshIntervalMs;
+
+    this.progressRefreshTimer = setInterval(() => {
+      if (this.suspended || !Array.isArray(this.devices) || this.devices.length === 0) {
+        return;
+      }
+
+      this.updateDom(0);
+    }, refreshIntervalMs);
+  },
+
+  clearProgressRefreshTimer() {
+    if (this.progressRefreshTimer) {
+      clearInterval(this.progressRefreshTimer);
+      this.progressRefreshTimer = null;
+    }
   },
 
   requestStateRefresh(options = {}) {
@@ -62,12 +92,37 @@ Module.register("MMM-HomeConnect2", {
     };
   },
 
+  getPreferredApiLanguage() {
+    const configuredLanguage =
+      typeof this.config?.apiLanguage === "string" ? this.config.apiLanguage.trim() : "";
+    if (configuredLanguage) {
+      return configuredLanguage;
+    }
+
+    const magicMirrorLanguage =
+      typeof globalThis.config?.language === "string" ? globalThis.config.language.trim() : "";
+    if (magicMirrorLanguage) {
+      return magicMirrorLanguage;
+    }
+
+    const documentLanguage =
+      typeof document?.documentElement?.lang === "string"
+        ? document.documentElement.lang.trim()
+        : "";
+    if (documentLanguage) {
+      return documentLanguage;
+    }
+
+    return typeof navigator?.language === "string" ? navigator.language.trim() : "";
+  },
+
   notificationReceived(notification) {
     if (notification === "ALL_MODULES_STARTED") {
       // Send config with instanceId
       this.sendSocketNotification("CONFIG", {
         ...this.config,
-        instanceId: this.instanceId
+        instanceId: this.instanceId,
+        apiLanguage: this.getPreferredApiLanguage()
       });
     }
   },
@@ -157,8 +212,7 @@ Module.register("MMM-HomeConnect2", {
   },
 
   stop() {
-    // No periodic frontend polling timers needed; state is driven by SSE and
-    // rare backend polling when SSE is unhealthy.
+    this.clearProgressRefreshTimer();
   },
 
   scheduleActiveProgramSnapshot() {
@@ -184,48 +238,363 @@ Module.register("MMM-HomeConnect2", {
     }
   },
 
-  getDom() {
-    const div = document.createElement("div");
-    let wrapper = "";
-    const _self = this;
-    const runtimeHints = this.deviceRuntimeHints || (this.deviceRuntimeHints = {});
+  getDeviceUtils() {
+    const browserUtils =
+      typeof window !== "undefined" && window.HomeConnectDeviceUtils
+        ? window.HomeConnectDeviceUtils
+        : {};
 
-    function parseRemainingSeconds(device) {
-      if (
-        typeof window !== "undefined" &&
-        window.HomeConnectDeviceUtils &&
-        typeof window.HomeConnectDeviceUtils.parseRemainingSeconds === "function"
-      ) {
-        try {
-          return window.HomeConnectDeviceUtils.parseRemainingSeconds(device);
-        } catch {
-          /* ignore */
-        }
-      }
-      return null;
+    return {
+      parseRemainingSeconds:
+        typeof browserUtils.parseRemainingSeconds === "function"
+          ? browserUtils.parseRemainingSeconds
+          : () => null,
+      parseProgress:
+        typeof browserUtils.parseProgress === "function"
+          ? browserUtils.parseProgress
+          : () => undefined,
+      parseEstimatedTotalSeconds:
+        typeof browserUtils.parseEstimatedTotalSeconds === "function"
+          ? browserUtils.parseEstimatedTotalSeconds
+          : () => null,
+      isEstimatedDuration:
+        typeof browserUtils.isEstimatedDuration === "function"
+          ? browserUtils.isEstimatedDuration
+          : () => false,
+      shouldDisplayDevice:
+        typeof browserUtils.shouldDisplayDevice === "function"
+          ? browserUtils.shouldDisplayDevice
+          : () => false
+    };
+  },
+
+  formatDuration(seconds) {
+    if (!seconds || seconds <= 0) {
+      return "";
     }
 
-    function parseProgress(device) {
-      if (
-        typeof window !== "undefined" &&
-        window.HomeConnectDeviceUtils &&
-        typeof window.HomeConnectDeviceUtils.parseProgress === "function"
-      ) {
-        try {
-          return window.HomeConnectDeviceUtils.parseProgress(device);
-        } catch {
-          /* ignore */
-        }
-      }
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    return (hours > 0 ? `${hours}h ` : "") + `${String(minutes).padStart(2, "0")}m`;
+  },
+
+  formatDebugAge(timestamp) {
+    if (!Number.isFinite(timestamp) || timestamp <= 0) {
+      return "n/a";
+    }
+
+    const ageSeconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+    return this.formatDuration(ageSeconds) || `${ageSeconds}s`;
+  },
+
+  getObservedProgressEstimate(device, remainingSeconds) {
+    const observedAt = Number(device?._remainingObservedAt);
+    if (!Number.isFinite(observedAt) || !(remainingSeconds > 0)) {
       return undefined;
     }
 
-    function formatDuration(sec) {
-      if (!sec || sec <= 0) return "";
-      const h = Math.floor(sec / 3600);
-      const m = Math.floor((sec % 3600) / 60);
-      return (h > 0 ? `${h}h ` : "") + `${String(m).padStart(2, "0")}m`;
+    const observedElapsedSeconds = Math.max(0, Math.round((Date.now() - observedAt) / 1000));
+    if (observedElapsedSeconds <= 0) {
+      return undefined;
     }
+
+    const estimatedTotalSeconds = observedElapsedSeconds + remainingSeconds;
+    if (!(estimatedTotalSeconds > 0)) {
+      return undefined;
+    }
+
+    return Math.max(
+      0,
+      Math.min(100, Math.round((observedElapsedSeconds / estimatedTotalSeconds) * 100))
+    );
+  },
+
+  getEffectiveRemainingSeconds(device, remainingSeconds) {
+    if (!(remainingSeconds > 0)) {
+      return remainingSeconds;
+    }
+
+    const lastSeenAt = Number(device?._lastRemainingSeenAt || device?._remainingObservedAt);
+    if (!Number.isFinite(lastSeenAt) || lastSeenAt <= 0) {
+      return remainingSeconds;
+    }
+
+    const elapsedSeconds = Math.max(0, Math.round((Date.now() - lastSeenAt) / 1000));
+    return Math.max(0, remainingSeconds - elapsedSeconds);
+  },
+
+  buildDeviceDisplayState(device, runtimeHints, deviceUtils) {
+    const remainingSeconds = deviceUtils.parseRemainingSeconds(device);
+    const effectiveRemainingSeconds = this.getEffectiveRemainingSeconds(device, remainingSeconds);
+    const estimatedTotalSeconds = deviceUtils.parseEstimatedTotalSeconds(device);
+    const hasEstimatedDuration = deviceUtils.isEstimatedDuration(device);
+    const progressValue = deviceUtils.parseProgress(device);
+    const deviceKey = device.haId || device.haid || device.id || device.name || "unknown";
+    const hint = runtimeHints[deviceKey] || (runtimeHints[deviceKey] = { hadActive: false });
+
+    let progressNumeric;
+    if (progressValue !== undefined && progressValue !== null) {
+      const parsed = Number(progressValue);
+      progressNumeric = Number.isFinite(parsed)
+        ? Math.max(0, Math.min(100, Math.round(parsed)))
+        : undefined;
+    }
+
+    const operationStateRaw = device.OperationState || device.operationState || null;
+    const operationStateString =
+      typeof operationStateRaw === "string"
+        ? operationStateRaw
+        : operationStateRaw && typeof operationStateRaw.value === "string"
+          ? operationStateRaw.value
+          : null;
+    const operationStateLabel = operationStateString ? operationStateString.split(".").pop() : "";
+    const operationStateFinished = /Finished/i.test(operationStateLabel || "");
+    const operationStateActive = /(Run|Active|DelayedStart|InProgress)/i.test(
+      operationStateLabel || ""
+    );
+    const operationStatePaused = /Pause/i.test(operationStateLabel || "");
+
+    if (device.PowerState === "Off") {
+      hint.hadActive = false;
+    }
+    if (operationStateActive && device.PowerState !== "Off") {
+      hint.hadActive = true;
+    }
+    if (remainingSeconds !== null && remainingSeconds > 0) {
+      hint.hadActive = true;
+    }
+    if (progressNumeric !== undefined && progressNumeric > 0 && progressNumeric < 100) {
+      hint.hadActive = true;
+    }
+
+    const finishedViaZero = hint.hadActive && remainingSeconds === 0;
+    const isFinished = operationStateFinished || progressNumeric === 100 || finishedViaZero;
+    if (isFinished) {
+      hint.hadActive = false;
+    }
+
+    const observedPercent = this.getObservedProgressEstimate(device, effectiveRemainingSeconds);
+    let estimatedTotalPercent;
+    if (
+      Number.isFinite(estimatedTotalSeconds) &&
+      estimatedTotalSeconds > 0 &&
+      Number.isFinite(effectiveRemainingSeconds) &&
+      effectiveRemainingSeconds >= 0 &&
+      effectiveRemainingSeconds <= estimatedTotalSeconds
+    ) {
+      estimatedTotalPercent = Math.max(
+        0,
+        Math.min(
+          100,
+          Math.round(
+            ((estimatedTotalSeconds - effectiveRemainingSeconds) / estimatedTotalSeconds) * 100
+          )
+        )
+      );
+    }
+
+    let initialPercent;
+    if (
+      device._initialRemaining &&
+      Number.isFinite(Number(device._initialRemaining)) &&
+      Number(device._initialRemaining) > 0 &&
+      effectiveRemainingSeconds > 0
+    ) {
+      const initialRemaining = Number(device._initialRemaining);
+      initialPercent = Math.max(
+        0,
+        Math.min(
+          100,
+          Math.round(((initialRemaining - effectiveRemainingSeconds) / initialRemaining) * 100)
+        )
+      );
+    }
+
+    const canTrustExplicitProgress =
+      progressNumeric !== undefined &&
+      (progressNumeric >= 100 ||
+        progressNumeric > 0 ||
+        !(effectiveRemainingSeconds > 0 && operationStateActive));
+
+    let percent;
+    let progressSource = "none";
+    if (canTrustExplicitProgress) {
+      percent = progressNumeric;
+      progressSource = "programProgress";
+    } else if (estimatedTotalPercent !== undefined) {
+      percent = estimatedTotalPercent;
+      progressSource = "estimatedTotalProgramTime";
+    } else if (
+      observedPercent !== undefined &&
+      (initialPercent === undefined || observedPercent > initialPercent)
+    ) {
+      percent = observedPercent;
+      progressSource = "observedElapsed+remaining";
+    } else if (initialPercent !== undefined) {
+      percent = initialPercent;
+      progressSource = "initialRemaining";
+    } else if (observedPercent !== undefined) {
+      percent = observedPercent;
+      progressSource = "observedElapsed+remaining";
+    }
+
+    const isIndeterminate = percent === undefined && effectiveRemainingSeconds > 0;
+    if (isIndeterminate) {
+      progressSource = "indeterminate";
+    }
+
+    const plannedDurationLabel =
+      Number.isFinite(estimatedTotalSeconds) && estimatedTotalSeconds > 0
+        ? `${hasEstimatedDuration ? `${this.translate("APPROX_PREFIX")} ` : ""}${this.formatDuration(estimatedTotalSeconds)}`
+        : "";
+    const showPlannedDurationInTitle = !(effectiveRemainingSeconds > 0);
+    const programName = device.ActiveProgramName || "";
+    const programPhase =
+      typeof device.ActiveProgramPhase === "string" ? device.ActiveProgramPhase : "";
+    const programDetails = Array.isArray(device.ActiveProgramDetails)
+      ? device.ActiveProgramDetails.filter((value) => typeof value === "string" && value)
+      : [];
+    const programSource = device.ActiveProgramSource === "selected" ? "selected" : "active";
+    const programMeta =
+      programName && plannedDurationLabel && showPlannedDurationInTitle
+        ? `${programName} • ${plannedDurationLabel}`
+        : programName || (showPlannedDurationInTitle ? plannedDurationLabel : "");
+    const programSupplementParts = [];
+    if (!operationStateActive && programSource === "selected" && programName) {
+      programSupplementParts.push(this.translate("SELECTED_PROGRAM"));
+    }
+    if (programPhase) {
+      programSupplementParts.push(programPhase);
+    }
+    if (programDetails.length) {
+      programSupplementParts.push(programDetails.join(" • "));
+    }
+
+    const statusText =
+      effectiveRemainingSeconds > 0
+        ? `${this.translate("DONE_IN")} ${hasEstimatedDuration ? `${this.translate("APPROX_PREFIX")} ` : ""}${this.formatDuration(effectiveRemainingSeconds)}`
+        : "";
+    const showProgressDebug = (this.config?.logLevel || "").toLowerCase() === "debug";
+    const progressDebug = showProgressDebug
+      ? [
+          `src=${progressSource}`,
+          `api=${progressNumeric !== undefined ? `${progressNumeric}%` : "n/a"}`,
+          `total=${estimatedTotalPercent !== undefined ? `${estimatedTotalPercent}%` : "n/a"}`,
+          `initial=${initialPercent !== undefined ? `${initialPercent}%` : "n/a"}`,
+          `observed=${observedPercent !== undefined ? `${observedPercent}%` : "n/a"}`,
+          `remaining=${effectiveRemainingSeconds !== null ? this.formatDuration(effectiveRemainingSeconds) || `${effectiveRemainingSeconds}s` : "n/a"}`,
+          `rawRemaining=${remainingSeconds !== null ? this.formatDuration(remainingSeconds) || `${remainingSeconds}s` : "n/a"}`,
+          `planned=${plannedDurationLabel || "n/a"}`,
+          `seen=${this.formatDebugAge(Number(device._remainingObservedAt))}`
+        ].join(" | ")
+      : "";
+
+    return {
+      deviceName: device.name,
+      imageName: `${device.type}.png`,
+      operationStateActive,
+      operationStateFinished,
+      operationStatePaused,
+      effectiveRemainingSeconds,
+      hasEstimatedDuration,
+      isFinished,
+      isIndeterminate,
+      percent,
+      progressDebug,
+      programMeta,
+      programSupplement: programSupplementParts.join(" | "),
+      showProgressDebug,
+      statusText
+    };
+  },
+
+  getDeviceProgressHtml(displayState) {
+    if (displayState.isFinished) {
+      return `<div class='hc-finished'>${this.translate("PROGRAM_FINISHED")}</div>`;
+    }
+    if (displayState.isIndeterminate) {
+      return `<progress max='100' width='95%'></progress><span class='hc-progress-label'>${this.translate("IN_PROGRESS")}</span>`;
+    }
+    if (displayState.percent !== undefined) {
+      return `<progress value='${displayState.percent}' max='100' width='95%'></progress><span class='hc-progress-label'>${displayState.percent}%</span>`;
+    }
+
+    return "";
+  },
+
+  getStatusIconsHtml(device, displayState) {
+    let programIcon = "";
+    if (device.PowerState !== "Off" && displayState.operationStatePaused) {
+      programIcon = "<i class='fa fa-pause deviceStatusIcon' title='Program paused'></i>";
+    } else if (
+      device.PowerState !== "Off" &&
+      displayState.operationStateActive &&
+      !displayState.operationStateFinished
+    ) {
+      programIcon = "<i class='fa fa-play deviceStatusIcon' title='Program running'></i>";
+    }
+
+    const statusIcons = [];
+
+    if (programIcon) {
+      statusIcons.push(programIcon);
+    } else if (device.PowerState === "On" || device.PowerState === "Standby") {
+      statusIcons.push(
+        `<i class='fa fa-toggle-on deviceStatusIcon' title='${device.PowerState}'></i>`
+      );
+    } else if (device.PowerState === "Off") {
+      statusIcons.push("<i class='fa fa-toggle-off deviceStatusIcon' title='Power off'></i>");
+    }
+
+    if (device.DoorState === "Open") {
+      statusIcons.push("<i class='fa fa-door-open deviceStatusIcon' title='Door Open'></i>");
+    }
+
+    if (device.Lighting === true) {
+      statusIcons.push("<i class='fa fa-lightbulb-o deviceStatusIcon' title='Light On'></i>");
+    }
+
+    return statusIcons.join("");
+  },
+
+  renderDeviceCard(device, runtimeHints, deviceUtils) {
+    if (!deviceUtils.shouldDisplayDevice(device, this.config)) {
+      return "";
+    }
+
+    const displayState = this.buildDeviceDisplayState(device, runtimeHints, deviceUtils);
+    const progressBarHtml = this.getDeviceProgressHtml(displayState);
+    const containerClasses = this.config.showDeviceIcon
+      ? "deviceContainer"
+      : "deviceContainer deviceContainerWithoutDeviceIcon";
+
+    let container = `<div class='${containerClasses}'>`;
+    if (this.config.showDeviceIcon) {
+      container += `<img src='modules/MMM-HomeConnect2/Icons/${displayState.imageName}' class='device_img'>`;
+    }
+    container += `<div class='deviceStatusIcons'>${this.getStatusIconsHtml(device, displayState)}</div>`;
+    container += `<div class='deviceName bright small'>${displayState.deviceName}`;
+    if (displayState.programMeta) {
+      container += `<div class='deviceProgram dimmed xsmall'>${displayState.programMeta}</div>`;
+    }
+    if (displayState.programSupplement) {
+      container += `<div class='deviceProgramDetails dimmed xsmall'>${displayState.programSupplement}</div>`;
+    }
+    container += "</div>";
+    container += `<div class='deviceStatus dimmed xsmall'>${displayState.statusText}</div>`;
+    container += `<div class='deviceProgressBar'>${progressBarHtml}</div>`;
+    if (displayState.showProgressDebug) {
+      container += `<div class='hc-device-debug'>${displayState.progressDebug}</div>`;
+    }
+    container += "</div>";
+
+    return container;
+  },
+
+  getDom() {
+    const div = document.createElement("div");
+    const runtimeHints = this.deviceRuntimeHints || (this.deviceRuntimeHints = {});
+    const deviceUtils = this.getDeviceUtils();
 
     // Show authentication info if available
     if (this.authInfo && this.authInfo.status === "waiting") {
@@ -249,183 +618,25 @@ Module.register("MMM-HomeConnect2", {
     if (!this.devices || this.devices.length === 0) {
       const loadingHtml =
         "<div class='small'>" +
-        `<i class='fa fa-cog fa-spin'></i> ${_self.translate("SESSION_BASED_AUTH")}<br>` +
-        `<span class='dimmed'>${_self.translate("LOADING_APPLIANCES")}...</span>` +
+        `<i class='fa fa-cog fa-spin'></i> ${this.translate("SESSION_BASED_AUTH")}<br>` +
+        `<span class='dimmed'>${this.translate("LOADING_APPLIANCES")}...</span>` +
         "</div>";
       div.innerHTML = loadingHtml;
       return div;
     }
 
-    // Show devices
-    this.devices.forEach((device) => {
-      // Compact and readable device show logic
-      let IsShowDevice = false;
-
-      if (_self.config.showAlwaysAllDevices) {
-        IsShowDevice = true;
-      }
-      if (device.PowerState === "On") {
-        IsShowDevice = true;
-      }
-      if (device.Lighting) {
-        IsShowDevice = true;
-      }
-      // Support different door fields: DoorState / DoorOpen
-      const doorOpen =
-        device.DoorOpen || device.DoorState === "Open" || device.doorState === "Open";
-      if (_self.config.showDeviceIfDoorIsOpen && doorOpen) {
-        IsShowDevice = true;
-      }
-      if (_self.config.showDeviceIfFailure && device.Failure) {
-        IsShowDevice = true;
-      }
-      if (_self.config.showDeviceIfInfoIsAvailable && device.Failure) {
-        IsShowDevice = true;
-      }
-
-      if (IsShowDevice) {
-        const remainingSec = parseRemainingSeconds(device);
-        const progVal = parseProgress(device);
-        const deviceKey = device.haId || device.haid || device.id || device.name || "unknown";
-        // Track if this appliance has recently reported an active program so we only mark it finished with real data
-        const hint = runtimeHints[deviceKey] || (runtimeHints[deviceKey] = { hadActive: false });
-
-        // Normalize program progress to a number if possible
-        let progNumeric;
-        if (progVal !== undefined && progVal !== null) {
-          const parsed = Number(progVal);
-          progNumeric = Number.isFinite(parsed)
-            ? Math.max(0, Math.min(100, Math.round(parsed)))
-            : undefined;
-        }
-
-        const opStateRaw = device.OperationState || device.operationState || null;
-        const opStateString =
-          typeof opStateRaw === "string"
-            ? opStateRaw
-            : opStateRaw && typeof opStateRaw.value === "string"
-              ? opStateRaw.value
-              : null;
-        const opStateLabel = opStateString ? opStateString.split(".").pop() : "";
-        const opStateFinished = /Finished/i.test(opStateLabel || "");
-        const opStateActive = /(Run|Active|DelayedStart|InProgress)/i.test(opStateLabel || "");
-        const opStatePaused = /Pause/i.test(opStateLabel || "");
-
-        // If the device is powered off, treat it as not active and clear any previous activity hint
-        if (device.PowerState === "Off") {
-          hint.hadActive = false;
-        }
-
-        if (opStateActive && device.PowerState !== "Off") {
-          hint.hadActive = true;
-        }
-        if (remainingSec !== null && remainingSec > 0) {
-          hint.hadActive = true;
-        }
-        if (progNumeric !== undefined && progNumeric > 0 && progNumeric < 100) {
-          hint.hadActive = true;
-        }
-
-        // Finished detection
-        const finishedViaZero = hint.hadActive && remainingSec === 0;
-        const isFinished = opStateFinished || progNumeric === 100 || finishedViaZero;
-        if (isFinished && (opStateFinished || progNumeric === 100 || finishedViaZero)) {
-          hint.hadActive = false;
-        }
-
-        // Determine percent: prefer explicit progress, otherwise estimate from initialRemaining if available
-        let percent;
-        if (progNumeric !== undefined) {
-          percent = progNumeric;
-        } else if (
-          device._initialRemaining &&
-          Number.isFinite(Number(device._initialRemaining)) &&
-          Number(device._initialRemaining) > 0 &&
-          remainingSec > 0
-        ) {
-          const init = Number(device._initialRemaining);
-          percent = Math.max(0, Math.min(100, Math.round(((init - remainingSec) / init) * 100)));
-        }
-
-        // If we have remaining but no percent -> show indeterminate
-        const isIndeterminate = percent === undefined && remainingSec > 0;
-
-        let ProgessBar = "";
-        if (isFinished) {
-          ProgessBar = `<div class='hc-finished'>${_self.translate("PROGRAM_FINISHED")}</div>`;
-        } else if (isIndeterminate) {
-          ProgessBar = `<progress max='100' width='95%'></progress><span class='hc-progress-label'>${_self.translate("IN_PROGRESS")}</span>`;
-        } else if (percent !== undefined) {
-          ProgessBar = `<progress value='${percent}' max='100' width='95%'></progress><span class='hc-progress-label'>${percent}%</span>`;
-        }
-
-        const StatusString =
-            remainingSec > 0 ? `${_self.translate("DONE_IN")} ${formatDuration(remainingSec)}` : "",
-          Image = `${device.type}.png`,
-          DeviceName = device.name;
-        let container = "<div class='deviceContainer'>";
-        if (_self.config.showDeviceIcon) {
-          container += `<img src='modules/MMM-HomeConnect2/Icons/${Image}' class='device_img'>`;
-        }
-        container += "<div class='deviceStatusIcons'>";
-
-        // Program state icon has priority over power icon, but never when device is off
-        let programIcon = "";
-        if (device.PowerState !== "Off" && opStatePaused) {
-          programIcon = "<i class='fa fa-pause deviceStatusIcon' title='Program paused'></i>";
-        } else if (device.PowerState !== "Off" && opStateActive && !opStateFinished) {
-          programIcon = "<i class='fa fa-play deviceStatusIcon' title='Program running'></i>";
-        }
-
-        const statusIcons = [];
-
-        if (programIcon) {
-          statusIcons.push(programIcon);
-        } else if (device.PowerState === "On" || device.PowerState === "Standby") {
-          statusIcons.push(
-            `<i class='fa fa-toggle-on deviceStatusIcon' title='${device.PowerState}'></i>`
-          );
-        } else if (device.PowerState === "Off") {
-          statusIcons.push("<i class='fa fa-toggle-off deviceStatusIcon' title='Power off'></i>");
-        }
-
-        if (device.DoorState === "Open") {
-          statusIcons.push("<i class='fa fa-door-open deviceStatusIcon' title='Door Open'></i>");
-        }
-
-        if (device.Lighting === true) {
-          statusIcons.push("<i class='fa fa-lightbulb-o deviceStatusIcon' title='Light On'></i>");
-        }
-
-        statusIcons.forEach((icon) => {
-          container += icon;
-        });
-
-        container += "</div>";
-        container += `<div class='deviceName bright small'>${DeviceName}<br>`;
-        container += "</div>"; // End deviceName
-        container += "<div></div>"; // Empty gridcell for layout
-        container += `<div class='deviceStatus dimmed xsmall'>${StatusString}</div>`;
-        container += `<div class='deviceProgessBar'>${ProgessBar}</div>`;
-        container += "</div>"; // End deviceContainer
-        if (wrapper === "") {
-          wrapper = container;
-        } else {
-          wrapper += container;
-        }
-      }
-    });
+    const wrapper = this.devices
+      .map((device) => this.renderDeviceCard(device, runtimeHints, deviceUtils))
+      .filter(Boolean)
+      .join("");
 
     if (wrapper === "") {
-      wrapper = `<div class='dimmed small'>${_self.translate("NO_ACTIVE_APPLIANCES")}</div>`;
+      div.innerHTML = `<div class='dimmed small'>${this.translate("NO_ACTIVE_APPLIANCES")}</div>${this.getDebugPanel()}`;
+      return div;
     }
 
     const debugPanel = this.getDebugPanel();
-    if (debugPanel) {
-      wrapper += debugPanel;
-    }
-
-    div.innerHTML = wrapper;
+    div.innerHTML = `${wrapper}${debugPanel}`;
     return div;
   },
 
