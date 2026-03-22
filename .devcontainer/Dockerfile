@@ -6,6 +6,7 @@ WORKDIR /opt/magic_mirror
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
+    ripgrep \
     python3 \
     ca-certificates \
     build-essential \
@@ -32,6 +33,11 @@ RUN npm install -g \
     @eslint/json \
     prettier-plugin-jinja-template \
     @stylistic/eslint-plugin
+
+# Install Playwright MCP and a local browser runtime for browser automation from chat/MCP.
+RUN npm install -g @playwright/mcp playwright && \
+    playwright install --with-deps chromium && \
+    npm cache clean --force
 
 WORKDIR /opt/magic_mirror
 
