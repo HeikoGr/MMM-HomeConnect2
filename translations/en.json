@@ -17,5 +17,7 @@
   "AUTH_FAILED_INFO": "Please restart MagicMirror to try again.",
   "SESSION_BASED_AUTH": "Session-based authentication active",
   "PROGRAM_FINISHED": "Program finished",
-  "IN_PROGRESS": "In progress"
+  "IN_PROGRESS": "In progress",
+  "APPROX_PREFIX": "approx.",
+  "SELECTED_PROGRAM": "Selected program"
 }

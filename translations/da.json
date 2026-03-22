@@ -17,5 +17,7 @@
   "AUTH_FAILED_INFO": "Genstart MagicMirror for at prøve igen.",
   "SESSION_BASED_AUTH": "Sessionsbaseret godkendelse aktiv",
   "PROGRAM_FINISHED": "Program færdig",
-  "IN_PROGRESS": "Igang"
+  "IN_PROGRESS": "Igang",
+  "APPROX_PREFIX": "ca.",
+  "SELECTED_PROGRAM": "Valgt program"
 }
