@@ -3,23 +3,55 @@
 // Simple test runner for local unit tests and optional live API smoke test.
 
 const { spawnSync } = require("child_process");
-const path = require("path");
+const { refreshTokenPath } = require("../lib/module-paths");
+
+function shouldRunLiveSmokeTest() {
+  const value = String(process.env.HC_RUN_LIVE_SMOKE_TEST || "")
+    .trim()
+    .toLowerCase();
+  return value === "1" || value === "true" || value === "yes";
+}
 
 function runNode(file) {
-  const abs = path.join(__dirname, file);
-  spawnSync(process.execPath, [abs], { stdio: "inherit" });
+  const result = spawnSync(process.execPath, [file], {
+    cwd: __dirname,
+    stdio: "inherit"
+  });
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  if (typeof result.status === "number" && result.status !== 0) {
+    const error = new Error(`${file} failed with exit code ${result.status}`);
+    error.exitCode = result.status;
+    throw error;
+  }
+
+  if (result.signal) {
+    const error = new Error(`${file} terminated by signal ${result.signal}`);
+    error.exitCode = 1;
+    throw error;
+  }
 }
 
 function runUnitTests() {
   runNode("auth-service.test.js");
+  runNode("device-utils.test.js");
   runNode("device-service.test.js");
+  runNode("frontend-render.test.js");
+  runNode("homeconnect-api.test.js");
   runNode("program-service.test.js");
 }
 
 async function runLiveSmokeTest() {
   const fs = require("fs");
-  const refreshPath = path.join(__dirname, "..", "refresh_token.json");
-  if (!fs.existsSync(refreshPath)) {
+  if (!shouldRunLiveSmokeTest()) {
+    console.log("Skipping live HomeConnect smoke test. Set HC_RUN_LIVE_SMOKE_TEST=1 to enable it.");
+    return;
+  }
+
+  if (!fs.existsSync(refreshTokenPath)) {
     console.log("No refresh_token.json found – skipping live API smoke test.");
     return;
   }
@@ -30,7 +62,7 @@ async function runLiveSmokeTest() {
 
   let tokenValue = null;
   try {
-    const raw = fs.readFileSync(refreshPath, "utf8");
+    const raw = fs.readFileSync(refreshTokenPath, "utf8");
     try {
       const parsed = JSON.parse(raw);
       if (typeof parsed === "string") {
@@ -229,6 +261,11 @@ async function runLiveSmokeTest() {
 }
 
 (async () => {
-  runUnitTests();
-  await runLiveSmokeTest();
+  try {
+    runUnitTests();
+    await runLiveSmokeTest();
+  } catch (error) {
+    console.error(error && error.message ? error.message : error);
+    process.exitCode = error && error.exitCode ? error.exitCode : 1;
+  }
 })();

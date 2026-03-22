@@ -29,7 +29,6 @@
     "lint:fix": "eslint --fix && prettier --write .",
     "test": "node tests/run-all.js",
     "test:spelling": "cspell .",
-    "check": "node check.js ../../config/config.js || true",
     "mmcheck": "node tests/magicmirror-check.mjs --current"
   },
   "lint-staged": {
