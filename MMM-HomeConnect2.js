@@ -490,16 +490,12 @@ Module.register("MMM-HomeConnect2", {
     const programDetails = Array.isArray(device.ActiveProgramDetails)
       ? device.ActiveProgramDetails.filter((value) => typeof value === "string" && value)
       : [];
-    const programSource = device.ActiveProgramSource === "selected" ? "selected" : "active";
     const shouldShowProgramDetails = programDetails.length > 0;
     const programMeta =
       programName && plannedDurationLabel && showPlannedDurationInTitle
         ? `${programName} • ${plannedDurationLabel}`
         : programName || (showPlannedDurationInTitle ? plannedDurationLabel : "");
     const programSupplementParts = [];
-    if (!operationStateActive && programSource === "selected" && programName) {
-      programSupplementParts.push(this.translate("SELECTED_PROGRAM"));
-    }
     if (programPhase) {
       programSupplementParts.push(programPhase);
     }
