@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("assert");
+const path = require("path");
 const AuthService = require("../lib/auth-service");
 
 function createAuthService(overrides = {}) {
@@ -20,6 +21,7 @@ function createAuthService(overrides = {}) {
     broadcastToAllClients: (n, p) => broadcasts.push({ n, p }),
     setModuleLogLevel: () => {},
     globalSession,
+    refreshTokenPath: path.join(__dirname, "fixtures", "missing-refresh-token.json"),
     maxInitAttempts: 1,
     ...overrides
   });

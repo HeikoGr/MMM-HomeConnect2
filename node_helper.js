@@ -3,6 +3,7 @@ const fs = require("fs");
 const ActiveProgramManager = require("./lib/active-program-manager");
 const AuthService = require("./lib/auth-service");
 const DeviceService = require("./lib/device-service");
+const { refreshTokenPath } = require("./lib/module-paths");
 const ProgramService = require("./lib/program-service");
 const { deviceAppearsActive, isDeviceConnected } = require("./lib/device-utils");
 /* eslint-disable n/no-missing-require */
@@ -47,7 +48,7 @@ module.exports = NodeHelper.create({
   },
 
   init() {
-    moduleLog("info", "init module helper: MMM-HomeConnect (session-based)");
+    moduleLog("info", "init module helper: MMM-HomeConnect2 (session-based)");
 
     this.authService = new AuthService({
       logger: moduleLog,
@@ -202,6 +203,9 @@ module.exports = NodeHelper.create({
         if (!this.config.clientSecret && this.config.client_Secret) {
           this.config.clientSecret = this.config.client_Secret;
         }
+        if (!this.config.apiLanguage && this.config.api_language) {
+          this.config.apiLanguage = this.config.api_language;
+        }
       }
       // apply configured log level for module-level logging via auth service
       this.authService.setConfig(this.config);
@@ -209,11 +213,17 @@ module.exports = NodeHelper.create({
       if (this.deviceService && typeof this.deviceService.setConfig === "function") {
         this.deviceService.setConfig(this.config);
       }
+      if (this.hc && typeof this.hc.setAcceptLanguage === "function") {
+        this.hc.setAcceptLanguage(this.config.apiLanguage);
+      }
       this.handleConfigNotificationFirstTime();
     } else {
       this.updateActiveProgramInterval();
       if (this.deviceService && typeof this.deviceService.setConfig === "function") {
         this.deviceService.setConfig(this.config);
+      }
+      if (this.hc && typeof this.hc.setAcceptLanguage === "function") {
+        this.hc.setAcceptLanguage(this.config.apiLanguage);
       }
       this.handleConfigNotificationSubsequent();
     }
@@ -445,7 +455,7 @@ module.exports = NodeHelper.create({
   },
 
   handleHeadlessAuthSuccess(tokens) {
-    fs.writeFileSync("./modules/MMM-HomeConnect2/refresh_token.json", tokens.refresh_token);
+    fs.writeFileSync(refreshTokenPath, tokens.refresh_token);
     moduleLog("info", "Refresh token saved successfully");
 
     globalSession.refreshToken = tokens.refresh_token;
@@ -567,8 +577,8 @@ module.exports = NodeHelper.create({
       });
 
       try {
-        if (fs.existsSync("./modules/MMM-HomeConnect2/refresh_token.json")) {
-          fs.unlinkSync("./modules/MMM-HomeConnect2/refresh_token.json");
+        if (fs.existsSync(refreshTokenPath)) {
+          fs.unlinkSync(refreshTokenPath);
           moduleLog("info", "Removed cached refresh_token.json after invalid_grant");
         }
       } catch (fsErr) {
@@ -604,7 +614,7 @@ module.exports = NodeHelper.create({
 
   setupHomeConnectRefreshToken() {
     this.hc.on("newRefreshToken", (refreshToken) => {
-      fs.writeFileSync("./modules/MMM-HomeConnect2/refresh_token.json", refreshToken);
+      fs.writeFileSync(refreshTokenPath, refreshToken);
       moduleLog("info", "Refresh token updated");
       globalSession.refreshToken = refreshToken;
       // After init has completed (subscriptions established), refresh devices on token update.
@@ -624,7 +634,9 @@ module.exports = NodeHelper.create({
       if (!HomeConnect) {
         HomeConnect = require("./lib/homeconnect-api.js");
       }
-      this.hc = new HomeConnect(this.config.clientId, this.config.clientSecret, refreshToken);
+      this.hc = new HomeConnect(this.config.clientId, this.config.clientSecret, refreshToken, {
+        acceptLanguage: this.config.apiLanguage
+      });
 
       // attach client to services
       if (this.deviceService) {
@@ -681,8 +693,8 @@ module.exports = NodeHelper.create({
       this.activeProgramManager.clearAll();
     }
 
-    if (fs.existsSync("./modules/MMM-HomeConnect2/refresh_token.json")) {
-      fs.unlinkSync("./modules/MMM-HomeConnect2/refresh_token.json");
+    if (fs.existsSync(refreshTokenPath)) {
+      fs.unlinkSync(refreshTokenPath);
       moduleLog("info", "Old token file deleted");
     }
 
