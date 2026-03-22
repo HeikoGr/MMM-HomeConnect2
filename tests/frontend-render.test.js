@@ -137,7 +137,7 @@ function createInstance(overrides = {}) {
     const selectedDom = selectedProgramInstance.getDom();
     assert.ok(selectedDom.innerHTML.includes("deviceContainerWithoutDeviceIcon"));
     assert.ok(selectedDom.innerHTML.includes("Synthetics"));
-    assert.ok(selectedDom.innerHTML.includes("SELECTED_PROGRAM"));
+    assert.ok(!selectedDom.innerHTML.includes("SELECTED_PROGRAM"));
     assert.ok(selectedDom.innerHTML.includes("Cupboard Dry Plus • Low Heat"));
 
     const finishedProgramInstance = createInstance({
