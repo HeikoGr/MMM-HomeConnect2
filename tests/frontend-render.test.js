@@ -27,6 +27,7 @@ function installFrontendGlobals() {
       parseProgress: deviceUtils.parseProgress,
       parseEstimatedTotalSeconds: deviceUtils.parseEstimatedTotalSeconds,
       isEstimatedDuration: deviceUtils.isEstimatedDuration,
+      getDeviceTypeMeta: deviceUtils.getDeviceTypeMeta,
       shouldDisplayDevice: deviceUtils.shouldDisplayDevice
     }
   };
@@ -101,6 +102,7 @@ function createInstance(overrides = {}) {
           PowerState: "On",
           OperationState: "BSH.Common.EnumType.OperationState.Run",
           ActiveProgramName: "Eco 40-60",
+          ActiveProgramDetails: ["Silent", "varioSpeed"],
           ProgramProgress: 35,
           RemainingProgramTime: 1800
         }
@@ -108,9 +110,11 @@ function createInstance(overrides = {}) {
     });
     const runningDom = runningInstance.getDom();
     assert.ok(runningDom.innerHTML.includes("Eco 40-60"));
+    assert.ok(runningDom.innerHTML.includes("Silent • varioSpeed"));
     assert.ok(runningDom.innerHTML.includes("35%"));
     assert.ok(runningDom.innerHTML.includes("deviceProgressBar"));
     assert.ok(runningDom.innerHTML.includes("fa-play"));
+    assert.ok(!runningDom.innerHTML.includes("AVAILABLE_PROGRAMS"));
 
     const selectedProgramInstance = createInstance({
       config: {
@@ -125,7 +129,8 @@ function createInstance(overrides = {}) {
           type: "Dryer",
           PowerState: "Off",
           ActiveProgramName: "Synthetics",
-          ActiveProgramSource: "selected"
+          ActiveProgramSource: "selected",
+          ActiveProgramDetails: ["Cupboard Dry Plus", "Low Heat"]
         }
       ]
     });
@@ -133,6 +138,76 @@ function createInstance(overrides = {}) {
     assert.ok(selectedDom.innerHTML.includes("deviceContainerWithoutDeviceIcon"));
     assert.ok(selectedDom.innerHTML.includes("Synthetics"));
     assert.ok(selectedDom.innerHTML.includes("SELECTED_PROGRAM"));
+    assert.ok(selectedDom.innerHTML.includes("Cupboard Dry Plus • Low Heat"));
+
+    const finishedProgramInstance = createInstance({
+      config: {
+        showDeviceIcon: false,
+        showDeviceIfInfoIsAvailable: true,
+        showDeviceIfDoorIsOpen: false,
+        showDeviceIfFailure: false
+      },
+      devices: [
+        {
+          name: "Washer",
+          type: "Washer",
+          PowerState: "On",
+          OperationState: "BSH.Common.EnumType.OperationState.Finished",
+          ActiveProgramName: "Cotton",
+          ActiveProgramSource: "active",
+          ActiveProgramDetails: ["Silent Wash", "varioSpeed"]
+        }
+      ]
+    });
+    const finishedProgramDom = finishedProgramInstance.getDom();
+    assert.ok(finishedProgramDom.innerHTML.includes("Cotton"));
+    assert.ok(finishedProgramDom.innerHTML.includes("Silent Wash • varioSpeed"));
+
+    const capabilityInstance = createInstance({
+      config: {
+        showDeviceIcon: true,
+        showDeviceIfInfoIsAvailable: true,
+        showDeviceIfDoorIsOpen: false,
+        showDeviceIfFailure: false
+      },
+      devices: [
+        {
+          name: "Coffee machine",
+          type: "Microwave",
+          PowerState: "Off",
+          AvailablePrograms: ["Coffee", "Espresso"],
+          AvailableOptionDetails: ["Bean Amount", "Fill Quantity: 60-260 ml"],
+          DeviceAlertsByKey: {
+            tank: "Water tank empty"
+          }
+        }
+      ]
+    });
+    const capabilityDom = capabilityInstance.getDom();
+    assert.ok(capabilityDom.innerHTML.includes("deviceIconFallback"));
+    assert.ok(capabilityDom.innerHTML.includes("ACTIVE_ALERTS"));
+
+    const washerAvailableProgramsInstance = createInstance({
+      config: {
+        showDeviceIcon: true,
+        showDeviceIfInfoIsAvailable: true,
+        showDeviceIfDoorIsOpen: false,
+        showDeviceIfFailure: false
+      },
+      devices: [
+        {
+          name: "Washer",
+          type: "Washer",
+          PowerState: "Off",
+          AvailablePrograms: ["Cotton", "Easy Care"],
+          AvailableOptionDetails: ["Temperature", "Spin Speed"]
+        }
+      ]
+    });
+    const washerAvailableProgramsDom = washerAvailableProgramsInstance.getDom();
+    assert.ok(!washerAvailableProgramsDom.innerHTML.includes("AVAILABLE_PROGRAMS"));
+    assert.ok(!washerAvailableProgramsDom.innerHTML.includes("AVAILABLE_OPTIONS"));
+    assert.ok(!washerAvailableProgramsDom.innerHTML.includes("Temperature"));
 
     const emptyInstance = createInstance({
       config: {

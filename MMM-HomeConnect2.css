@@ -24,13 +24,24 @@
   grid-template-columns: 40px minmax(0, 1fr);
 }
 
-.deviceContainer > img {
+.deviceContainer > img,
+.device_img {
   text-align: center;
   align-self: start;
   width: 60px;
   height: 60px;
   grid-column: 1;
   grid-row: 1 / span 4;
+}
+
+.deviceIconFallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 28px;
 }
 
 .deviceContainer > div {
@@ -98,6 +109,14 @@
   font-size: 10px;
   font-weight: 400;
   line-height: 1.15;
+}
+
+.deviceAlert {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  line-height: 1.2;
+  color: #ffd27d;
 }
 
 .deviceProgressBar {

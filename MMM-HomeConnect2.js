@@ -261,11 +261,46 @@ Module.register("MMM-HomeConnect2", {
         typeof browserUtils.isEstimatedDuration === "function"
           ? browserUtils.isEstimatedDuration
           : () => false,
+      getDeviceTypeMeta:
+        typeof browserUtils.getDeviceTypeMeta === "function"
+          ? browserUtils.getDeviceTypeMeta
+          : (type) => ({ iconName: type ? `${type}.png` : null, fallbackIconClass: "fa-plug" }),
       shouldDisplayDevice:
         typeof browserUtils.shouldDisplayDevice === "function"
           ? browserUtils.shouldDisplayDevice
           : () => false
     };
+  },
+
+  getUniqueStrings(values, maxItems = Infinity) {
+    const seen = new Set();
+    const result = [];
+
+    values.forEach((value) => {
+      if (typeof value !== "string") {
+        return;
+      }
+
+      const normalized = value.trim();
+      if (!normalized || seen.has(normalized)) {
+        return;
+      }
+
+      seen.add(normalized);
+      if (result.length < maxItems) {
+        result.push(normalized);
+      }
+    });
+
+    return result;
+  },
+
+  getObjectSummaryValues(value, maxItems = Infinity) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return [];
+    }
+
+    return this.getUniqueStrings(Object.values(value), maxItems);
   },
 
   formatDuration(seconds) {
@@ -447,6 +482,7 @@ Module.register("MMM-HomeConnect2", {
       Number.isFinite(estimatedTotalSeconds) && estimatedTotalSeconds > 0
         ? `${hasEstimatedDuration ? `${this.translate("APPROX_PREFIX")} ` : ""}${this.formatDuration(estimatedTotalSeconds)}`
         : "";
+    const typeMeta = deviceUtils.getDeviceTypeMeta(device.type);
     const showPlannedDurationInTitle = !(effectiveRemainingSeconds > 0);
     const programName = device.ActiveProgramName || "";
     const programPhase =
@@ -455,6 +491,7 @@ Module.register("MMM-HomeConnect2", {
       ? device.ActiveProgramDetails.filter((value) => typeof value === "string" && value)
       : [];
     const programSource = device.ActiveProgramSource === "selected" ? "selected" : "active";
+    const shouldShowProgramDetails = programDetails.length > 0;
     const programMeta =
       programName && plannedDurationLabel && showPlannedDurationInTitle
         ? `${programName} • ${plannedDurationLabel}`
@@ -466,9 +503,16 @@ Module.register("MMM-HomeConnect2", {
     if (programPhase) {
       programSupplementParts.push(programPhase);
     }
-    if (programDetails.length) {
+    if (shouldShowProgramDetails) {
       programSupplementParts.push(programDetails.join(" • "));
     }
+    const deviceSpecificDetails = this.getObjectSummaryValues(device.DeviceStatusByKey, 4);
+    const deviceAlerts = this.getObjectSummaryValues(device.DeviceAlertsByKey, 3);
+
+    const detailText = deviceSpecificDetails.join(" • ");
+    const alertText = deviceAlerts.length
+      ? `${this.translate("ACTIVE_ALERTS")}: ${deviceAlerts.join(" • ")}`
+      : "";
 
     const statusText =
       effectiveRemainingSeconds > 0
@@ -491,7 +535,8 @@ Module.register("MMM-HomeConnect2", {
 
     return {
       deviceName: device.name,
-      imageName: `${device.type}.png`,
+      imageName: typeMeta.iconName,
+      fallbackIconClass: typeMeta.fallbackIconClass,
       operationStateActive,
       operationStateFinished,
       operationStatePaused,
@@ -502,6 +547,8 @@ Module.register("MMM-HomeConnect2", {
       percent,
       progressDebug,
       programMeta,
+      detailText,
+      alertText,
       programSupplement: programSupplementParts.join(" | "),
       showProgressDebug,
       statusText
@@ -570,7 +617,11 @@ Module.register("MMM-HomeConnect2", {
 
     let container = `<div class='${containerClasses}'>`;
     if (this.config.showDeviceIcon) {
-      container += `<img src='modules/MMM-HomeConnect2/Icons/${displayState.imageName}' class='device_img'>`;
+      if (displayState.imageName) {
+        container += `<img src='modules/MMM-HomeConnect2/Icons/${displayState.imageName}' class='device_img'>`;
+      } else {
+        container += `<div class='device_img deviceIconFallback'><i class='fa ${displayState.fallbackIconClass}'></i></div>`;
+      }
     }
     container += `<div class='deviceStatusIcons'>${this.getStatusIconsHtml(device, displayState)}</div>`;
     container += `<div class='deviceName bright small'>${displayState.deviceName}`;
@@ -579,6 +630,12 @@ Module.register("MMM-HomeConnect2", {
     }
     if (displayState.programSupplement) {
       container += `<div class='deviceProgramDetails dimmed xsmall'>${displayState.programSupplement}</div>`;
+    }
+    if (displayState.detailText) {
+      container += `<div class='deviceProgramDetails dimmed xsmall'>${displayState.detailText}</div>`;
+    }
+    if (displayState.alertText) {
+      container += `<div class='deviceAlert xsmall'>${displayState.alertText}</div>`;
     }
     container += "</div>";
     container += `<div class='deviceStatus dimmed xsmall'>${displayState.statusText}</div>`;

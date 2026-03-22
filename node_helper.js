@@ -1,5 +1,6 @@
 let HomeConnect = null;
 const fs = require("fs");
+const util = require("util");
 const ActiveProgramManager = require("./lib/active-program-manager");
 const AuthService = require("./lib/auth-service");
 const DeviceService = require("./lib/device-service");
@@ -764,6 +765,22 @@ module.exports = NodeHelper.create({
             hasData: !!(result.data && Object.keys(result.data).length),
             error: result.error || null
           });
+          if (result && result.data) {
+            moduleLog(
+              "debug",
+              `Active program raw payload for ${device.name} (${result.source || "unknown"}):\n${util.inspect(
+                result.data,
+                {
+                  depth: null,
+                  colors: false,
+                  compact: false,
+                  breakLength: 120,
+                  maxArrayLength: null,
+                  maxStringLength: null
+                }
+              )}`
+            );
+          }
           results.push(result);
 
           // Small delay between requests to avoid rate limiting

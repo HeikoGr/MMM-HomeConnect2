@@ -2,7 +2,9 @@
 
 const assert = require("assert");
 const {
+  collectProgramOptionLabels,
   getNumericValue,
+  getDeviceTypeMeta,
   parseDurationSeconds,
   parseRemainingSeconds,
   parseEstimatedTotalSeconds,
@@ -10,6 +12,8 @@ const {
   isDoorOpen,
   hasInformativeState,
   shouldDisplayDevice,
+  summarizeAvailablePrograms,
+  summarizeProgramConstraints,
   deviceAppearsActive
 } = require("../lib/device-utils");
 
@@ -73,6 +77,111 @@ const {
     deviceAppearsActive({ RemainingProgramTime: { value: "PT20M" } }),
     true,
     "Duration objects should mark device as active"
+  );
+
+  assert.deepStrictEqual(
+    collectProgramOptionLabels({
+      options: [
+        {
+          key: "ConsumerProducts.CoffeeMaker.Option.BeanAmount",
+          value: "ConsumerProducts.CoffeeMaker.EnumType.BeanAmount.Strong"
+        },
+        {
+          key: "ConsumerProducts.CoffeeMaker.Option.FillQuantity",
+          value: 240,
+          unit: "ml"
+        }
+      ]
+    }),
+    ["Bean Amount: Strong", "Fill Quantity: 240 ml"]
+  );
+
+  assert.deepStrictEqual(
+    collectProgramOptionLabels({
+      options: [
+        {
+          key: "LaundryCare.Washer.Option.SpeedPerfect",
+          name: "varioSpeed",
+          value: "LaundryCare.Washer.EnumType.SpeedPerfect.On"
+        },
+        {
+          key: "LaundryCare.Washer.Option.SilentWash",
+          name: "Leiser waschen",
+          value: "LaundryCare.Washer.EnumType.SilentWash.Off"
+        },
+        {
+          key: "LaundryCare.Washer.Option.SteamAssist",
+          name: "Bedampfen",
+          value: true
+        },
+        {
+          key: "LaundryCare.Washer.Option.IntensivePlus",
+          name: "Intensiv Plus",
+          value: false
+        },
+        {
+          key: "LaundryCare.Washer.Option.Temperature",
+          name: "Temperatur",
+          value: "LaundryCare.Washer.EnumType.Temperature.GC40"
+        },
+        {
+          key: "LaundryCare.Washer.Option.SpinSpeed",
+          name: "Schleudern",
+          value: "LaundryCare.Washer.EnumType.SpinSpeed.RPM1400"
+        }
+      ]
+    }),
+    ["Temperatur: 40 °C", "Schleudern: 1400 rpm", "varioSpeed", "Bedampfen"]
+  );
+
+  assert.deepStrictEqual(
+    summarizeAvailablePrograms([
+      { key: "ConsumerProducts.CoffeeMaker.Program.Beverage.Coffee", name: "Coffee" },
+      { key: "ConsumerProducts.CoffeeMaker.Program.Beverage.Espresso", name: "Espresso" }
+    ]),
+    ["Coffee", "Espresso"]
+  );
+
+  assert.deepStrictEqual(
+    summarizeProgramConstraints({
+      options: [
+        {
+          key: "ConsumerProducts.CoffeeMaker.Option.FillQuantity",
+          unit: "ml",
+          constraints: { min: 60, max: 260 }
+        },
+        {
+          key: "ConsumerProducts.CoffeeMaker.Option.BeanAmount",
+          constraints: {
+            allowedvalues: ["ConsumerProducts.CoffeeMaker.EnumType.BeanAmount.Mild"]
+          }
+        }
+      ]
+    }),
+    ["Fill Quantity: 60-260 ml", "Bean Amount"]
+  );
+
+  assert.strictEqual(getDeviceTypeMeta("CoffeeMachine").iconName, "CoffeeMaker.png");
+  assert.strictEqual(getDeviceTypeMeta("Microwave").iconName, null);
+
+  assert.strictEqual(
+    isDoorOpen({
+      RefrigerationDoorStates: {
+        freezer: "Freezer: Open"
+      }
+    }),
+    true,
+    "Refrigeration compartment door states should count as open doors"
+  );
+
+  assert.strictEqual(
+    hasInformativeState({
+      DeviceAlertsByKey: {
+        alarm: "Water tank empty"
+      }
+    }),
+    true,
+    "Device alerts should make a device informative"
   );
 
   console.log("device-utils.test.js OK");

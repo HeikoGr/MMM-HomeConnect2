@@ -19,5 +19,8 @@
   "PROGRAM_FINISHED": "Programm fertig",
   "IN_PROGRESS": "Läuft",
   "APPROX_PREFIX": "ca.",
-  "SELECTED_PROGRAM": "Ausgewähltes Programm"
+  "SELECTED_PROGRAM": "Ausgewähltes Programm",
+  "AVAILABLE_PROGRAMS": "Programme",
+  "AVAILABLE_OPTIONS": "Optionen",
+  "ACTIVE_ALERTS": "Hinweise"
 }
