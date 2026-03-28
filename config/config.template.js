@@ -9,6 +9,12 @@ let config = {
   units: "metric",
   modules: [
     { module: "alert" },
+    {
+      module: "MMM-Cursor",
+      config: {
+        timeout: 1500
+      }
+    },
     { module: "clock", position: "top_left" },
     {
       module: "MMM-HomeConnect2",
