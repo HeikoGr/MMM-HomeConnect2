@@ -24,6 +24,7 @@ function installFrontendGlobals() {
   globalThis.window = {
     HomeConnectDeviceUtils: {
       parseRemainingSeconds: deviceUtils.parseRemainingSeconds,
+      parseStartInRelativeSeconds: deviceUtils.parseStartInRelativeSeconds,
       parseProgress: deviceUtils.parseProgress,
       parseEstimatedTotalSeconds: deviceUtils.parseEstimatedTotalSeconds,
       isEstimatedDuration: deviceUtils.isEstimatedDuration,
@@ -199,6 +200,44 @@ function createInstance(overrides = {}) {
     const finishedProgramDom = finishedProgramInstance.getDom();
     assert.ok(finishedProgramDom.innerHTML.includes("Cotton"));
     assert.ok(finishedProgramDom.innerHTML.includes("Silent Wash • varioSpeed"));
+
+    const wrinkleGuardInstance = createInstance({
+      devices: [
+        {
+          name: "Dryer",
+          type: "Dryer",
+          PowerState: "On",
+          OperationState: "BSH.Common.EnumType.OperationState.Run",
+          ActiveProgramName: "Synthetics",
+          ProgramProgress: 100,
+          RemainingProgramTime: 0,
+          ActiveProgramDetails: ["Wrinkle Block: 120 min"]
+        }
+      ]
+    });
+    const wrinkleGuardDom = wrinkleGuardInstance.getDom();
+    assert.ok(wrinkleGuardDom.innerHTML.includes("WRINKLE_PROTECTION_ACTIVE"));
+    assert.ok(!wrinkleGuardDom.innerHTML.includes("fa-play"));
+
+    const delayedStartInstance = createInstance({
+      devices: [
+        {
+          name: "Washer",
+          type: "Washer",
+          PowerState: "On",
+          OperationState: "BSH.Common.EnumType.OperationState.DelayedStart",
+          ActiveProgramName: "Easy Care",
+          RemainingProgramTimeIsEstimated: true,
+          "BSH.Common.Option.StartInRelative": { value: "PT2H29M" }
+        }
+      ]
+    });
+    const delayedStartDom = delayedStartInstance.getDom();
+    assert.ok(delayedStartDom.innerHTML.includes("DELAYED_START"));
+    assert.ok(delayedStartDom.innerHTML.includes("STARTS_IN"));
+    assert.ok(delayedStartDom.innerHTML.includes("APPROX_PREFIX 2h 29m"));
+    assert.ok(delayedStartDom.innerHTML.includes("fa-clock-o"));
+    assert.ok(!delayedStartDom.innerHTML.includes("fa-play"));
 
     const offlineDeviceInstance = createInstance({
       config: {

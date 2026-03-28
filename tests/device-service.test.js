@@ -32,6 +32,26 @@ function createDeviceService(overrides = {}) {
     assert.ok(notifications.some((e) => e.n === "MMM-HomeConnect_Update"));
   }
 
+  // broadcastDevices: emits only one socket notification even with multiple clients
+  {
+    const globalSession = { clientInstances: new Set(["frontend-a", "frontend-b", "frontend-c"]) };
+    const notifications = [];
+    const service = new DeviceService({
+      logger: () => {},
+      broadcastToAllClients: () => {},
+      globalSession
+    });
+    service.devices.set("ha-1", { haId: "ha-1", name: "Washer" });
+
+    service.broadcastDevices((n, payload) => {
+      notifications.push({ n, payload });
+    });
+
+    assert.strictEqual(notifications.length, 1);
+    assert.strictEqual(notifications[0].n, "MMM-HomeConnect_Update");
+    assert.deepStrictEqual(notifications[0].payload, [{ haId: "ha-1", name: "Washer" }]);
+  }
+
   // handleGetDevicesError: broadcasts device_error
   {
     const { service, notifications } = createDeviceService();
