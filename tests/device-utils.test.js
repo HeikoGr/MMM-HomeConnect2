@@ -74,6 +74,23 @@ const {
   );
 
   assert.strictEqual(
+    shouldDisplayDevice(
+      {
+        PowerState: "Off",
+        connected: false
+      },
+      {
+        showAlwaysAllDevices: false,
+        showDeviceIfDoorIsOpen: false,
+        showDeviceIfFailure: false,
+        showDeviceIfInfoIsAvailable: false
+      }
+    ),
+    true,
+    "Explicitly disconnected devices should stay visible"
+  );
+
+  assert.strictEqual(
     deviceAppearsActive({ RemainingProgramTime: { value: "PT20M" } }),
     true,
     "Duration objects should mark device as active"

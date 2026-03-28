@@ -28,6 +28,9 @@ function installFrontendGlobals() {
       parseEstimatedTotalSeconds: deviceUtils.parseEstimatedTotalSeconds,
       isEstimatedDuration: deviceUtils.isEstimatedDuration,
       getDeviceTypeMeta: deviceUtils.getDeviceTypeMeta,
+      deviceAppearsActive: deviceUtils.deviceAppearsActive,
+      isDeviceConnected: deviceUtils.isDeviceConnected,
+      isDeviceExplicitlyDisconnected: deviceUtils.isDeviceExplicitlyDisconnected,
       shouldDisplayDevice: deviceUtils.shouldDisplayDevice
     }
   };
@@ -116,6 +119,21 @@ function createInstance(overrides = {}) {
     assert.ok(runningDom.innerHTML.includes("fa-play"));
     assert.ok(!runningDom.innerHTML.includes("AVAILABLE_PROGRAMS"));
 
+    const fallbackRunningInstance = createInstance({
+      devices: [
+        {
+          name: "Washer",
+          type: "Washer",
+          PowerState: "On",
+          ActiveProgramName: "Cotton",
+          ActiveProgramDetails: ["Temperatur: 40 °C"],
+          RemainingProgramTime: { value: "PT20M" }
+        }
+      ]
+    });
+    const fallbackRunningDom = fallbackRunningInstance.getDom();
+    assert.ok(fallbackRunningDom.innerHTML.includes("fa-play"));
+
     const selectedProgramInstance = createInstance({
       config: {
         showDeviceIcon: false,
@@ -135,10 +153,29 @@ function createInstance(overrides = {}) {
       ]
     });
     const selectedDom = selectedProgramInstance.getDom();
-    assert.ok(selectedDom.innerHTML.includes("deviceContainerWithoutDeviceIcon"));
-    assert.ok(selectedDom.innerHTML.includes("Synthetics"));
+    assert.ok(selectedDom.innerHTML.includes("NO_ACTIVE_APPLIANCES"));
+    assert.ok(!selectedDom.innerHTML.includes("Synthetics"));
     assert.ok(!selectedDom.innerHTML.includes("SELECTED_PROGRAM"));
-    assert.ok(selectedDom.innerHTML.includes("Cupboard Dry Plus • Low Heat"));
+    assert.ok(!selectedDom.innerHTML.includes("Cupboard Dry Plus • Low Heat"));
+
+    const runningSelectedProgramInstance = createInstance({
+      devices: [
+        {
+          name: "Dryer",
+          type: "Dryer",
+          PowerState: "On",
+          OperationState: "BSH.Common.EnumType.OperationState.Run",
+          ActiveProgramName: "Synthetics",
+          ActiveProgramSource: "selected",
+          ActiveProgramDetails: ["Cupboard Dry Plus", "Low Heat"],
+          ProgramProgress: 15,
+          RemainingProgramTime: 1500
+        }
+      ]
+    });
+    const runningSelectedDom = runningSelectedProgramInstance.getDom();
+    assert.ok(runningSelectedDom.innerHTML.includes("Synthetics"));
+    assert.ok(runningSelectedDom.innerHTML.includes("Cupboard Dry Plus • Low Heat"));
 
     const finishedProgramInstance = createInstance({
       config: {
@@ -162,6 +199,28 @@ function createInstance(overrides = {}) {
     const finishedProgramDom = finishedProgramInstance.getDom();
     assert.ok(finishedProgramDom.innerHTML.includes("Cotton"));
     assert.ok(finishedProgramDom.innerHTML.includes("Silent Wash • varioSpeed"));
+
+    const offlineDeviceInstance = createInstance({
+      config: {
+        showDeviceIcon: false,
+        showDeviceIfInfoIsAvailable: false,
+        showDeviceIfDoorIsOpen: false,
+        showDeviceIfFailure: false
+      },
+      devices: [
+        {
+          name: "Washer",
+          type: "Washer",
+          PowerState: "Off",
+          connected: false
+        }
+      ]
+    });
+    const offlineDom = offlineDeviceInstance.getDom();
+    assert.ok(offlineDom.innerHTML.includes("Washer"));
+    assert.ok(offlineDom.innerHTML.includes("DEVICE_NOT_CONNECTED"));
+    assert.ok(offlineDom.innerHTML.includes("deviceOffline"));
+    assert.ok(offlineDom.innerHTML.includes("fa-chain-broken"));
 
     const capabilityInstance = createInstance({
       config: {

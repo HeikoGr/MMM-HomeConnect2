@@ -24,6 +24,10 @@
   grid-template-columns: 40px minmax(0, 1fr);
 }
 
+.deviceContainer.deviceOffline {
+  opacity: 0.72;
+}
+
 .deviceContainer > img,
 .device_img {
   text-align: center;
@@ -66,6 +70,10 @@
   line-height: 0.8;
   color: #ffffff;
   font-size: 16pt;
+}
+
+.deviceStatusIconOffline {
+  color: #ffbf80;
 }
 
 .deviceName {

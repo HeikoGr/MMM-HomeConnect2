@@ -265,6 +265,18 @@ Module.register("MMM-HomeConnect2", {
         typeof browserUtils.getDeviceTypeMeta === "function"
           ? browserUtils.getDeviceTypeMeta
           : (type) => ({ iconName: type ? `${type}.png` : null, fallbackIconClass: "fa-plug" }),
+      deviceAppearsActive:
+        typeof browserUtils.deviceAppearsActive === "function"
+          ? browserUtils.deviceAppearsActive
+          : () => false,
+      isDeviceConnected:
+        typeof browserUtils.isDeviceConnected === "function"
+          ? browserUtils.isDeviceConnected
+          : () => false,
+      isDeviceExplicitlyDisconnected:
+        typeof browserUtils.isDeviceExplicitlyDisconnected === "function"
+          ? browserUtils.isDeviceExplicitlyDisconnected
+          : () => false,
       shouldDisplayDevice:
         typeof browserUtils.shouldDisplayDevice === "function"
           ? browserUtils.shouldDisplayDevice
@@ -359,6 +371,9 @@ Module.register("MMM-HomeConnect2", {
   },
 
   buildDeviceDisplayState(device, runtimeHints, deviceUtils) {
+    const explicitlyDisconnected = deviceUtils.isDeviceExplicitlyDisconnected(device);
+    const isConnected = explicitlyDisconnected ? false : deviceUtils.isDeviceConnected(device);
+    const appearsActive = deviceUtils.deviceAppearsActive(device);
     const remainingSeconds = deviceUtils.parseRemainingSeconds(device);
     const effectiveRemainingSeconds = this.getEffectiveRemainingSeconds(device, remainingSeconds);
     const estimatedTotalSeconds = deviceUtils.parseEstimatedTotalSeconds(device);
@@ -484,12 +499,18 @@ Module.register("MMM-HomeConnect2", {
         : "";
     const typeMeta = deviceUtils.getDeviceTypeMeta(device.type);
     const showPlannedDurationInTitle = !(effectiveRemainingSeconds > 0);
-    const programName = device.ActiveProgramName || "";
-    const programPhase =
-      typeof device.ActiveProgramPhase === "string" ? device.ActiveProgramPhase : "";
-    const programDetails = Array.isArray(device.ActiveProgramDetails)
-      ? device.ActiveProgramDetails.filter((value) => typeof value === "string" && value)
-      : [];
+    const selectedProgramVisible =
+      device.ActiveProgramSource !== "selected" || operationStateActive;
+    const programName = selectedProgramVisible ? device.ActiveProgramName || "" : "";
+    const programPhase = selectedProgramVisible
+      ? typeof device.ActiveProgramPhase === "string"
+        ? device.ActiveProgramPhase
+        : ""
+      : "";
+    const programDetails =
+      selectedProgramVisible && Array.isArray(device.ActiveProgramDetails)
+        ? device.ActiveProgramDetails.filter((value) => typeof value === "string" && value)
+        : [];
     const shouldShowProgramDetails = programDetails.length > 0;
     const programMeta =
       programName && plannedDurationLabel && showPlannedDurationInTitle
@@ -510,8 +531,9 @@ Module.register("MMM-HomeConnect2", {
       ? `${this.translate("ACTIVE_ALERTS")}: ${deviceAlerts.join(" • ")}`
       : "";
 
-    const statusText =
-      effectiveRemainingSeconds > 0
+    const statusText = explicitlyDisconnected
+      ? this.translate("DEVICE_NOT_CONNECTED")
+      : effectiveRemainingSeconds > 0
         ? `${this.translate("DONE_IN")} ${hasEstimatedDuration ? `${this.translate("APPROX_PREFIX")} ` : ""}${this.formatDuration(effectiveRemainingSeconds)}`
         : "";
     const showProgressDebug = (this.config?.logLevel || "").toLowerCase() === "debug";
@@ -533,6 +555,9 @@ Module.register("MMM-HomeConnect2", {
       deviceName: device.name,
       imageName: typeMeta.iconName,
       fallbackIconClass: typeMeta.fallbackIconClass,
+      explicitlyDisconnected,
+      isConnected,
+      appearsActive,
       operationStateActive,
       operationStateFinished,
       operationStatePaused,
@@ -567,11 +592,14 @@ Module.register("MMM-HomeConnect2", {
 
   getStatusIconsHtml(device, displayState) {
     let programIcon = "";
-    if (device.PowerState !== "Off" && displayState.operationStatePaused) {
+    if (displayState.explicitlyDisconnected) {
+      programIcon =
+        "<i class='fa fa-chain-broken deviceStatusIcon deviceStatusIconOffline' title='Device not connected'></i>";
+    } else if (device.PowerState !== "Off" && displayState.operationStatePaused) {
       programIcon = "<i class='fa fa-pause deviceStatusIcon' title='Program paused'></i>";
     } else if (
       device.PowerState !== "Off" &&
-      displayState.operationStateActive &&
+      (displayState.operationStateActive || displayState.appearsActive) &&
       !displayState.operationStateFinished
     ) {
       programIcon = "<i class='fa fa-play deviceStatusIcon' title='Program running'></i>";
@@ -607,11 +635,15 @@ Module.register("MMM-HomeConnect2", {
 
     const displayState = this.buildDeviceDisplayState(device, runtimeHints, deviceUtils);
     const progressBarHtml = this.getDeviceProgressHtml(displayState);
-    const containerClasses = this.config.showDeviceIcon
-      ? "deviceContainer"
-      : "deviceContainer deviceContainerWithoutDeviceIcon";
+    const containerClasses = ["deviceContainer"];
+    if (!this.config.showDeviceIcon) {
+      containerClasses.push("deviceContainerWithoutDeviceIcon");
+    }
+    if (displayState.explicitlyDisconnected) {
+      containerClasses.push("deviceOffline");
+    }
 
-    let container = `<div class='${containerClasses}'>`;
+    let container = `<div class='${containerClasses.join(" ")}'>`;
     if (this.config.showDeviceIcon) {
       if (displayState.imageName) {
         container += `<img src='modules/MMM-HomeConnect2/Icons/${displayState.imageName}' class='device_img'>`;
