@@ -245,6 +245,10 @@ Module.register("MMM-HomeConnect2", {
         : {};
 
     return {
+      parseStartInRelativeSeconds:
+        typeof browserUtils.parseStartInRelativeSeconds === "function"
+          ? browserUtils.parseStartInRelativeSeconds
+          : () => null,
       parseRemainingSeconds:
         typeof browserUtils.parseRemainingSeconds === "function"
           ? browserUtils.parseRemainingSeconds
@@ -379,6 +383,10 @@ Module.register("MMM-HomeConnect2", {
     const estimatedTotalSeconds = deviceUtils.parseEstimatedTotalSeconds(device);
     const hasEstimatedDuration = deviceUtils.isEstimatedDuration(device);
     const progressValue = deviceUtils.parseProgress(device);
+    const startInRelativeSeconds =
+      typeof deviceUtils.parseStartInRelativeSeconds === "function"
+        ? deviceUtils.parseStartInRelativeSeconds(device)
+        : null;
     const deviceKey = device.haId || device.haid || device.id || device.name || "unknown";
     const hint = runtimeHints[deviceKey] || (runtimeHints[deviceKey] = { hadActive: false });
 
@@ -402,6 +410,7 @@ Module.register("MMM-HomeConnect2", {
     const operationStateActive = /(Run|Active|DelayedStart|InProgress)/i.test(
       operationStateLabel || ""
     );
+    const operationStateDelayedStart = /DelayedStart/i.test(operationStateLabel || "");
     const operationStatePaused = /Pause/i.test(operationStateLabel || "");
 
     if (device.PowerState === "Off") {
@@ -523,6 +532,11 @@ Module.register("MMM-HomeConnect2", {
     if (shouldShowProgramDetails) {
       programSupplementParts.push(programDetails.join(" • "));
     }
+    const wrinkleProtectionActive =
+      isFinished &&
+      [programPhase, ...programDetails].some(
+        (value) => typeof value === "string" && /Wrinkle|Ironing/i.test(value)
+      );
     const deviceSpecificDetails = this.getObjectSummaryValues(device.DeviceStatusByKey, 4);
     const deviceAlerts = this.getObjectSummaryValues(device.DeviceAlertsByKey, 3);
 
@@ -530,12 +544,19 @@ Module.register("MMM-HomeConnect2", {
     const alertText = deviceAlerts.length
       ? `${this.translate("ACTIVE_ALERTS")}: ${deviceAlerts.join(" • ")}`
       : "";
+    const delayedStartText = operationStateDelayedStart
+      ? startInRelativeSeconds > 0
+        ? `${this.translate("DELAYED_START")} • ${this.translate("STARTS_IN")} ${hasEstimatedDuration ? `${this.translate("APPROX_PREFIX")} ` : ""}${this.formatDuration(startInRelativeSeconds)}`
+        : this.translate("DELAYED_START")
+      : "";
 
     const statusText = explicitlyDisconnected
       ? this.translate("DEVICE_NOT_CONNECTED")
-      : effectiveRemainingSeconds > 0
-        ? `${this.translate("DONE_IN")} ${hasEstimatedDuration ? `${this.translate("APPROX_PREFIX")} ` : ""}${this.formatDuration(effectiveRemainingSeconds)}`
-        : "";
+      : wrinkleProtectionActive
+        ? this.translate("WRINKLE_PROTECTION_ACTIVE")
+        : effectiveRemainingSeconds > 0
+          ? `${this.translate("DONE_IN")} ${hasEstimatedDuration ? `${this.translate("APPROX_PREFIX")} ` : ""}${this.formatDuration(effectiveRemainingSeconds)}`
+          : "";
     const showProgressDebug = (this.config?.logLevel || "").toLowerCase() === "debug";
     const progressDebug = showProgressDebug
       ? [
@@ -559,12 +580,15 @@ Module.register("MMM-HomeConnect2", {
       isConnected,
       appearsActive,
       operationStateActive,
+      operationStateDelayedStart,
       operationStateFinished,
       operationStatePaused,
       effectiveRemainingSeconds,
       hasEstimatedDuration,
+      delayedStartText,
       isFinished,
       isIndeterminate,
+      wrinkleProtectionActive,
       percent,
       progressDebug,
       programMeta,
@@ -577,6 +601,12 @@ Module.register("MMM-HomeConnect2", {
   },
 
   getDeviceProgressHtml(displayState) {
+    if (displayState.delayedStartText) {
+      return `<div class='hc-finished'>${displayState.delayedStartText}</div>`;
+    }
+    if (displayState.wrinkleProtectionActive) {
+      return `<div class='hc-finished'>${this.translate("WRINKLE_PROTECTION_ACTIVE")}</div>`;
+    }
     if (displayState.isFinished) {
       return `<div class='hc-finished'>${this.translate("PROGRAM_FINISHED")}</div>`;
     }
@@ -595,11 +625,14 @@ Module.register("MMM-HomeConnect2", {
     if (displayState.explicitlyDisconnected) {
       programIcon =
         "<i class='fa fa-chain-broken deviceStatusIcon deviceStatusIconOffline' title='Device not connected'></i>";
+    } else if (device.PowerState !== "Off" && displayState.operationStateDelayedStart) {
+      programIcon = "<i class='fa fa-clock-o deviceStatusIcon' title='Delayed start'></i>";
     } else if (device.PowerState !== "Off" && displayState.operationStatePaused) {
       programIcon = "<i class='fa fa-pause deviceStatusIcon' title='Program paused'></i>";
     } else if (
       device.PowerState !== "Off" &&
       (displayState.operationStateActive || displayState.appearsActive) &&
+      !displayState.isFinished &&
       !displayState.operationStateFinished
     ) {
       programIcon = "<i class='fa fa-play deviceStatusIcon' title='Program running'></i>";
