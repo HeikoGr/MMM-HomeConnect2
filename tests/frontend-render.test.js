@@ -11,7 +11,8 @@ function installFrontendGlobals() {
     Module: globalThis.Module,
     config: globalThis.config,
     window: globalThis.window,
-    document: globalThis.document
+    document: globalThis.document,
+    navigator: Reflect.get(globalThis, "navigator")
   };
 
   globalThis.Log = {
@@ -25,6 +26,7 @@ function installFrontendGlobals() {
     HomeConnectDeviceUtils: {
       parseRemainingSeconds: deviceUtils.parseRemainingSeconds,
       parseStartInRelativeSeconds: deviceUtils.parseStartInRelativeSeconds,
+      parseFinishInRelativeSeconds: deviceUtils.parseFinishInRelativeSeconds,
       parseProgress: deviceUtils.parseProgress,
       parseEstimatedTotalSeconds: deviceUtils.parseEstimatedTotalSeconds,
       isEstimatedDuration: deviceUtils.isEstimatedDuration,
@@ -41,6 +43,14 @@ function installFrontendGlobals() {
       return { innerHTML: "" };
     }
   };
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    writable: true,
+    value: {
+      language: "en-US",
+      languages: ["en-US", "en"]
+    }
+  });
 
   return () => {
     globalThis.Log = originals.Log;
@@ -48,6 +58,11 @@ function installFrontendGlobals() {
     globalThis.config = originals.config;
     globalThis.window = originals.window;
     globalThis.document = originals.document;
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      writable: true,
+      value: originals.navigator
+    });
   };
 }
 
@@ -129,6 +144,32 @@ function createInstance(overrides = {}) {
     assert.ok(runningDisplayState.presentation);
     assert.strictEqual(runningDisplayState.runtime.percent, 35);
     assert.strictEqual(runningDisplayState.presentation.programMeta, "Eco 40-60");
+
+    const configuredLanguageInstance = createInstance({
+      config: {
+        apiLanguage: "da"
+      }
+    });
+    assert.strictEqual(configuredLanguageInstance.getPreferredApiLanguage(), "da");
+
+    const magicMirrorLanguageInstance = createInstance({
+      config: {
+        apiLanguage: ""
+      }
+    });
+    globalThis.config.language = "de";
+    assert.strictEqual(magicMirrorLanguageInstance.getPreferredApiLanguage(), "de");
+
+    const browserLanguageInstance = createInstance({
+      config: {
+        apiLanguage: ""
+      }
+    });
+    globalThis.config.language = "";
+    const browserNavigator = Reflect.get(globalThis, "navigator");
+    browserNavigator.languages = ["fr-FR", "fr"];
+    browserNavigator.language = "fr-FR";
+    assert.strictEqual(browserLanguageInstance.getPreferredApiLanguage(), "fr-FR");
 
     const fallbackRunningInstance = createInstance({
       devices: [
@@ -260,16 +301,41 @@ function createInstance(overrides = {}) {
           OperationState: "BSH.Common.EnumType.OperationState.DelayedStart",
           ActiveProgramName: "Easy Care",
           RemainingProgramTimeIsEstimated: true,
-          "BSH.Common.Option.StartInRelative": { value: "PT2H29M" }
+          "BSH.Common.Option.StartInRelative": { value: "PT2H29M" },
+          "BSH.Common.Option.FinishInRelative": { value: "PT4H10M" }
         }
       ]
     });
+    const originalDateNow = Date.now;
+    Date.now = () => new Date("2026-04-04T10:00:00Z").getTime();
     const delayedStartDom = delayedStartInstance.getDom();
+    Date.now = originalDateNow;
     assert.ok(delayedStartDom.innerHTML.includes("DELAYED_START"));
     assert.ok(delayedStartDom.innerHTML.includes("STARTS_IN"));
     assert.ok(delayedStartDom.innerHTML.includes("APPROX_PREFIX 2h 29m"));
+    assert.ok(delayedStartDom.innerHTML.includes("ENDS_AT"));
+    assert.ok(delayedStartDom.innerHTML.includes("APPROX_PREFIX"));
     assert.ok(delayedStartDom.innerHTML.includes("fa-clock-o"));
     assert.ok(!delayedStartDom.innerHTML.includes("fa-play"));
+
+    const delayedStartFinishOnlyInstance = createInstance({
+      devices: [
+        {
+          name: "Washer",
+          type: "Washer",
+          PowerState: "On",
+          OperationState: "BSH.Common.EnumType.OperationState.DelayedStart",
+          ActiveProgramName: "Cottons",
+          EstimatedTotalProgramTime: 11760,
+          "BSH.Common.Option.FinishInRelative": { value: 39309 }
+        }
+      ]
+    });
+    Date.now = () => new Date("2026-04-04T10:00:00Z").getTime();
+    const delayedStartFinishOnlyDom = delayedStartFinishOnlyInstance.getDom();
+    Date.now = originalDateNow;
+    assert.ok(delayedStartFinishOnlyDom.innerHTML.includes("STARTS_IN"));
+    assert.ok(delayedStartFinishOnlyDom.innerHTML.includes("ENDS_AT"));
 
     const offlineDeviceInstance = createInstance({
       config: {

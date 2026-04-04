@@ -19,6 +19,8 @@
   "PROGRAM_FINISHED": "Program finished",
   "DELAYED_START": "Delayed start",
   "STARTS_IN": "Starts in",
+  "STARTS_AT": "Starts at",
+  "ENDS_AT": "Ends at",
   "DEVICE_NOT_CONNECTED": "Not connected",
   "IN_PROGRESS": "In progress",
   "WRINKLE_PROTECTION_ACTIVE": "Wrinkle protection active",

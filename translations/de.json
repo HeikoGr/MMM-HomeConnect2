@@ -19,6 +19,8 @@
   "PROGRAM_FINISHED": "Programm fertig",
   "DELAYED_START": "Verzögerter Start",
   "STARTS_IN": "Startet in",
+  "STARTS_AT": "Startet um",
+  "ENDS_AT": "Endet um",
   "DEVICE_NOT_CONNECTED": "Nicht verbunden",
   "IN_PROGRESS": "Läuft",
   "WRINKLE_PROTECTION_ACTIVE": "Knitterschutz aktiv",

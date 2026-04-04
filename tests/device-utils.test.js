@@ -6,6 +6,7 @@ const {
   getNumericValue,
   getDeviceTypeMeta,
   parseDurationSeconds,
+  parseFinishInRelativeSeconds,
   parseRemainingSeconds,
   parseEstimatedTotalSeconds,
   isEstimatedDuration,
@@ -27,6 +28,10 @@ const {
   assert.strictEqual(parseDurationSeconds({ value: "PT45M" }), 2700);
   assert.strictEqual(parseDurationSeconds({ displayValue: "PT30S" }), 30);
   assert.strictEqual(parseRemainingSeconds({ RemainingProgramTime: { value: "PT20M" } }), 1200);
+  assert.strictEqual(
+    parseFinishInRelativeSeconds({ "BSH.Common.Option.FinishInRelative": { value: "PT2H10M" } }),
+    7800
+  );
   assert.strictEqual(
     parseEstimatedTotalSeconds({
       "BSH.Common.Option.EstimatedTotalProgramTime": { value: "PT1H" }
