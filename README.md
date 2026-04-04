@@ -101,6 +101,10 @@ Developer notes
 - API endpoints used: device_authorization, token, and homeappliances endpoints of Home Connect.
 - Minimum polling interval: 5 seconds. Module adapts if server returns slow_down.
 
+## Documentation
+
+Additional development and devcontainer documentation is collected in [docs/README.md](docs/README.md).
+
 ## Comparison to the original
 
 This fork is based on djerik's [MMM-HomeConnect](https://github.com/djerik/MMM-HomeConnect).

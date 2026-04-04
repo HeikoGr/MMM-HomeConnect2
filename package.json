@@ -29,7 +29,7 @@
     "lint:fix": "eslint --fix && prettier --write .",
     "test": "node tests/run-all.js",
     "test:spelling": "cspell .",
-    "mmcheck": "node tests/magicmirror-check.mjs --current"
+    "mmcheck": "node scripts/magicmirror-check.mjs --devcontainer-only --current"
   },
   "lint-staged": {
     "*.{js,json,css,html}": [
