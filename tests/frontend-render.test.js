@@ -15,9 +15,9 @@ function installFrontendGlobals() {
   };
 
   globalThis.Log = {
-    log() {},
-    warn() {},
-    error() {}
+    log() { },
+    warn() { },
+    error() { }
   };
 
   globalThis.config = { language: "en" };
@@ -89,8 +89,8 @@ function createInstance(overrides = {}) {
     translate(key) {
       return key;
     },
-    updateDom() {},
-    sendSocketNotification() {}
+    updateDom() { },
+    sendSocketNotification() { }
   };
 }
 
@@ -119,6 +119,16 @@ function createInstance(overrides = {}) {
     assert.ok(runningDom.innerHTML.includes("deviceProgressBar"));
     assert.ok(runningDom.innerHTML.includes("fa-play"));
     assert.ok(!runningDom.innerHTML.includes("AVAILABLE_PROGRAMS"));
+
+    const runningDisplayState = runningInstance.buildDeviceDisplayState(
+      runningInstance.devices[0],
+      {},
+      runningInstance.getDeviceUtils()
+    );
+    assert.ok(runningDisplayState.runtime);
+    assert.ok(runningDisplayState.presentation);
+    assert.strictEqual(runningDisplayState.runtime.percent, 35);
+    assert.strictEqual(runningDisplayState.presentation.programMeta, "Eco 40-60");
 
     const fallbackRunningInstance = createInstance({
       devices: [
@@ -175,8 +185,30 @@ function createInstance(overrides = {}) {
       ]
     });
     const runningSelectedDom = runningSelectedProgramInstance.getDom();
-    assert.ok(runningSelectedDom.innerHTML.includes("Synthetics"));
-    assert.ok(runningSelectedDom.innerHTML.includes("Cupboard Dry Plus • Low Heat"));
+    assert.ok(runningSelectedDom.innerHTML.includes("NO_ACTIVE_APPLIANCES"));
+    assert.ok(!runningSelectedDom.innerHTML.includes("Synthetics"));
+    assert.ok(!runningSelectedDom.innerHTML.includes("fa-play"));
+
+    const selectedDoorOpenInstance = createInstance({
+      devices: [
+        {
+          name: "Dryer",
+          type: "Dryer",
+          PowerState: "On",
+          DoorState: "Open",
+          ActiveProgramName: "Synthetics",
+          ActiveProgramSource: "selected",
+          EstimatedTotalProgramTime: 4560,
+          RemainingProgramTime: 4560,
+          RemainingProgramTimeIsEstimated: true
+        }
+      ]
+    });
+    const selectedDoorOpenDom = selectedDoorOpenInstance.getDom();
+    assert.ok(selectedDoorOpenDom.innerHTML.includes("Dryer"));
+    assert.ok(selectedDoorOpenDom.innerHTML.includes("fa-door-open"));
+    assert.ok(!selectedDoorOpenDom.innerHTML.includes("Synthetics"));
+    assert.ok(!selectedDoorOpenDom.innerHTML.includes("1h 16m"));
 
     const finishedProgramInstance = createInstance({
       config: {

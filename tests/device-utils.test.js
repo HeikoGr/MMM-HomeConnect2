@@ -96,6 +96,37 @@ const {
     "Duration objects should mark device as active"
   );
 
+  assert.strictEqual(
+    deviceAppearsActive({
+      PowerState: "On",
+      ActiveProgramSource: "selected",
+      RemainingProgramTime: { value: "PT20M" },
+      ProgramProgress: 5
+    }),
+    false,
+    "Selected programs must not be treated as running based on estimate data alone"
+  );
+
+  assert.strictEqual(
+    shouldDisplayDevice(
+      {
+        PowerState: "On",
+        ActiveProgramSource: "selected",
+        ActiveProgramName: "Synthetics",
+        RemainingProgramTime: { value: "PT1H15M" },
+        ProgramProgress: 3
+      },
+      {
+        showAlwaysAllDevices: false,
+        showDeviceIfDoorIsOpen: false,
+        showDeviceIfFailure: false,
+        showDeviceIfInfoIsAvailable: true
+      }
+    ),
+    false,
+    "Power-on devices with only a selected program should stay hidden"
+  );
+
   assert.deepStrictEqual(
     collectProgramOptionLabels({
       options: [
