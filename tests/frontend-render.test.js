@@ -16,9 +16,9 @@ function installFrontendGlobals() {
   };
 
   globalThis.Log = {
-    log() { },
-    warn() { },
-    error() { }
+    log() {},
+    warn() {},
+    error() {}
   };
 
   globalThis.config = { language: "en" };
@@ -100,12 +100,13 @@ function createInstance(overrides = {}) {
     debugStats: overrides.debugStats || null,
     lastInitStatus: overrides.lastInitStatus || null,
     deviceRuntimeHints: overrides.deviceRuntimeHints || {},
+    activeProgramRecoveryRequestTsByHaId: overrides.activeProgramRecoveryRequestTsByHaId || {},
     instanceId: "test-instance",
     translate(key) {
       return key;
     },
-    updateDom() { },
-    sendSocketNotification() { }
+    updateDom() {},
+    sendSocketNotification() {}
   };
 }
 
@@ -229,6 +230,75 @@ function createInstance(overrides = {}) {
     assert.ok(runningSelectedDom.innerHTML.includes("NO_ACTIVE_APPLIANCES"));
     assert.ok(!runningSelectedDom.innerHTML.includes("Synthetics"));
     assert.ok(!runningSelectedDom.innerHTML.includes("fa-play"));
+
+    const recoveryNotifications = [];
+    const recoveryInstance = createInstance();
+    recoveryInstance.sendSocketNotification = (notification, payload) => {
+      recoveryNotifications.push({ notification, payload });
+    };
+
+    recoveryInstance.socketNotificationReceived("MMM-HomeConnect_Update", [
+      {
+        haId: "dryer-1",
+        name: "Dryer",
+        type: "Dryer",
+        PowerState: "On",
+        OperationState: "BSH.Common.EnumType.OperationState.Run",
+        ActiveProgramName: "Synthetics",
+        ActiveProgramSource: "selected",
+        RemainingProgramTime: 1500
+      }
+    ]);
+
+    assert.strictEqual(recoveryNotifications.length, 1);
+    assert.strictEqual(recoveryNotifications[0].notification, "REQUEST_DEVICE_REFRESH");
+    assert.deepStrictEqual(recoveryNotifications[0].payload.haIds, ["dryer-1"]);
+    assert.strictEqual(recoveryNotifications[0].payload.bypassActiveProgramThrottle, true);
+
+    recoveryInstance.socketNotificationReceived("MMM-HomeConnect_Update", [
+      {
+        haId: "dryer-1",
+        name: "Dryer",
+        type: "Dryer",
+        PowerState: "On",
+        OperationState: "BSH.Common.EnumType.OperationState.Run",
+        ActiveProgramName: "Synthetics",
+        ActiveProgramSource: "selected",
+        RemainingProgramTime: 1400
+      }
+    ]);
+
+    assert.strictEqual(
+      recoveryNotifications.length,
+      1,
+      "Expected recovery request to be rate-limited per device"
+    );
+
+    const delayedStartNotifications = [];
+    const delayedStartRecoveryInstance = createInstance();
+    delayedStartRecoveryInstance.lastActiveProgramRequestTs = Date.now();
+    delayedStartRecoveryInstance.sendSocketNotification = (notification, payload) => {
+      delayedStartNotifications.push({ notification, payload });
+    };
+
+    delayedStartRecoveryInstance.socketNotificationReceived("MMM-HomeConnect_Update", [
+      {
+        haId: "dryer-2",
+        name: "Dryer",
+        type: "Dryer",
+        PowerState: "On",
+        OperationState: "BSH.Common.EnumType.OperationState.DelayedStart",
+        ActiveProgramName: "Synthetics",
+        ActiveProgramSource: "selected",
+        "BSH.Common.Option.StartInRelative": { value: "PT30M" }
+      }
+    ]);
+
+    assert.strictEqual(
+      delayedStartNotifications.length,
+      0,
+      "Expected no recovery request for delayed start with selected program"
+    );
 
     const selectedDoorOpenInstance = createInstance({
       devices: [

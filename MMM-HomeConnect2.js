@@ -220,6 +220,7 @@ Module.register("MMM-HomeConnect2", {
   instanceId: null,
   deviceRuntimeHints: {},
   lastActiveProgramRequestTs: 0,
+  activeProgramRecoveryRequestTsByHaId: {},
   debugStats: null,
   progressRefreshTimer: null,
 
@@ -275,6 +276,76 @@ Module.register("MMM-HomeConnect2", {
     }
   },
 
+  getActiveProgramRecoveryCooldownMs() {
+    return 15 * 1000;
+  },
+
+  getActiveProgramRecoveryState() {
+    if (!this.activeProgramRecoveryRequestTsByHaId) {
+      this.activeProgramRecoveryRequestTsByHaId = {};
+    }
+
+    return this.activeProgramRecoveryRequestTsByHaId;
+  },
+
+  recoverMissingActivePrograms(devices = this.devices) {
+    const deviceUtils = this.getDeviceUtils();
+    const requestState = this.getActiveProgramRecoveryState();
+    const recoverHaIds = [];
+    const now = Date.now();
+    const cooldownMs = this.getActiveProgramRecoveryCooldownMs();
+
+    devices.forEach((device) => {
+      const haId = device?.haId || device?.haid || device?.id;
+      if (!haId) {
+        return;
+      }
+
+      const operationState = getOperationStateInfo(device);
+      const appearsActive = deviceUtils.deviceAppearsActive(device);
+      const running =
+        device.PowerState !== "Off" &&
+        (operationState.isActive || appearsActive) &&
+        !operationState.isDelayedStart;
+
+      if (device.ActiveProgramSource === "active") {
+        delete requestState[haId];
+        return;
+      }
+
+      if (!running) {
+        delete requestState[haId];
+        return;
+      }
+
+      const needsRecovery =
+        device.ActiveProgramSource === "selected" ||
+        !device.ActiveProgramName ||
+        !device.ActiveProgramSource;
+
+      if (!needsRecovery) {
+        return;
+      }
+
+      if (now - (requestState[haId] || 0) < cooldownMs) {
+        return;
+      }
+
+      requestState[haId] = now;
+      recoverHaIds.push(haId);
+    });
+
+    if (!recoverHaIds.length) {
+      return;
+    }
+
+    this.lastActiveProgramRequestTs = now;
+    this.requestStateRefresh({
+      haIds: recoverHaIds,
+      bypassActiveProgramThrottle: true
+    });
+  },
+
   requestStateRefresh(options = {}) {
     const payload = {
       instanceId: this.instanceId,
@@ -319,8 +390,8 @@ Module.register("MMM-HomeConnect2", {
 
     const browserLanguages = Array.isArray(navigator?.languages)
       ? navigator.languages
-        .map((language) => (typeof language === "string" ? language.trim() : ""))
-        .filter(Boolean)
+      .map((language) => (typeof language === "string" ? language.trim() : ""))
+      .filter(Boolean)
       : [];
     if (browserLanguages.length > 0) {
       return browserLanguages[0];
@@ -365,6 +436,7 @@ Module.register("MMM-HomeConnect2", {
     switch (notification) {
       case "MMM-HomeConnect_Update":
         this.devices = safePayload || [];
+        this.recoverMissingActivePrograms(this.devices);
         this.updateDom();
         // After initial device list arrives, request a snapshot of active programs
         // so RemainingProgramTime / ProgramProgress are populated even before SSE events come in.
