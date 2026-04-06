@@ -25,31 +25,231 @@ const NodeHelper = require("node_helper"),
 const ACTIVE_PROGRAM_RETRY_DELAY_MS = 5000; // 5s
 const ACTIVE_PROGRAM_MAX_RETRIES = 3; // Maximum number of retries for active program requests
 
+const SESSION_STATES = Object.freeze({
+  BOOT: "boot",
+  AUTHENTICATING: "authenticating",
+  INITIALIZING: "initializing",
+  READY: "ready",
+  REFRESHING_DEVICES: "refreshing_devices",
+  REFRESHING_PROGRAMS: "refreshing_programs",
+  RATE_LIMITED: "rate_limited",
+  ERROR: "error"
+});
+
+const INIT_STATUS_MESSAGES = Object.freeze({
+  initializing: "Initialization started",
+  session_active: "Session active - using existing authentication",
+  auth_in_progress: "Authentication in progress",
+  complete: "Already initialized",
+  hc_not_ready: "HomeConnect not ready",
+  token_found: "Token found - initializing HomeConnect",
+  rate_limited: "Rate limit - please wait...",
+  initializing_hc: "Initializing HomeConnect...",
+  auth_failed: "Authentication failed - please check manually",
+  success: "Successfully initialized",
+  reauth_required: "Stored HomeConnect token invalid - re-authentication required",
+  fetching_programs: "Fetching active programs..."
+});
+
+const AUTH_STATUS_MESSAGES = Object.freeze({
+  success: "Authentication successful",
+  error: "Authentication failed",
+  token_invalid: "Token invalid - starting new authentication flow"
+});
+
 const { moduleLog, setModuleLogLevel } = require("./lib/logger");
 
 module.exports = NodeHelper.create({
   refreshToken: null,
   hc: null,
-  authInProgress: false,
   configReceived: false,
   initializationAttempts: 0,
   maxInitAttempts: 3,
   instanceId: null,
-  subscribed: false,
   activeProgramManager: null,
   authService: null,
   deviceService: null,
   programService: null,
-  serverPollTimer: null,
-  activeProgramSchedulerTimer: null,
+  sessionState: SESSION_STATES.BOOT,
+  sessionStateMeta: {
+    updatedAt: 0,
+    event: "init",
+    reason: null
+  },
+  rateLimitReleaseTimer: null,
   debugStats: {
     lastApiCallTs: null,
     lastSseEventTs: null,
     apiCounters: {}
   },
 
+  transitionSessionState(event, payload = {}) {
+    const prevState = this.sessionState || SESSION_STATES.BOOT;
+    let nextState = prevState;
+
+    switch (event) {
+      case "CONFIG_RECEIVED":
+        if (globalSession.isAuthenticated) {
+          nextState = SESSION_STATES.READY;
+        }
+        break;
+      case "AUTH_START":
+        nextState = SESSION_STATES.AUTHENTICATING;
+        break;
+      case "HC_INIT_START":
+        nextState = SESSION_STATES.INITIALIZING;
+        break;
+      case "AUTH_SUCCESS":
+        nextState = SESSION_STATES.READY;
+        break;
+      case "AUTH_ERROR":
+        nextState = SESSION_STATES.ERROR;
+        break;
+      case "DEVICE_REFRESH_START":
+        nextState = SESSION_STATES.REFRESHING_DEVICES;
+        break;
+      case "DEVICE_REFRESH_DONE":
+        nextState =
+          Date.now() < globalSession.rateLimitUntil
+            ? SESSION_STATES.RATE_LIMITED
+            : SESSION_STATES.READY;
+        break;
+      case "PROGRAM_FETCH_START":
+        nextState = SESSION_STATES.REFRESHING_PROGRAMS;
+        break;
+      case "PROGRAM_FETCH_DONE":
+        nextState =
+          Date.now() < globalSession.rateLimitUntil
+            ? SESSION_STATES.RATE_LIMITED
+            : SESSION_STATES.READY;
+        break;
+      case "RATE_LIMIT_HIT":
+        nextState = SESSION_STATES.RATE_LIMITED;
+        break;
+      case "RATE_LIMIT_CLEARED":
+        nextState = SESSION_STATES.READY;
+        break;
+      case "ERROR":
+        nextState = SESSION_STATES.ERROR;
+        break;
+      case "RESET":
+        nextState = SESSION_STATES.BOOT;
+        break;
+      default:
+        break;
+    }
+
+    this.sessionStateMeta = {
+      updatedAt: Date.now(),
+      event,
+      reason: payload.reason || null
+    };
+
+    if (nextState !== prevState) {
+      this.sessionState = nextState;
+      moduleLog("debug", `Session state transition: ${prevState} -> ${nextState}`, {
+        event,
+        reason: payload.reason || null
+      });
+      this.broadcastDebugStats();
+    }
+
+    return this.sessionState;
+  },
+
+  scheduleRateLimitRelease(untilTs) {
+    if (this.rateLimitReleaseTimer) {
+      clearTimeout(this.rateLimitReleaseTimer);
+      this.rateLimitReleaseTimer = null;
+    }
+
+    const waitMs = Math.max(0, Number(untilTs || 0) - Date.now());
+    if (waitMs <= 0) {
+      this.transitionSessionState("RATE_LIMIT_CLEARED", {
+        reason: "rate_limit_elapsed"
+      });
+      return;
+    }
+
+    this.rateLimitReleaseTimer = setTimeout(() => {
+      this.rateLimitReleaseTimer = null;
+      if (Date.now() >= globalSession.rateLimitUntil) {
+        this.transitionSessionState("RATE_LIMIT_CLEARED", {
+          reason: "rate_limit_elapsed"
+        });
+      }
+    }, waitMs);
+  },
+
+  syncRateLimitState() {
+    const now = Date.now();
+    if (now >= globalSession.rateLimitUntil) {
+      if (this.sessionState === SESSION_STATES.RATE_LIMITED) {
+        this.transitionSessionState("RATE_LIMIT_CLEARED", {
+          reason: "rate_limit_elapsed"
+        });
+      }
+      return false;
+    }
+
+    this.transitionSessionState("RATE_LIMIT_HIT", {
+      reason: "rate_limit_active"
+    });
+    this.scheduleRateLimitRelease(globalSession.rateLimitUntil);
+    return true;
+  },
+
+  buildInitStatusPayload(status, payload = {}) {
+    const baseMessage = INIT_STATUS_MESSAGES[status] || "";
+    const message =
+      typeof payload.message === "string" && payload.message.length ? payload.message : baseMessage;
+
+    return {
+      status,
+      message,
+      ...payload
+    };
+  },
+
+  emitInitStatus(status, payload = {}, options = {}) {
+    const { broadcast = true } = options;
+    const builtPayload = this.buildInitStatusPayload(status, payload);
+
+    if (broadcast) {
+      this.broadcastToAllClients("INIT_STATUS", builtPayload);
+      return;
+    }
+
+    this.sendSocketNotification("INIT_STATUS", builtPayload);
+  },
+
+  buildAuthStatusPayload(status, payload = {}) {
+    const baseMessage = AUTH_STATUS_MESSAGES[status] || "";
+    const message =
+      typeof payload.message === "string" && payload.message.length ? payload.message : baseMessage;
+
+    return {
+      status,
+      message,
+      ...payload
+    };
+  },
+
+  emitAuthStatus(status, payload = {}, options = {}) {
+    const { broadcast = true } = options;
+    const builtPayload = this.buildAuthStatusPayload(status, payload);
+
+    if (broadcast) {
+      this.broadcastToAllClients("AUTH_STATUS", builtPayload);
+      return;
+    }
+
+    this.sendSocketNotification("AUTH_STATUS", builtPayload);
+  },
+
   init() {
     moduleLog("info", "init module helper: MMM-HomeConnect2 (session-based)");
+    this.transitionSessionState("CONFIG_RECEIVED", { reason: "helper_init" });
 
     this.authService = new AuthService({
       logger: moduleLog,
@@ -103,13 +303,9 @@ module.exports = NodeHelper.create({
     if (this.activeProgramManager && typeof this.activeProgramManager.clearAll === "function") {
       this.activeProgramManager.clearAll();
     }
-    if (this.serverPollTimer) {
-      clearInterval(this.serverPollTimer);
-      this.serverPollTimer = null;
-    }
-    if (this.activeProgramSchedulerTimer) {
-      clearInterval(this.activeProgramSchedulerTimer);
-      this.activeProgramSchedulerTimer = null;
+    if (this.rateLimitReleaseTimer) {
+      clearTimeout(this.rateLimitReleaseTimer);
+      this.rateLimitReleaseTimer = null;
     }
     if (this.deviceService && typeof this.deviceService.shutdown === "function") {
       this.deviceService.shutdown();
@@ -127,22 +323,26 @@ module.exports = NodeHelper.create({
       return this.notifyAuthInProgress();
     }
 
-    this.sendSocketNotification("INIT_STATUS", {
-      status: "initializing",
-      message: "Initialization started",
-      instanceId: this.instanceId
-    });
+    this.emitInitStatus(
+      "initializing",
+      {
+        instanceId: this.instanceId
+      },
+      { broadcast: false }
+    );
 
     this.checkTokenAndInitialize();
   },
 
   handleSessionAlreadyActive() {
     moduleLog("info", "Session already authenticated - using existing tokens");
-    this.sendSocketNotification("INIT_STATUS", {
-      status: "session_active",
-      message: "Session active - using existing authentication",
-      instanceId: this.instanceId
-    });
+    this.emitInitStatus(
+      "session_active",
+      {
+        instanceId: this.instanceId
+      },
+      { broadcast: false }
+    );
 
     if (this.hc && this.deviceService) {
       setTimeout(() => {
@@ -153,20 +353,24 @@ module.exports = NodeHelper.create({
 
   notifyAuthInProgress() {
     moduleLog("info", "Authentication already in progress for another client instance");
-    this.sendSocketNotification("INIT_STATUS", {
-      status: "auth_in_progress",
-      message: "Authentication in progress",
-      instanceId: this.instanceId
-    });
+    this.emitInitStatus(
+      "auth_in_progress",
+      {
+        instanceId: this.instanceId
+      },
+      { broadcast: false }
+    );
   },
 
   handleConfigNotificationSubsequent() {
     if (globalSession.isAuthenticated && this.hc && this.deviceService) {
-      this.sendSocketNotification("INIT_STATUS", {
-        status: "complete",
-        message: "Already initialized",
-        instanceId: this.instanceId
-      });
+      this.emitInitStatus(
+        "complete",
+        {
+          instanceId: this.instanceId
+        },
+        { broadcast: false }
+      );
 
       setTimeout(() => {
         this.deviceService.broadcastDevices(this.sendSocketNotification.bind(this));
@@ -177,6 +381,10 @@ module.exports = NodeHelper.create({
   },
 
   handleConfigNotification(payload) {
+    this.transitionSessionState("CONFIG_RECEIVED", {
+      reason: "config_notification"
+    });
+
     this.instanceId = payload.instanceId || "default";
     globalSession.clientInstances.add(this.instanceId);
 
@@ -248,12 +456,18 @@ module.exports = NodeHelper.create({
     const shouldFetchDevices = forceRefresh || !sseHealthy;
 
     if (shouldFetchDevices && this.hc && !globalSession.isAuthenticating) {
+      this.transitionSessionState("DEVICE_REFRESH_START", {
+        reason: "state_refresh_poll"
+      });
       moduleLog("info", "State refresh requires polling Home Connect", {
         requester,
         forceRefresh,
         sseHealthy
       });
       this.deviceService.getDevices(this.sendSocketNotification.bind(this));
+      this.transitionSessionState("DEVICE_REFRESH_DONE", {
+        reason: "state_refresh_dispatched"
+      });
     } else if (hasDevices) {
       moduleLog("debug", "State refresh served from cache (SSE data)", {
         requester,
@@ -261,9 +475,15 @@ module.exports = NodeHelper.create({
         sseHealthy
       });
       this.deviceService.broadcastDevices(this.sendSocketNotification.bind(this));
+      this.transitionSessionState("DEVICE_REFRESH_DONE", {
+        reason: "state_refresh_cache"
+      });
     } else {
       moduleLog("warn", "State refresh unable to respond - no device data available", {
         requester
+      });
+      this.transitionSessionState("ERROR", {
+        reason: "state_refresh_no_devices"
       });
     }
 
@@ -290,9 +510,7 @@ module.exports = NodeHelper.create({
 
     if (!this.hc) {
       moduleLog("warn", "HomeConnect not initialized - cannot fetch active programs");
-      this.broadcastToAllClients("INIT_STATUS", {
-        status: "hc_not_ready",
-        message: "HomeConnect not ready",
+      this.emitInitStatus("hc_not_ready", {
         instanceId: requester
       });
       return;
@@ -300,11 +518,11 @@ module.exports = NodeHelper.create({
 
     const now = Date.now();
 
-    if (!force && now < globalSession.rateLimitUntil) {
+    const rateLimitActive = this.syncRateLimitState();
+    if (!force && rateLimitActive) {
       const remainingSeconds = Math.ceil((globalSession.rateLimitUntil - now) / 1000);
       moduleLog("info", `Rate limited - ${remainingSeconds}s remaining`);
-      this.broadcastToAllClients("INIT_STATUS", {
-        status: "device_error",
+      this.emitInitStatus("device_error", {
         message: `Rate limit active - please wait ${remainingSeconds}s`,
         rateLimitSeconds: remainingSeconds,
         statusCode: 429,
@@ -348,6 +566,9 @@ module.exports = NodeHelper.create({
       force
     });
 
+    this.transitionSessionState("PROGRAM_FETCH_START", {
+      reason: "active_program_request"
+    });
     globalSession.lastActiveProgramFetch = now;
     this.fetchActiveProgramsForDevices(targetDevices, requester);
   },
@@ -390,7 +611,15 @@ module.exports = NodeHelper.create({
     this.broadcastToAllClients("DEBUG_STATS", {
       lastApiCallTs: this.debugStats.lastApiCallTs,
       lastSseEventTs: this.debugStats.lastSseEventTs,
-      apiCounters: { ...this.debugStats.apiCounters }
+      apiCounters: { ...this.debugStats.apiCounters },
+      session: {
+        state: this.sessionState,
+        event: this.sessionStateMeta.event,
+        updatedAt: this.sessionStateMeta.updatedAt,
+        reason: this.sessionStateMeta.reason,
+        rateLimitUntil: globalSession.rateLimitUntil || 0,
+        rateLimitRemainingMs: Math.max(0, (globalSession.rateLimitUntil || 0) - Date.now())
+      }
     });
   },
 
@@ -416,17 +645,20 @@ module.exports = NodeHelper.create({
   checkRateLimit() {
     const now = Date.now();
     if (now - globalSession.lastAuthAttempt < globalSession.MIN_AUTH_INTERVAL) {
-      moduleLog("warn", "Rate limit: waiting before next auth attempt");
-      this.broadcastToAllClients("INIT_STATUS", {
-        status: "rate_limited",
-        message: "Rate limit - please wait..."
+      this.transitionSessionState("RATE_LIMIT_HIT", {
+        reason: "auth_interval_rate_limit"
       });
+      moduleLog("warn", "Rate limit: waiting before next auth attempt");
+      this.emitInitStatus("rate_limited");
       return false;
     }
     return true;
   },
 
   initiateAuthFlow() {
+    this.transitionSessionState("AUTH_START", {
+      reason: "initiate_auth_flow"
+    });
     this.authService.initiateAuthFlow();
     if (!globalSession.isAuthenticating && !globalSession.refreshToken) {
       this.initWithHeadlessAuth();
@@ -441,10 +673,7 @@ module.exports = NodeHelper.create({
       globalSession.refreshToken = token;
       this.refreshToken = token;
 
-      this.broadcastToAllClients("INIT_STATUS", {
-        status: "token_found",
-        message: "Token found - initializing HomeConnect"
-      });
+      this.emitInitStatus("token_found");
 
       this.initializeHomeConnect(token);
       return;
@@ -464,27 +693,25 @@ module.exports = NodeHelper.create({
     globalSession.refreshToken = tokens.refresh_token;
     globalSession.accessToken = tokens.access_token;
 
-    this.broadcastToAllClients("INIT_STATUS", {
-      status: "initializing_hc",
-      message: "Initializing HomeConnect..."
-    });
+    this.emitInitStatus("initializing_hc");
 
     return this.initializeHomeConnect(tokens.refresh_token);
   },
 
   handleHeadlessAuthError(error) {
     globalSession.isAuthenticating = false;
+    this.transitionSessionState("AUTH_ERROR", {
+      reason: error && error.message ? error.message : "headless_auth_error"
+    });
     moduleLog("error", "Headless authentication failed:", error.message);
 
-    this.broadcastToAllClients("AUTH_STATUS", {
-      status: "error",
+    this.emitAuthStatus("error", {
       message: `Authentication failed: ${error.message}`
     });
 
     if (error.message.includes("polling too quickly")) {
       moduleLog("info", "Rate limiting detected - will not retry automatically");
-      this.broadcastToAllClients("INIT_STATUS", {
-        status: "rate_limited",
+      this.emitInitStatus("rate_limited", {
         message: "Rate limit reached - please restart in 2 minutes"
       });
       return;
@@ -504,10 +731,7 @@ module.exports = NodeHelper.create({
     }
 
     moduleLog("error", "Max initialization attempts reached - aborting headless authentication");
-    this.broadcastToAllClients("INIT_STATUS", {
-      status: "auth_failed",
-      message: "Authentication failed - please check manually"
-    });
+    this.emitInitStatus("auth_failed");
   },
 
   async initWithHeadlessAuth() {
@@ -516,6 +740,9 @@ module.exports = NodeHelper.create({
       return;
     }
 
+    this.transitionSessionState("AUTH_START", {
+      reason: "headless_auth"
+    });
     globalSession.isAuthenticating = true;
     this.initializationAttempts++;
 
@@ -525,9 +752,15 @@ module.exports = NodeHelper.create({
     );
 
     try {
-      const tokens = await this.authService.headlessAuth((notification, payload) =>
-        this.broadcastToAllClients(notification, payload)
-      );
+      const tokens = await this.authService.headlessAuth((notification, payload) => {
+        if (notification === "AUTH_STATUS") {
+          const status = payload && payload.status ? payload.status : "error";
+          this.emitAuthStatus(status, payload || {});
+          return;
+        }
+
+        this.broadcastToAllClients(notification, payload);
+      });
 
       await this.handleHeadlessAuthSuccess(tokens);
     } catch (error) {
@@ -540,17 +773,23 @@ module.exports = NodeHelper.create({
 
     globalSession.isAuthenticated = true;
     globalSession.isAuthenticating = false;
-
-    this.broadcastToAllClients("INIT_STATUS", {
-      status: "success",
-      message: "Successfully initialized"
+    this.transitionSessionState("AUTH_SUCCESS", {
+      reason: "homeconnect_initialized"
     });
+
+    this.emitInitStatus("success");
 
     if (this.deviceService) {
       // Perform a single initial device fetch; further updates are normally
       // driven by SSE, with fallback polling only when SSE is unhealthy.
       setTimeout(() => {
+        this.transitionSessionState("DEVICE_REFRESH_START", {
+          reason: "initial_device_fetch"
+        });
         this.deviceService.getDevices(this.sendSocketNotification.bind(this));
+        this.transitionSessionState("DEVICE_REFRESH_DONE", {
+          reason: "initial_device_fetch_dispatched"
+        });
       }, 2000);
     }
   },
@@ -558,6 +797,9 @@ module.exports = NodeHelper.create({
   handleHomeConnectInitError(error) {
     moduleLog("error", "HomeConnect initialization failed:", error);
     globalSession.isAuthenticating = false;
+    this.transitionSessionState("AUTH_ERROR", {
+      reason: error && error.message ? error.message : "homeconnect_init_error"
+    });
 
     const errorMessage = error && error.message ? error.message : String(error || "");
     const normalizedMsg = typeof errorMessage === "string" ? errorMessage.toLowerCase() : "";
@@ -569,15 +811,9 @@ module.exports = NodeHelper.create({
         "Detected invalid_grant response while initializing HomeConnect - triggering re-authentication"
       );
 
-      this.broadcastToAllClients("INIT_STATUS", {
-        status: "reauth_required",
-        message: "Stored HomeConnect token invalid - re-authentication required"
-      });
+      this.emitInitStatus("reauth_required");
 
-      this.broadcastToAllClients("AUTH_STATUS", {
-        status: "token_invalid",
-        message: "Token invalid - starting new authentication flow"
-      });
+      this.emitAuthStatus("token_invalid");
 
       try {
         if (fs.existsSync(refreshTokenPath)) {
@@ -598,6 +834,9 @@ module.exports = NodeHelper.create({
       this.initializationAttempts = 0;
       globalSession.lastAuthAttempt = 0;
       globalSession.rateLimitUntil = 0;
+      this.transitionSessionState("RESET", {
+        reason: "invalid_grant"
+      });
 
       // Start a fresh headless authentication flow (shows QR code on clients)
       setTimeout(() => {
@@ -609,8 +848,7 @@ module.exports = NodeHelper.create({
       return;
     }
 
-    this.broadcastToAllClients("INIT_STATUS", {
-      status: "hc_error",
+    this.emitInitStatus("hc_error", {
       message: `HomeConnect error: ${error.message}`
     });
   },
@@ -622,9 +860,15 @@ module.exports = NodeHelper.create({
       globalSession.refreshToken = refreshToken;
       // After init has completed (subscriptions established), refresh devices on token update.
       // During initial init (subscribed === false), skip to avoid double fetching.
-      if (this.subscribed && this.deviceService) {
+      if (this.deviceService && this.deviceService.subscribed) {
         moduleLog("info", "Token updated post-init - refreshing device list");
+        this.transitionSessionState("DEVICE_REFRESH_START", {
+          reason: "token_refresh_device_sync"
+        });
         this.deviceService.getDevices(this.sendSocketNotification.bind(this));
+        this.transitionSessionState("DEVICE_REFRESH_DONE", {
+          reason: "token_refresh_device_sync_dispatched"
+        });
       } else {
         moduleLog("info", "Token updated during initialization");
       }
@@ -634,6 +878,9 @@ module.exports = NodeHelper.create({
   async initializeHomeConnect(refreshToken) {
     return new Promise((resolve, reject) => {
       moduleLog("info", "Initializing HomeConnect with token...");
+      this.transitionSessionState("HC_INIT_START", {
+        reason: "initialize_homeconnect"
+      });
       if (!HomeConnect) {
         HomeConnect = require("./lib/homeconnect-api.js");
       }
@@ -676,6 +923,9 @@ module.exports = NodeHelper.create({
 
   retryAuthentication() {
     moduleLog("info", "Manual authentication retry");
+    this.transitionSessionState("RESET", {
+      reason: "manual_retry_auth"
+    });
     globalSession.isAuthenticated = false;
     globalSession.isAuthenticating = false;
     globalSession.accessToken = null;
@@ -691,7 +941,6 @@ module.exports = NodeHelper.create({
         this.deviceService.shutdown();
       }
     }
-    this.subscribed = false;
     if (this.activeProgramManager && typeof this.activeProgramManager.clearAll === "function") {
       this.activeProgramManager.clearAll();
     }
@@ -730,9 +979,7 @@ module.exports = NodeHelper.create({
 
     moduleLog("info", `Fetching active programs for ${deviceArray.length} device(s)`);
 
-    this.broadcastToAllClients("INIT_STATUS", {
-      status: "fetching_programs",
-      message: "Fetching active programs...",
+    this.emitInitStatus("fetching_programs", {
       instanceId: requestingInstanceId
     });
 
@@ -847,12 +1094,26 @@ module.exports = NodeHelper.create({
       }
     } catch (error) {
       this.handleActiveProgramFetchError(error);
+    } finally {
+      this.transitionSessionState("PROGRAM_FETCH_DONE", {
+        reason: "active_program_cycle_finished"
+      });
     }
   },
 
   handleActiveProgramFetchError(error) {
     if (!this.programService) return;
     this.programService.handleActiveProgramFetchError(error, this.broadcastToAllClients.bind(this));
+    if (globalSession.rateLimitUntil > Date.now()) {
+      this.transitionSessionState("RATE_LIMIT_HIT", {
+        reason: "active_program_429"
+      });
+      this.scheduleRateLimitRelease(globalSession.rateLimitUntil);
+    } else {
+      this.transitionSessionState("ERROR", {
+        reason: error && error.message ? error.message : "active_program_error"
+      });
+    }
   },
 
   applyProgramResult(result) {

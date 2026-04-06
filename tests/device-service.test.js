@@ -37,8 +37,8 @@ function createDeviceService(overrides = {}) {
     const globalSession = { clientInstances: new Set(["frontend-a", "frontend-b", "frontend-c"]) };
     const notifications = [];
     const service = new DeviceService({
-      logger: () => { },
-      broadcastToAllClients: () => { },
+      logger: () => {},
+      broadcastToAllClients: () => {},
       globalSession
     });
     service.devices.set("ha-1", { haId: "ha-1", name: "Washer" });
@@ -81,12 +81,12 @@ function createDeviceService(overrides = {}) {
     const hcMock = {
       subscribe: (type) => subscribeCalls.push(type),
       refreshTokens: () => Promise.resolve(),
-      closeEventSources: () => { }
+      closeEventSources: () => {}
     };
     sseService.attachClient(hcMock);
     sseService.setConfig({ enableSSEHeartbeat: false });
 
-    const handler = () => { };
+    const handler = () => {};
 
     sseService.subscribeToDeviceEvents(handler);
     await wait(0);
@@ -112,12 +112,12 @@ function createDeviceService(overrides = {}) {
     const { service } = createDeviceService();
     const closeCalls = [];
     const oldClient = {
-      setEventSourceRetryConfig: () => { },
+      setEventSourceRetryConfig: () => {},
       closeEventSources: (opts) => closeCalls.push(opts)
     };
     const newClient = {
-      setEventSourceRetryConfig: () => { },
-      closeEventSources: () => { }
+      setEventSourceRetryConfig: () => {},
+      closeEventSources: () => {}
     };
 
     service.attachClient(oldClient);
