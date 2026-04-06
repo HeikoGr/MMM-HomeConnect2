@@ -183,6 +183,29 @@ progress[max]:not([value]) {
   color: #f5f5f5;
 }
 
+.hc-status-banner {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  line-height: 1.35;
+}
+
+.hc-status-banner-warning {
+  border: 1px solid rgba(255, 191, 128, 0.45);
+  background: rgba(120, 72, 10, 0.28);
+  color: #ffe1b8;
+}
+
+.hc-status-banner-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.hc-status-banner-message {
+  margin-top: 3px;
+  font-size: 11px;
+}
+
 .hc-debug-row {
   display: flex;
   justify-content: space-between;

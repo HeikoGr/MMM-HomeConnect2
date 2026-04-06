@@ -271,7 +271,26 @@ function createInstance(overrides = {}) {
     assert.strictEqual(
       recoveryNotifications.length,
       1,
-      "Expected recovery request to be rate-limited per device"
+      "Expected recovery request to run only once per active program cycle"
+    );
+
+    recoveryInstance.socketNotificationReceived("MMM-HomeConnect_Update", [
+      {
+        haId: "dryer-1",
+        name: "Dryer",
+        type: "Dryer",
+        PowerState: "On",
+        OperationState: "BSH.Common.EnumType.OperationState.Run",
+        ActiveProgramName: "Mixed Load",
+        ActiveProgramSource: "selected",
+        RemainingProgramTime: 1200
+      }
+    ]);
+
+    assert.strictEqual(
+      recoveryNotifications.length,
+      2,
+      "Expected a new recovery request when the active program cycle changes"
     );
 
     const delayedStartNotifications = [];
@@ -505,6 +524,28 @@ function createInstance(overrides = {}) {
     assert.ok(authDom.innerHTML.includes("AUTH_TITLE"));
     assert.ok(authDom.innerHTML.includes("ABCD-EFGH"));
     assert.ok(authDom.innerHTML.includes("auth-container"));
+
+    const rateLimitInstance = createInstance({
+      devices: [
+        {
+          name: "Washer",
+          type: "Washer",
+          PowerState: "On",
+          ActiveProgramName: "Eco 40-60",
+          ActiveProgramSource: "active"
+        }
+      ],
+      lastInitStatus: {
+        status: "device_error",
+        message: "Rate limit active - please wait 120s",
+        statusCode: 429,
+        isRateLimit: true,
+        rateLimitSeconds: 120
+      }
+    });
+    const rateLimitDom = rateLimitInstance.getDom();
+    assert.ok(rateLimitDom.innerHTML.includes("HTTP 429"));
+    assert.ok(rateLimitDom.innerHTML.includes("Rate limit active - please wait 120s"));
 
     console.log("frontend-render.test.js OK");
   } finally {

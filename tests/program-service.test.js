@@ -151,6 +151,7 @@ function createProgramService(overrides = {}) {
   // fetchActiveProgramForDevice: falls back to selected program on 404 active program
   {
     const { service } = createProgramService();
+    let availableProgramCalls = 0;
     service.attachClient({
       getActiveProgram: async () => ({
         success: false,
@@ -161,6 +162,16 @@ function createProgramService(overrides = {}) {
         success: true,
         data: { key: "LaundryCare.Dryer.Program.Synthetic", name: "Synthetics", options: [] }
       }),
+      getAvailableProgram: async () => {
+        availableProgramCalls += 1;
+        return {
+          success: true,
+          data: {
+            key: "LaundryCare.Dryer.Program.Synthetic",
+            options: []
+          }
+        };
+      },
       applyEventToDevice() {}
     });
 
@@ -168,6 +179,10 @@ function createProgramService(overrides = {}) {
     assert.strictEqual(result.success, true);
     assert.strictEqual(result.source, "selected");
     assert.strictEqual(result.data.name, "Synthetics");
+
+    const secondResult = await service.fetchActiveProgramForDevice("ha-1", "Washer");
+    assert.strictEqual(secondResult.success, true);
+    assert.strictEqual(availableProgramCalls, 1);
   }
 
   // fetchActiveProgramForDevice: does not fall back to available programs for washers
@@ -268,6 +283,8 @@ function createProgramService(overrides = {}) {
     const evt = events.find((e) => e.n === "INIT_STATUS");
     assert.ok(evt);
     assert.strictEqual(evt.p.status, "device_error");
+    assert.strictEqual(evt.p.statusCode, 429);
+    assert.strictEqual(evt.p.isRateLimit, true);
   }
 
   console.log("program-service.test.js OK");

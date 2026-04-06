@@ -280,6 +280,16 @@ Module.register("MMM-HomeConnect2", {
     return 15 * 1000;
   },
 
+  getActiveProgramRecoveryCycleKey(device, operationState) {
+    return [
+      device?.PowerState || "",
+      device?.OperationState || "",
+      operationState?.label || "",
+      device?.ActiveProgramSource || "",
+      device?.ActiveProgramName || ""
+    ].join("|");
+  },
+
   getActiveProgramRecoveryState() {
     if (!this.activeProgramRecoveryRequestTsByHaId) {
       this.activeProgramRecoveryRequestTsByHaId = {};
@@ -293,7 +303,6 @@ Module.register("MMM-HomeConnect2", {
     const requestState = this.getActiveProgramRecoveryState();
     const recoverHaIds = [];
     const now = Date.now();
-    const cooldownMs = this.getActiveProgramRecoveryCooldownMs();
 
     devices.forEach((device) => {
       const haId = device?.haId || device?.haid || device?.id;
@@ -307,6 +316,8 @@ Module.register("MMM-HomeConnect2", {
         device.PowerState !== "Off" &&
         (operationState.isActive || appearsActive) &&
         !operationState.isDelayedStart;
+      const cycleKey = this.getActiveProgramRecoveryCycleKey(device, operationState);
+      const existingRequest = requestState[haId];
 
       if (device.ActiveProgramSource === "active") {
         delete requestState[haId];
@@ -327,11 +338,14 @@ Module.register("MMM-HomeConnect2", {
         return;
       }
 
-      if (now - (requestState[haId] || 0) < cooldownMs) {
+      if (existingRequest && existingRequest.cycleKey === cycleKey) {
         return;
       }
 
-      requestState[haId] = now;
+      requestState[haId] = {
+        cycleKey,
+        requestedAt: now
+      };
       recoverHaIds.push(haId);
     });
 
@@ -390,8 +404,8 @@ Module.register("MMM-HomeConnect2", {
 
     const browserLanguages = Array.isArray(navigator?.languages)
       ? navigator.languages
-      .map((language) => (typeof language === "string" ? language.trim() : ""))
-      .filter(Boolean)
+          .map((language) => (typeof language === "string" ? language.trim() : ""))
+          .filter(Boolean)
       : [];
     if (browserLanguages.length > 0) {
       return browserLanguages[0];
@@ -833,16 +847,16 @@ Module.register("MMM-HomeConnect2", {
     const showProgressDebug = (this.config?.logLevel || "").toLowerCase() === "debug";
     const progressDebug = showProgressDebug
       ? [
-        `src=${progressSource}`,
-        `api=${progressNumeric !== undefined ? `${progressNumeric}%` : "n/a"}`,
-        `total=${estimatedTotalPercent !== undefined ? `${estimatedTotalPercent}%` : "n/a"}`,
-        `initial=${initialPercent !== undefined ? `${initialPercent}%` : "n/a"}`,
-        `observed=${observedPercent !== undefined ? `${observedPercent}%` : "n/a"}`,
-        `remaining=${visibleRemainingSeconds !== null ? this.formatDuration(visibleRemainingSeconds) || `${visibleRemainingSeconds}s` : "n/a"}`,
-        `rawRemaining=${remainingSeconds !== null ? this.formatDuration(remainingSeconds) || `${remainingSeconds}s` : "n/a"}`,
-        `planned=${visiblePlannedDurationLabel || "n/a"}`,
-        `seen=${this.formatDebugAge(Number(device._remainingObservedAt))}`
-      ].join(" | ")
+          `src=${progressSource}`,
+          `api=${progressNumeric !== undefined ? `${progressNumeric}%` : "n/a"}`,
+          `total=${estimatedTotalPercent !== undefined ? `${estimatedTotalPercent}%` : "n/a"}`,
+          `initial=${initialPercent !== undefined ? `${initialPercent}%` : "n/a"}`,
+          `observed=${observedPercent !== undefined ? `${observedPercent}%` : "n/a"}`,
+          `remaining=${visibleRemainingSeconds !== null ? this.formatDuration(visibleRemainingSeconds) || `${visibleRemainingSeconds}s` : "n/a"}`,
+          `rawRemaining=${remainingSeconds !== null ? this.formatDuration(remainingSeconds) || `${remainingSeconds}s` : "n/a"}`,
+          `planned=${visiblePlannedDurationLabel || "n/a"}`,
+          `seen=${this.formatDebugAge(Number(device._remainingObservedAt))}`
+        ].join(" | ")
       : "";
 
     return {
@@ -897,6 +911,43 @@ Module.register("MMM-HomeConnect2", {
     }
 
     return "";
+  },
+
+  getRateLimitNotice() {
+    const status = this.lastInitStatus || this.authStatus;
+    if (!status || typeof status !== "object") {
+      return null;
+    }
+
+    const message = typeof status.message === "string" ? status.message.trim() : "";
+    const isRateLimited =
+      status.isRateLimit === true ||
+      Number(status.statusCode) === 429 ||
+      Number.isFinite(status.rateLimitSeconds) ||
+      /(^|\D)429(\D|$)|rate limit/i.test(message);
+
+    if (!isRateLimited) {
+      return null;
+    }
+
+    return {
+      title: "HTTP 429",
+      message: message || "Home Connect API rate limit reached"
+    };
+  },
+
+  getRateLimitNoticeHtml() {
+    const notice = this.getRateLimitNotice();
+    if (!notice) {
+      return "";
+    }
+
+    return [
+      "<div class='hc-status-banner hc-status-banner-warning'>",
+      `<div class='hc-status-banner-title'>${notice.title}</div>`,
+      `<div class='hc-status-banner-message'>${notice.message}</div>`,
+      "</div>"
+    ].join("");
   },
 
   getStatusIconsHtml(device, displayState) {
@@ -994,6 +1045,7 @@ Module.register("MMM-HomeConnect2", {
     const div = document.createElement("div");
     const runtimeHints = this.deviceRuntimeHints || (this.deviceRuntimeHints = {});
     const deviceUtils = this.getDeviceUtils();
+    const rateLimitNoticeHtml = this.getRateLimitNoticeHtml();
 
     // Show authentication info if available
     if (this.authInfo && this.authInfo.status === "waiting") {
@@ -1020,7 +1072,7 @@ Module.register("MMM-HomeConnect2", {
         `<i class='fa fa-cog fa-spin'></i> ${this.translate("SESSION_BASED_AUTH")}<br>` +
         `<span class='dimmed'>${this.translate("LOADING_APPLIANCES")}...</span>` +
         "</div>";
-      div.innerHTML = loadingHtml;
+      div.innerHTML = `${rateLimitNoticeHtml}${loadingHtml}`;
       return div;
     }
 
@@ -1030,12 +1082,12 @@ Module.register("MMM-HomeConnect2", {
       .join("");
 
     if (wrapper === "") {
-      div.innerHTML = `<div class='dimmed small'>${this.translate("NO_ACTIVE_APPLIANCES")}</div>${this.getDebugPanel()}`;
+      div.innerHTML = `${rateLimitNoticeHtml}<div class='dimmed small'>${this.translate("NO_ACTIVE_APPLIANCES")}</div>${this.getDebugPanel()}`;
       return div;
     }
 
     const debugPanel = this.getDebugPanel();
-    div.innerHTML = `${wrapper}${debugPanel}`;
+    div.innerHTML = `${rateLimitNoticeHtml}${wrapper}${debugPanel}`;
     return div;
   },
 
@@ -1117,7 +1169,8 @@ Module.register("MMM-HomeConnect2", {
     // Status from INIT_STATUS gets rendered only in debug mode
     if (this.lastInitStatus && this.lastInitStatus.message) {
       rows.push(
-        `<div class='hc-debug-row'><span class='hc-debug-label'>last init status:</span> ${this.lastInitStatus.message
+        `<div class='hc-debug-row'><span class='hc-debug-label'>last init status:</span> ${
+          this.lastInitStatus.message
         }</div>`
       );
     }

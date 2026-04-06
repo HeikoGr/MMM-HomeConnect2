@@ -307,6 +307,8 @@ module.exports = NodeHelper.create({
         status: "device_error",
         message: `Rate limit active - please wait ${remainingSeconds}s`,
         rateLimitSeconds: remainingSeconds,
+        statusCode: 429,
+        isRateLimit: true,
         instanceId: requester
       });
       return;

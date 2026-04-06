@@ -61,6 +61,19 @@ function createDeviceService(overrides = {}) {
     assert.strictEqual(errEvent.p.status, "device_error");
   }
 
+  // handleGetDevicesError: marks HTTP 429 for the frontend
+  {
+    const { service, notifications } = createDeviceService();
+    service.handleGetDevicesError(
+      Object.assign(new Error("Too many requests"), { statusCode: 429 })
+    );
+    const errEvent = notifications.find((e) => e.n === "INIT_STATUS");
+    assert.ok(errEvent);
+    assert.strictEqual(errEvent.p.statusCode, 429);
+    assert.strictEqual(errEvent.p.isRateLimit, true);
+    assert.ok(errEvent.p.message.includes("HTTP 429"));
+  }
+
   // SSE global subscription establishes immediately and is idempotent
   {
     const { service: sseService } = createDeviceService();
