@@ -404,8 +404,8 @@ Module.register("MMM-HomeConnect2", {
 
     const browserLanguages = Array.isArray(navigator?.languages)
       ? navigator.languages
-        .map((language) => (typeof language === "string" ? language.trim() : ""))
-        .filter(Boolean)
+          .map((language) => (typeof language === "string" ? language.trim() : ""))
+          .filter(Boolean)
       : [];
     if (browserLanguages.length > 0) {
       return browserLanguages[0];
@@ -847,16 +847,16 @@ Module.register("MMM-HomeConnect2", {
     const showProgressDebug = (this.config?.logLevel || "").toLowerCase() === "debug";
     const progressDebug = showProgressDebug
       ? [
-        `src=${progressSource}`,
-        `api=${progressNumeric !== undefined ? `${progressNumeric}%` : "n/a"}`,
-        `total=${estimatedTotalPercent !== undefined ? `${estimatedTotalPercent}%` : "n/a"}`,
-        `initial=${initialPercent !== undefined ? `${initialPercent}%` : "n/a"}`,
-        `observed=${observedPercent !== undefined ? `${observedPercent}%` : "n/a"}`,
-        `remaining=${visibleRemainingSeconds !== null ? this.formatDuration(visibleRemainingSeconds) || `${visibleRemainingSeconds}s` : "n/a"}`,
-        `rawRemaining=${remainingSeconds !== null ? this.formatDuration(remainingSeconds) || `${remainingSeconds}s` : "n/a"}`,
-        `planned=${visiblePlannedDurationLabel || "n/a"}`,
-        `seen=${this.formatDebugAge(Number(device._remainingObservedAt))}`
-      ].join(" | ")
+          `src=${progressSource}`,
+          `api=${progressNumeric !== undefined ? `${progressNumeric}%` : "n/a"}`,
+          `total=${estimatedTotalPercent !== undefined ? `${estimatedTotalPercent}%` : "n/a"}`,
+          `initial=${initialPercent !== undefined ? `${initialPercent}%` : "n/a"}`,
+          `observed=${observedPercent !== undefined ? `${observedPercent}%` : "n/a"}`,
+          `remaining=${visibleRemainingSeconds !== null ? this.formatDuration(visibleRemainingSeconds) || `${visibleRemainingSeconds}s` : "n/a"}`,
+          `rawRemaining=${remainingSeconds !== null ? this.formatDuration(remainingSeconds) || `${remainingSeconds}s` : "n/a"}`,
+          `planned=${visiblePlannedDurationLabel || "n/a"}`,
+          `seen=${this.formatDebugAge(Number(device._remainingObservedAt))}`
+        ].join(" | ")
       : "";
 
     return {
@@ -1169,7 +1169,8 @@ Module.register("MMM-HomeConnect2", {
     // Status from INIT_STATUS gets rendered only in debug mode
     if (this.lastInitStatus && this.lastInitStatus.message) {
       rows.push(
-        `<div class='hc-debug-row'><span class='hc-debug-label'>last init status:</span> ${this.lastInitStatus.message
+        `<div class='hc-debug-row'><span class='hc-debug-label'>last init status:</span> ${
+          this.lastInitStatus.message
         }</div>`
       );
     }
@@ -1191,11 +1192,13 @@ Module.register("MMM-HomeConnect2", {
         ? Math.max(0, Math.ceil(session.rateLimitRemainingMs / 1000))
         : 0;
       rows.push(
-        `<div class='hc-debug-row'><span class='hc-debug-label'>session state:</span> ${session.state || "n/a"
+        `<div class='hc-debug-row'><span class='hc-debug-label'>session state:</span> ${
+          session.state || "n/a"
         }</div>`
       );
       rows.push(
-        `<div class='hc-debug-row'><span class='hc-debug-label'>session event:</span> ${session.event || "n/a"
+        `<div class='hc-debug-row'><span class='hc-debug-label'>session event:</span> ${
+          session.event || "n/a"
         }</div>`
       );
       if (session.reason) {

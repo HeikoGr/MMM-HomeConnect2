@@ -247,6 +247,50 @@ module.exports = NodeHelper.create({
     this.sendSocketNotification("AUTH_STATUS", builtPayload);
   },
 
+  setAuthFlags({ isAuthenticated, isAuthenticating } = {}) {
+    if (typeof isAuthenticated === "boolean") {
+      globalSession.isAuthenticated = isAuthenticated;
+    }
+    if (typeof isAuthenticating === "boolean") {
+      globalSession.isAuthenticating = isAuthenticating;
+    }
+  },
+
+  isSessionAuthenticated() {
+    if (globalSession.isAuthenticated) {
+      return true;
+    }
+
+    return this.sessionState === SESSION_STATES.READY;
+  },
+
+  isAuthFlowInProgress() {
+    if (globalSession.isAuthenticating) {
+      return true;
+    }
+
+    return (
+      this.sessionState === SESSION_STATES.AUTHENTICATING ||
+      this.sessionState === SESSION_STATES.INITIALIZING
+    );
+  },
+
+  beginDeviceRefresh(reason) {
+    this.transitionSessionState("DEVICE_REFRESH_START", { reason });
+  },
+
+  endDeviceRefresh(reason) {
+    this.transitionSessionState("DEVICE_REFRESH_DONE", { reason });
+  },
+
+  beginProgramFetch(reason) {
+    this.transitionSessionState("PROGRAM_FETCH_START", { reason });
+  },
+
+  endProgramFetch(reason) {
+    this.transitionSessionState("PROGRAM_FETCH_DONE", { reason });
+  },
+
   init() {
     moduleLog("info", "init module helper: MMM-HomeConnect2 (session-based)");
     this.transitionSessionState("CONFIG_RECEIVED", { reason: "helper_init" });
@@ -315,11 +359,11 @@ module.exports = NodeHelper.create({
   handleConfigNotificationFirstTime() {
     this.configReceived = true;
 
-    if (globalSession.isAuthenticated) {
+    if (this.isSessionAuthenticated()) {
       return this.handleSessionAlreadyActive();
     }
 
-    if (globalSession.isAuthenticating) {
+    if (this.isAuthFlowInProgress()) {
       return this.notifyAuthInProgress();
     }
 
@@ -363,7 +407,7 @@ module.exports = NodeHelper.create({
   },
 
   handleConfigNotificationSubsequent() {
-    if (globalSession.isAuthenticated && this.hc && this.deviceService) {
+    if (this.isSessionAuthenticated() && this.hc && this.deviceService) {
       this.emitInitStatus(
         "complete",
         {
@@ -375,7 +419,7 @@ module.exports = NodeHelper.create({
       setTimeout(() => {
         this.deviceService.broadcastDevices(this.sendSocketNotification.bind(this));
       }, 500);
-    } else if (globalSession.isAuthenticating) {
+    } else if (this.isAuthFlowInProgress()) {
       this.notifyAuthInProgress();
     }
   },
@@ -455,19 +499,15 @@ module.exports = NodeHelper.create({
       this.deviceService.subscribed && !this.deviceService.heartbeatStale && hasDevices;
     const shouldFetchDevices = forceRefresh || !sseHealthy;
 
-    if (shouldFetchDevices && this.hc && !globalSession.isAuthenticating) {
-      this.transitionSessionState("DEVICE_REFRESH_START", {
-        reason: "state_refresh_poll"
-      });
+    if (shouldFetchDevices && this.hc && !this.isAuthFlowInProgress()) {
+      this.beginDeviceRefresh("state_refresh_poll");
       moduleLog("info", "State refresh requires polling Home Connect", {
         requester,
         forceRefresh,
         sseHealthy
       });
       this.deviceService.getDevices(this.sendSocketNotification.bind(this));
-      this.transitionSessionState("DEVICE_REFRESH_DONE", {
-        reason: "state_refresh_dispatched"
-      });
+      this.endDeviceRefresh("state_refresh_dispatched");
     } else if (hasDevices) {
       moduleLog("debug", "State refresh served from cache (SSE data)", {
         requester,
@@ -475,9 +515,7 @@ module.exports = NodeHelper.create({
         sseHealthy
       });
       this.deviceService.broadcastDevices(this.sendSocketNotification.bind(this));
-      this.transitionSessionState("DEVICE_REFRESH_DONE", {
-        reason: "state_refresh_cache"
-      });
+      this.endDeviceRefresh("state_refresh_cache");
     } else {
       moduleLog("warn", "State refresh unable to respond - no device data available", {
         requester
@@ -566,9 +604,7 @@ module.exports = NodeHelper.create({
       force
     });
 
-    this.transitionSessionState("PROGRAM_FETCH_START", {
-      reason: "active_program_request"
-    });
+    this.beginProgramFetch("active_program_request");
     globalSession.lastActiveProgramFetch = now;
     this.fetchActiveProgramsForDevices(targetDevices, requester);
   },
@@ -699,7 +735,7 @@ module.exports = NodeHelper.create({
   },
 
   handleHeadlessAuthError(error) {
-    globalSession.isAuthenticating = false;
+    this.setAuthFlags({ isAuthenticating: false });
     this.transitionSessionState("AUTH_ERROR", {
       reason: error && error.message ? error.message : "headless_auth_error"
     });
@@ -735,7 +771,7 @@ module.exports = NodeHelper.create({
   },
 
   async initWithHeadlessAuth() {
-    if (globalSession.isAuthenticating) {
+    if (this.isAuthFlowInProgress()) {
       moduleLog("warn", "Authentication already in progress, skipping...");
       return;
     }
@@ -743,7 +779,7 @@ module.exports = NodeHelper.create({
     this.transitionSessionState("AUTH_START", {
       reason: "headless_auth"
     });
-    globalSession.isAuthenticating = true;
+    this.setAuthFlags({ isAuthenticating: true });
     this.initializationAttempts++;
 
     moduleLog(
@@ -771,8 +807,10 @@ module.exports = NodeHelper.create({
   handleHomeConnectInitSuccess() {
     moduleLog("info", "HomeConnect initialized successfully");
 
-    globalSession.isAuthenticated = true;
-    globalSession.isAuthenticating = false;
+    this.setAuthFlags({
+      isAuthenticated: true,
+      isAuthenticating: false
+    });
     this.transitionSessionState("AUTH_SUCCESS", {
       reason: "homeconnect_initialized"
     });
@@ -783,20 +821,16 @@ module.exports = NodeHelper.create({
       // Perform a single initial device fetch; further updates are normally
       // driven by SSE, with fallback polling only when SSE is unhealthy.
       setTimeout(() => {
-        this.transitionSessionState("DEVICE_REFRESH_START", {
-          reason: "initial_device_fetch"
-        });
+        this.beginDeviceRefresh("initial_device_fetch");
         this.deviceService.getDevices(this.sendSocketNotification.bind(this));
-        this.transitionSessionState("DEVICE_REFRESH_DONE", {
-          reason: "initial_device_fetch_dispatched"
-        });
+        this.endDeviceRefresh("initial_device_fetch_dispatched");
       }, 2000);
     }
   },
 
   handleHomeConnectInitError(error) {
     moduleLog("error", "HomeConnect initialization failed:", error);
-    globalSession.isAuthenticating = false;
+    this.setAuthFlags({ isAuthenticating: false });
     this.transitionSessionState("AUTH_ERROR", {
       reason: error && error.message ? error.message : "homeconnect_init_error"
     });
@@ -824,7 +858,7 @@ module.exports = NodeHelper.create({
         moduleLog("warn", "Failed to delete cached refresh token file:", fsErr);
       }
 
-      globalSession.isAuthenticated = false;
+      this.setAuthFlags({ isAuthenticated: false, isAuthenticating: false });
       globalSession.refreshToken = null;
       globalSession.accessToken = null;
       this.refreshToken = null;
@@ -840,7 +874,7 @@ module.exports = NodeHelper.create({
 
       // Start a fresh headless authentication flow (shows QR code on clients)
       setTimeout(() => {
-        if (!globalSession.isAuthenticating) {
+        if (!this.isAuthFlowInProgress()) {
           this.initWithHeadlessAuth();
         }
       }, 1500);
@@ -862,13 +896,9 @@ module.exports = NodeHelper.create({
       // During initial init (subscribed === false), skip to avoid double fetching.
       if (this.deviceService && this.deviceService.subscribed) {
         moduleLog("info", "Token updated post-init - refreshing device list");
-        this.transitionSessionState("DEVICE_REFRESH_START", {
-          reason: "token_refresh_device_sync"
-        });
+        this.beginDeviceRefresh("token_refresh_device_sync");
         this.deviceService.getDevices(this.sendSocketNotification.bind(this));
-        this.transitionSessionState("DEVICE_REFRESH_DONE", {
-          reason: "token_refresh_device_sync_dispatched"
-        });
+        this.endDeviceRefresh("token_refresh_device_sync_dispatched");
       } else {
         moduleLog("info", "Token updated during initialization");
       }
@@ -898,7 +928,7 @@ module.exports = NodeHelper.create({
 
       const initTimeout = setTimeout(() => {
         moduleLog("error", "HomeConnect initialization timeout");
-        globalSession.isAuthenticating = false;
+        this.setAuthFlags({ isAuthenticating: false });
         reject(new Error("HomeConnect initialization timeout"));
       }, 30000);
 
@@ -926,8 +956,10 @@ module.exports = NodeHelper.create({
     this.transitionSessionState("RESET", {
       reason: "manual_retry_auth"
     });
-    globalSession.isAuthenticated = false;
-    globalSession.isAuthenticating = false;
+    this.setAuthFlags({
+      isAuthenticated: false,
+      isAuthenticating: false
+    });
     globalSession.accessToken = null;
     globalSession.refreshToken = null;
     globalSession.clientInstances.clear();
@@ -1095,9 +1127,7 @@ module.exports = NodeHelper.create({
     } catch (error) {
       this.handleActiveProgramFetchError(error);
     } finally {
-      this.transitionSessionState("PROGRAM_FETCH_DONE", {
-        reason: "active_program_cycle_finished"
-      });
+      this.endProgramFetch("active_program_cycle_finished");
     }
   },
 
