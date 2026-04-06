@@ -28,7 +28,7 @@
   opacity: 0.72;
 }
 
-.deviceContainer > img,
+.deviceContainer>img,
 .device_img {
   text-align: center;
   align-self: start;
@@ -48,7 +48,7 @@
   font-size: 28px;
 }
 
-.deviceContainer > div {
+.deviceContainer>div {
   text-align: left;
   min-width: 0;
 }
@@ -164,12 +164,10 @@ progress {
 /* Indeterminate styling: keep native progress but add subtle animation fallback */
 progress[max]:not([value]) {
   /* browsers show indeterminate natively; ensure visibility */
-  background: linear-gradient(
-    90deg,
-    rgba(255, 255, 255, 0.1) 0%,
-    rgba(255, 255, 255, 0.25) 50%,
-    rgba(255, 255, 255, 0.1) 100%
-  );
+  background: linear-gradient(90deg,
+      rgba(255, 255, 255, 0.1) 0%,
+      rgba(255, 255, 255, 0.25) 50%,
+      rgba(255, 255, 255, 0.1) 100%);
 }
 
 .hc-debug-panel {
@@ -212,7 +210,7 @@ progress[max]:not([value]) {
   gap: 12px;
 }
 
-.hc-debug-row + .hc-debug-row {
+.hc-debug-row+.hc-debug-row {
   margin-top: 4px;
 }
 

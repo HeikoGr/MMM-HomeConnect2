@@ -172,7 +172,7 @@ function createProgramService(overrides = {}) {
           }
         };
       },
-      applyEventToDevice() {}
+      applyEventToDevice() { }
     });
 
     const result = await service.fetchActiveProgramForDevice("ha-1", "Washer");
@@ -214,7 +214,7 @@ function createProgramService(overrides = {}) {
           ]
         }
       }),
-      applyEventToDevice() {}
+      applyEventToDevice() { }
     });
 
     const result = await service.fetchActiveProgramForDevice("ha-1", "Washer");
@@ -262,7 +262,7 @@ function createProgramService(overrides = {}) {
           ]
         }
       }),
-      applyEventToDevice() {}
+      applyEventToDevice() { }
     });
 
     const result = await service.fetchActiveProgramForDevice("ha-hood", "Hood");
