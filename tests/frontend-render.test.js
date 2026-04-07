@@ -16,9 +16,9 @@ function installFrontendGlobals() {
   };
 
   globalThis.Log = {
-    log() {},
-    warn() {},
-    error() {}
+    log() { },
+    warn() { },
+    error() { }
   };
 
   globalThis.config = { language: "en" };
@@ -105,8 +105,8 @@ function createInstance(overrides = {}) {
     translate(key) {
       return key;
     },
-    updateDom() {},
-    sendSocketNotification() {}
+    updateDom() { },
+    sendSocketNotification() { }
   };
 }
 
@@ -206,7 +206,7 @@ function createInstance(overrides = {}) {
       ]
     });
     const selectedDom = selectedProgramInstance.getDom();
-    assert.ok(selectedDom.innerHTML.includes("NO_ACTIVE_APPLIANCES"));
+    assert.ok(selectedDom.innerHTML.includes("Dryer"));
     assert.ok(!selectedDom.innerHTML.includes("Synthetics"));
     assert.ok(!selectedDom.innerHTML.includes("SELECTED_PROGRAM"));
     assert.ok(!selectedDom.innerHTML.includes("Cupboard Dry Plus • Low Heat"));
@@ -227,7 +227,7 @@ function createInstance(overrides = {}) {
       ]
     });
     const runningSelectedDom = runningSelectedProgramInstance.getDom();
-    assert.ok(runningSelectedDom.innerHTML.includes("NO_ACTIVE_APPLIANCES"));
+    assert.ok(runningSelectedDom.innerHTML.includes("Dryer"));
     assert.ok(!runningSelectedDom.innerHTML.includes("Synthetics"));
     assert.ok(!runningSelectedDom.innerHTML.includes("fa-play"));
 

@@ -101,6 +101,26 @@ Developer notes
 - API endpoints used: device_authorization, token, and homeappliances endpoints of Home Connect.
 - Minimum polling interval: 5 seconds. Module adapts if server returns slow_down.
 
+## Architecture Contract (API Truth vs. Session FSM)
+
+This module follows a strict separation of responsibilities:
+
+- API truth is authoritative: Device/program fields from Home Connect API and SSE always win and overwrite local values.
+- Session FSM is orchestration only: The state machine controls auth/init/rate-limit/retry/error flow, not appliance truth.
+- No reverse coupling: FSM transitions must never modify device/program domain values.
+- One-way data flow for appliance truth: API/SSE -> service mapping -> shared device store -> frontend rendering.
+- Frontend does not infer alternate truth: UI renders API-backed device data plus optional FSM/debug metadata.
+
+Scope boundaries
+- FSM scope includes: boot, authenticating, initializing, ready, rate_limited, error, plus technical refresh states.
+- FSM scope excludes: PowerState, ActiveProgramName, RemainingProgramTime, ProgramProgress, and other appliance fields.
+
+Review checklist for changes
+- Does this change alter appliance data without an API/SSE payload? If yes, reject.
+- Does this change add FSM logic that writes device/program fields? If yes, reject.
+- Does this change keep orchestration decisions (when to fetch/auth/retry) inside the helper/session FSM? If no, refactor.
+- Do tests still cover both dimensions: FSM transitions and API-data overwrite behavior? If no, add tests.
+
 ## Documentation
 
 Additional development and devcontainer documentation is collected in [docs/README.md](docs/README.md).

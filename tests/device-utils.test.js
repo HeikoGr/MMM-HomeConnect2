@@ -3,7 +3,7 @@
 const assert = require("assert");
 const {
   collectProgramOptionLabels,
-  getNumericValue,
+  extractValueByType,
   getDeviceTypeMeta,
   parseDurationSeconds,
   parseFinishInRelativeSeconds,
@@ -19,8 +19,20 @@ const {
 } = require("../lib/device-utils");
 
 (() => {
-  assert.strictEqual(getNumericValue({ value: "42" }), 42);
-  assert.strictEqual(getNumericValue({ displayValue: "17.5" }), 17.5);
+  assert.strictEqual(
+    extractValueByType({ value: "42" }, "number", (val) => {
+      const parsed = Number(val);
+      return Number.isFinite(parsed) ? parsed : null;
+    }),
+    42
+  );
+  assert.strictEqual(
+    extractValueByType({ displayValue: "17.5" }, "number", (val) => {
+      const parsed = Number(val);
+      return Number.isFinite(parsed) ? parsed : null;
+    }),
+    17.5
+  );
 
   assert.strictEqual(parseDurationSeconds(95), 95);
   assert.strictEqual(parseDurationSeconds("120"), 120);

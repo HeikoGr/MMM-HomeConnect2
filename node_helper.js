@@ -10,8 +10,6 @@ const { deviceAppearsActive, isDeviceConnected } = require("./lib/device-utils")
 /* eslint-disable n/no-missing-require */
 const NodeHelper = require("node_helper"),
   globalSession = {
-    isAuthenticated: false,
-    isAuthenticating: false,
     accessToken: null, // Access token for API requests
     refreshToken: null, // Refresh token for obtaining new access tokens
     clientInstances: new Set(), // Set of client instance IDs using this helper
@@ -34,6 +32,107 @@ const SESSION_STATES = Object.freeze({
   REFRESHING_PROGRAMS: "refreshing_programs",
   RATE_LIMITED: "rate_limited",
   ERROR: "error"
+});
+
+const SESSION_EVENTS = Object.freeze({
+  CONFIG_RECEIVED: "CONFIG_RECEIVED",
+  AUTH_START: "AUTH_START",
+  HC_INIT_START: "HC_INIT_START",
+  AUTH_SUCCESS: "AUTH_SUCCESS",
+  AUTH_ERROR: "AUTH_ERROR",
+  DEVICE_REFRESH_START: "DEVICE_REFRESH_START",
+  DEVICE_REFRESH_DONE: "DEVICE_REFRESH_DONE",
+  PROGRAM_FETCH_START: "PROGRAM_FETCH_START",
+  PROGRAM_FETCH_DONE: "PROGRAM_FETCH_DONE",
+  RATE_LIMIT_HIT: "RATE_LIMIT_HIT",
+  RATE_LIMIT_CLEARED: "RATE_LIMIT_CLEARED",
+  ERROR: "ERROR",
+  RESET: "RESET"
+});
+
+const AUTHENTICATED_SESSION_STATES = new Set([
+  SESSION_STATES.READY,
+  SESSION_STATES.REFRESHING_DEVICES,
+  SESSION_STATES.REFRESHING_PROGRAMS,
+  SESSION_STATES.RATE_LIMITED
+]);
+
+const AUTH_FLOW_SESSION_STATES = new Set([
+  SESSION_STATES.AUTHENTICATING,
+  SESSION_STATES.INITIALIZING
+]);
+
+const ALL_SESSION_STATES = new Set(Object.values(SESSION_STATES));
+
+const SESSION_TRANSITIONS = Object.freeze({
+  [SESSION_EVENTS.CONFIG_RECEIVED]: {
+    from: "*",
+    resolve: ({ currentState, hasAuthenticatedSession }) => {
+      if (currentState === SESSION_STATES.BOOT && hasAuthenticatedSession) {
+        return SESSION_STATES.READY;
+      }
+      return currentState;
+    }
+  },
+  [SESSION_EVENTS.AUTH_START]: {
+    from: [SESSION_STATES.BOOT, SESSION_STATES.ERROR, SESSION_STATES.READY],
+    to: SESSION_STATES.AUTHENTICATING
+  },
+  [SESSION_EVENTS.HC_INIT_START]: {
+    from: [SESSION_STATES.BOOT, SESSION_STATES.AUTHENTICATING, SESSION_STATES.ERROR],
+    to: SESSION_STATES.INITIALIZING
+  },
+  [SESSION_EVENTS.AUTH_SUCCESS]: {
+    from: [SESSION_STATES.AUTHENTICATING, SESSION_STATES.INITIALIZING],
+    to: SESSION_STATES.READY
+  },
+  [SESSION_EVENTS.AUTH_ERROR]: {
+    from: [SESSION_STATES.AUTHENTICATING, SESSION_STATES.INITIALIZING],
+    to: SESSION_STATES.ERROR
+  },
+  [SESSION_EVENTS.DEVICE_REFRESH_START]: {
+    from: [SESSION_STATES.READY, SESSION_STATES.RATE_LIMITED, SESSION_STATES.REFRESHING_PROGRAMS],
+    to: SESSION_STATES.REFRESHING_DEVICES
+  },
+  [SESSION_EVENTS.DEVICE_REFRESH_DONE]: {
+    from: [SESSION_STATES.REFRESHING_DEVICES],
+    resolve: ({ isRateLimited }) =>
+      isRateLimited ? SESSION_STATES.RATE_LIMITED : SESSION_STATES.READY
+  },
+  [SESSION_EVENTS.PROGRAM_FETCH_START]: {
+    from: [SESSION_STATES.READY, SESSION_STATES.RATE_LIMITED, SESSION_STATES.REFRESHING_DEVICES],
+    to: SESSION_STATES.REFRESHING_PROGRAMS
+  },
+  [SESSION_EVENTS.PROGRAM_FETCH_DONE]: {
+    from: [SESSION_STATES.REFRESHING_PROGRAMS],
+    resolve: ({ isRateLimited }) =>
+      isRateLimited ? SESSION_STATES.RATE_LIMITED : SESSION_STATES.READY
+  },
+  [SESSION_EVENTS.RATE_LIMIT_HIT]: {
+    from: "*",
+    to: SESSION_STATES.RATE_LIMITED
+  },
+  [SESSION_EVENTS.RATE_LIMIT_CLEARED]: {
+    from: [SESSION_STATES.RATE_LIMITED],
+    resolve: ({ isRateLimited }) =>
+      isRateLimited ? SESSION_STATES.RATE_LIMITED : SESSION_STATES.READY
+  },
+  [SESSION_EVENTS.ERROR]: {
+    from: [
+      SESSION_STATES.BOOT,
+      SESSION_STATES.AUTHENTICATING,
+      SESSION_STATES.INITIALIZING,
+      SESSION_STATES.READY,
+      SESSION_STATES.REFRESHING_DEVICES,
+      SESSION_STATES.REFRESHING_PROGRAMS,
+      SESSION_STATES.RATE_LIMITED
+    ],
+    to: SESSION_STATES.ERROR
+  },
+  [SESSION_EVENTS.RESET]: {
+    from: "*",
+    to: SESSION_STATES.BOOT
+  }
 });
 
 const INIT_STATUS_MESSAGES = Object.freeze({
@@ -85,58 +184,47 @@ module.exports = NodeHelper.create({
 
   transitionSessionState(event, payload = {}) {
     const prevState = this.sessionState || SESSION_STATES.BOOT;
-    let nextState = prevState;
+    const transition = SESSION_TRANSITIONS[event];
 
-    switch (event) {
-      case "CONFIG_RECEIVED":
-        if (globalSession.isAuthenticated) {
-          nextState = SESSION_STATES.READY;
-        }
-        break;
-      case "AUTH_START":
-        nextState = SESSION_STATES.AUTHENTICATING;
-        break;
-      case "HC_INIT_START":
-        nextState = SESSION_STATES.INITIALIZING;
-        break;
-      case "AUTH_SUCCESS":
-        nextState = SESSION_STATES.READY;
-        break;
-      case "AUTH_ERROR":
-        nextState = SESSION_STATES.ERROR;
-        break;
-      case "DEVICE_REFRESH_START":
-        nextState = SESSION_STATES.REFRESHING_DEVICES;
-        break;
-      case "DEVICE_REFRESH_DONE":
-        nextState =
-          Date.now() < globalSession.rateLimitUntil
-            ? SESSION_STATES.RATE_LIMITED
-            : SESSION_STATES.READY;
-        break;
-      case "PROGRAM_FETCH_START":
-        nextState = SESSION_STATES.REFRESHING_PROGRAMS;
-        break;
-      case "PROGRAM_FETCH_DONE":
-        nextState =
-          Date.now() < globalSession.rateLimitUntil
-            ? SESSION_STATES.RATE_LIMITED
-            : SESSION_STATES.READY;
-        break;
-      case "RATE_LIMIT_HIT":
-        nextState = SESSION_STATES.RATE_LIMITED;
-        break;
-      case "RATE_LIMIT_CLEARED":
-        nextState = SESSION_STATES.READY;
-        break;
-      case "ERROR":
-        nextState = SESSION_STATES.ERROR;
-        break;
-      case "RESET":
-        nextState = SESSION_STATES.BOOT;
-        break;
-      default:
-        break;
+    if (!transition) {
+      moduleLog("warn", "Unknown session event ignored", {
+        event,
+        state: prevState
+      });
+      return prevState;
+    }
+
+    const transitionFrom = transition.from;
+    const allowedFromCurrent =
+      transitionFrom === "*" || (Array.isArray(transitionFrom) && transitionFrom.includes(prevState));
+
+    if (!allowedFromCurrent) {
+      moduleLog("warn", "Invalid session transition blocked", {
+        event,
+        from: prevState,
+        allowedFrom: transitionFrom
+      });
+      return prevState;
+    }
+
+    const context = {
+      currentState: prevState,
+      isRateLimited: Date.now() < globalSession.rateLimitUntil,
+      hasAuthenticatedSession:
+        AUTHENTICATED_SESSION_STATES.has(prevState) || Boolean(this.hc && globalSession.refreshToken)
+    };
+    const nextState =
+      typeof transition.resolve === "function"
+        ? transition.resolve(context, payload)
+        : transition.to || prevState;
+
+    if (!ALL_SESSION_STATES.has(nextState)) {
+      moduleLog("warn", "Invalid target state ignored", {
+        event,
+        from: prevState,
+        to: nextState
+      });
+      return prevState;
     }
 
     this.sessionStateMeta = {
@@ -165,7 +253,7 @@ module.exports = NodeHelper.create({
 
     const waitMs = Math.max(0, Number(untilTs || 0) - Date.now());
     if (waitMs <= 0) {
-      this.transitionSessionState("RATE_LIMIT_CLEARED", {
+      this.transitionSessionState(SESSION_EVENTS.RATE_LIMIT_CLEARED, {
         reason: "rate_limit_elapsed"
       });
       return;
@@ -174,7 +262,7 @@ module.exports = NodeHelper.create({
     this.rateLimitReleaseTimer = setTimeout(() => {
       this.rateLimitReleaseTimer = null;
       if (Date.now() >= globalSession.rateLimitUntil) {
-        this.transitionSessionState("RATE_LIMIT_CLEARED", {
+        this.transitionSessionState(SESSION_EVENTS.RATE_LIMIT_CLEARED, {
           reason: "rate_limit_elapsed"
         });
       }
@@ -185,22 +273,31 @@ module.exports = NodeHelper.create({
     const now = Date.now();
     if (now >= globalSession.rateLimitUntil) {
       if (this.sessionState === SESSION_STATES.RATE_LIMITED) {
-        this.transitionSessionState("RATE_LIMIT_CLEARED", {
+        this.transitionSessionState(SESSION_EVENTS.RATE_LIMIT_CLEARED, {
           reason: "rate_limit_elapsed"
         });
       }
       return false;
     }
 
-    this.transitionSessionState("RATE_LIMIT_HIT", {
+    this.transitionSessionState(SESSION_EVENTS.RATE_LIMIT_HIT, {
       reason: "rate_limit_active"
     });
     this.scheduleRateLimitRelease(globalSession.rateLimitUntil);
     return true;
   },
 
-  buildInitStatusPayload(status, payload = {}) {
-    const baseMessage = INIT_STATUS_MESSAGES[status] || "";
+  getRateLimitUntil() {
+    return globalSession.rateLimitUntil || 0;
+  },
+
+  setRateLimitUntil(untilTs) {
+    globalSession.rateLimitUntil = Math.max(0, Number(untilTs || 0));
+    return globalSession.rateLimitUntil;
+  },
+
+  buildStatusPayload(messageMap, status, payload = {}) {
+    const baseMessage = messageMap[status] || "";
     const message =
       typeof payload.message === "string" && payload.message.length ? payload.message : baseMessage;
 
@@ -209,91 +306,63 @@ module.exports = NodeHelper.create({
       message,
       ...payload
     };
+  },
+
+  emitStatus(notification, messageMap, status, payload = {}, options = {}) {
+    const { broadcast = true } = options;
+    const builtPayload = this.buildStatusPayload(messageMap, status, payload);
+
+    if (broadcast) {
+      this.broadcastToAllClients(notification, builtPayload);
+      return;
+    }
+
+    this.sendSocketNotification(notification, builtPayload);
+  },
+
+  buildInitStatusPayload(status, payload = {}) {
+    return this.buildStatusPayload(INIT_STATUS_MESSAGES, status, payload);
   },
 
   emitInitStatus(status, payload = {}, options = {}) {
-    const { broadcast = true } = options;
-    const builtPayload = this.buildInitStatusPayload(status, payload);
-
-    if (broadcast) {
-      this.broadcastToAllClients("INIT_STATUS", builtPayload);
-      return;
-    }
-
-    this.sendSocketNotification("INIT_STATUS", builtPayload);
+    this.emitStatus("INIT_STATUS", INIT_STATUS_MESSAGES, status, payload, options);
   },
 
   buildAuthStatusPayload(status, payload = {}) {
-    const baseMessage = AUTH_STATUS_MESSAGES[status] || "";
-    const message =
-      typeof payload.message === "string" && payload.message.length ? payload.message : baseMessage;
-
-    return {
-      status,
-      message,
-      ...payload
-    };
+    return this.buildStatusPayload(AUTH_STATUS_MESSAGES, status, payload);
   },
 
   emitAuthStatus(status, payload = {}, options = {}) {
-    const { broadcast = true } = options;
-    const builtPayload = this.buildAuthStatusPayload(status, payload);
-
-    if (broadcast) {
-      this.broadcastToAllClients("AUTH_STATUS", builtPayload);
-      return;
-    }
-
-    this.sendSocketNotification("AUTH_STATUS", builtPayload);
-  },
-
-  setAuthFlags({ isAuthenticated, isAuthenticating } = {}) {
-    if (typeof isAuthenticated === "boolean") {
-      globalSession.isAuthenticated = isAuthenticated;
-    }
-    if (typeof isAuthenticating === "boolean") {
-      globalSession.isAuthenticating = isAuthenticating;
-    }
+    this.emitStatus("AUTH_STATUS", AUTH_STATUS_MESSAGES, status, payload, options);
   },
 
   isSessionAuthenticated() {
-    if (globalSession.isAuthenticated) {
-      return true;
-    }
-
-    return this.sessionState === SESSION_STATES.READY;
+    return AUTHENTICATED_SESSION_STATES.has(this.sessionState);
   },
 
   isAuthFlowInProgress() {
-    if (globalSession.isAuthenticating) {
-      return true;
-    }
-
-    return (
-      this.sessionState === SESSION_STATES.AUTHENTICATING ||
-      this.sessionState === SESSION_STATES.INITIALIZING
-    );
+    return AUTH_FLOW_SESSION_STATES.has(this.sessionState);
   },
 
   beginDeviceRefresh(reason) {
-    this.transitionSessionState("DEVICE_REFRESH_START", { reason });
+    this.transitionSessionState(SESSION_EVENTS.DEVICE_REFRESH_START, { reason });
   },
 
   endDeviceRefresh(reason) {
-    this.transitionSessionState("DEVICE_REFRESH_DONE", { reason });
+    this.transitionSessionState(SESSION_EVENTS.DEVICE_REFRESH_DONE, { reason });
   },
 
   beginProgramFetch(reason) {
-    this.transitionSessionState("PROGRAM_FETCH_START", { reason });
+    this.transitionSessionState(SESSION_EVENTS.PROGRAM_FETCH_START, { reason });
   },
 
   endProgramFetch(reason) {
-    this.transitionSessionState("PROGRAM_FETCH_DONE", { reason });
+    this.transitionSessionState(SESSION_EVENTS.PROGRAM_FETCH_DONE, { reason });
   },
 
   init() {
     moduleLog("info", "init module helper: MMM-HomeConnect2 (session-based)");
-    this.transitionSessionState("CONFIG_RECEIVED", { reason: "helper_init" });
+    this.transitionSessionState(SESSION_EVENTS.CONFIG_RECEIVED, { reason: "helper_init" });
 
     this.authService = new AuthService({
       logger: moduleLog,
@@ -334,7 +403,8 @@ module.exports = NodeHelper.create({
       devices: this.deviceService.devices,
       debugHooks: {
         recordApiCall: this.recordApiCall.bind(this)
-      }
+      },
+      setRateLimitUntil: this.setRateLimitUntil.bind(this)
     });
   },
 
@@ -425,7 +495,7 @@ module.exports = NodeHelper.create({
   },
 
   handleConfigNotification(payload) {
-    this.transitionSessionState("CONFIG_RECEIVED", {
+    this.transitionSessionState(SESSION_EVENTS.CONFIG_RECEIVED, {
       reason: "config_notification"
     });
 
@@ -520,7 +590,7 @@ module.exports = NodeHelper.create({
       moduleLog("warn", "State refresh unable to respond - no device data available", {
         requester
       });
-      this.transitionSessionState("ERROR", {
+      this.transitionSessionState(SESSION_EVENTS.ERROR, {
         reason: "state_refresh_no_devices"
       });
     }
@@ -653,8 +723,8 @@ module.exports = NodeHelper.create({
         event: this.sessionStateMeta.event,
         updatedAt: this.sessionStateMeta.updatedAt,
         reason: this.sessionStateMeta.reason,
-        rateLimitUntil: globalSession.rateLimitUntil || 0,
-        rateLimitRemainingMs: Math.max(0, (globalSession.rateLimitUntil || 0) - Date.now())
+        rateLimitUntil: this.getRateLimitUntil(),
+        rateLimitRemainingMs: Math.max(0, this.getRateLimitUntil() - Date.now())
       }
     });
   },
@@ -681,7 +751,7 @@ module.exports = NodeHelper.create({
   checkRateLimit() {
     const now = Date.now();
     if (now - globalSession.lastAuthAttempt < globalSession.MIN_AUTH_INTERVAL) {
-      this.transitionSessionState("RATE_LIMIT_HIT", {
+      this.transitionSessionState(SESSION_EVENTS.RATE_LIMIT_HIT, {
         reason: "auth_interval_rate_limit"
       });
       moduleLog("warn", "Rate limit: waiting before next auth attempt");
@@ -692,11 +762,8 @@ module.exports = NodeHelper.create({
   },
 
   initiateAuthFlow() {
-    this.transitionSessionState("AUTH_START", {
-      reason: "initiate_auth_flow"
-    });
     this.authService.initiateAuthFlow();
-    if (!globalSession.isAuthenticating && !globalSession.refreshToken) {
+    if (!globalSession.refreshToken) {
       this.initWithHeadlessAuth();
     }
   },
@@ -735,8 +802,7 @@ module.exports = NodeHelper.create({
   },
 
   handleHeadlessAuthError(error) {
-    this.setAuthFlags({ isAuthenticating: false });
-    this.transitionSessionState("AUTH_ERROR", {
+    this.transitionSessionState(SESSION_EVENTS.AUTH_ERROR, {
       reason: error && error.message ? error.message : "headless_auth_error"
     });
     moduleLog("error", "Headless authentication failed:", error.message);
@@ -776,10 +842,9 @@ module.exports = NodeHelper.create({
       return;
     }
 
-    this.transitionSessionState("AUTH_START", {
+    this.transitionSessionState(SESSION_EVENTS.AUTH_START, {
       reason: "headless_auth"
     });
-    this.setAuthFlags({ isAuthenticating: true });
     this.initializationAttempts++;
 
     moduleLog(
@@ -807,11 +872,7 @@ module.exports = NodeHelper.create({
   handleHomeConnectInitSuccess() {
     moduleLog("info", "HomeConnect initialized successfully");
 
-    this.setAuthFlags({
-      isAuthenticated: true,
-      isAuthenticating: false
-    });
-    this.transitionSessionState("AUTH_SUCCESS", {
+    this.transitionSessionState(SESSION_EVENTS.AUTH_SUCCESS, {
       reason: "homeconnect_initialized"
     });
 
@@ -830,8 +891,7 @@ module.exports = NodeHelper.create({
 
   handleHomeConnectInitError(error) {
     moduleLog("error", "HomeConnect initialization failed:", error);
-    this.setAuthFlags({ isAuthenticating: false });
-    this.transitionSessionState("AUTH_ERROR", {
+    this.transitionSessionState(SESSION_EVENTS.AUTH_ERROR, {
       reason: error && error.message ? error.message : "homeconnect_init_error"
     });
 
@@ -858,7 +918,6 @@ module.exports = NodeHelper.create({
         moduleLog("warn", "Failed to delete cached refresh token file:", fsErr);
       }
 
-      this.setAuthFlags({ isAuthenticated: false, isAuthenticating: false });
       globalSession.refreshToken = null;
       globalSession.accessToken = null;
       this.refreshToken = null;
@@ -867,8 +926,8 @@ module.exports = NodeHelper.create({
       // Reset attempts so a fresh authentication cycle can proceed without hitting attempt limits.
       this.initializationAttempts = 0;
       globalSession.lastAuthAttempt = 0;
-      globalSession.rateLimitUntil = 0;
-      this.transitionSessionState("RESET", {
+      this.setRateLimitUntil(0);
+      this.transitionSessionState(SESSION_EVENTS.RESET, {
         reason: "invalid_grant"
       });
 
@@ -908,7 +967,7 @@ module.exports = NodeHelper.create({
   async initializeHomeConnect(refreshToken) {
     return new Promise((resolve, reject) => {
       moduleLog("info", "Initializing HomeConnect with token...");
-      this.transitionSessionState("HC_INIT_START", {
+      this.transitionSessionState(SESSION_EVENTS.HC_INIT_START, {
         reason: "initialize_homeconnect"
       });
       if (!HomeConnect) {
@@ -928,7 +987,9 @@ module.exports = NodeHelper.create({
 
       const initTimeout = setTimeout(() => {
         moduleLog("error", "HomeConnect initialization timeout");
-        this.setAuthFlags({ isAuthenticating: false });
+        this.transitionSessionState(SESSION_EVENTS.AUTH_ERROR, {
+          reason: "homeconnect_init_timeout"
+        });
         reject(new Error("HomeConnect initialization timeout"));
       }, 30000);
 
@@ -953,12 +1014,8 @@ module.exports = NodeHelper.create({
 
   retryAuthentication() {
     moduleLog("info", "Manual authentication retry");
-    this.transitionSessionState("RESET", {
+    this.transitionSessionState(SESSION_EVENTS.RESET, {
       reason: "manual_retry_auth"
-    });
-    this.setAuthFlags({
-      isAuthenticated: false,
-      isAuthenticating: false
     });
     globalSession.accessToken = null;
     globalSession.refreshToken = null;
@@ -1135,12 +1192,12 @@ module.exports = NodeHelper.create({
     if (!this.programService) return;
     this.programService.handleActiveProgramFetchError(error, this.broadcastToAllClients.bind(this));
     if (globalSession.rateLimitUntil > Date.now()) {
-      this.transitionSessionState("RATE_LIMIT_HIT", {
+      this.transitionSessionState(SESSION_EVENTS.RATE_LIMIT_HIT, {
         reason: "active_program_429"
       });
       this.scheduleRateLimitRelease(globalSession.rateLimitUntil);
     } else {
-      this.transitionSessionState("ERROR", {
+      this.transitionSessionState(SESSION_EVENTS.ERROR, {
         reason: error && error.message ? error.message : "active_program_error"
       });
     }

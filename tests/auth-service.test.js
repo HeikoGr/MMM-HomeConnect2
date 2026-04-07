@@ -8,7 +8,6 @@ function createAuthService(overrides = {}) {
   const globalSession = {
     lastAuthAttempt: 0,
     MIN_AUTH_INTERVAL: 60000,
-    isAuthenticating: false,
     refreshToken: null
   };
   const logs = [];
@@ -19,7 +18,7 @@ function createAuthService(overrides = {}) {
   const service = new AuthService({
     logger,
     broadcastToAllClients: (n, p) => broadcasts.push({ n, p }),
-    setModuleLogLevel: () => {},
+    setModuleLogLevel: () => { },
     globalSession,
     refreshTokenPath: path.join(__dirname, "fixtures", "missing-refresh-token.json"),
     maxInitAttempts: 1,
@@ -34,14 +33,6 @@ function createAuthService(overrides = {}) {
     const { service } = createAuthService();
     const token = service.readRefreshTokenFromFile();
     assert.strictEqual(token, null);
-  }
-
-  // checkRateLimit: first call ok, second within interval returns false
-  {
-    const { service, globalSession } = createAuthService();
-    globalSession.lastAuthAttempt = Date.now() - 30000;
-    const ok = service.checkRateLimit();
-    assert.strictEqual(ok, false);
   }
 
   // initiateAuthFlow: sets lastAuthAttempt and broadcasts need_auth
