@@ -16,9 +16,9 @@ function installFrontendGlobals() {
   };
 
   globalThis.Log = {
-    log() { },
-    warn() { },
-    error() { }
+    log() {},
+    warn() {},
+    error() {}
   };
 
   globalThis.config = { language: "en" };
@@ -105,8 +105,8 @@ function createInstance(overrides = {}) {
     translate(key) {
       return key;
     },
-    updateDom() { },
-    sendSocketNotification() { }
+    updateDom() {},
+    sendSocketNotification() {}
   };
 }
 

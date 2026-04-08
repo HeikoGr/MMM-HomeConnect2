@@ -1,6 +1,6 @@
 {
   "name": "mmm-homeconnect2",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "MagicMirror² Module for Home Connect",
   "main": "MMM-HomeConnect2.js",
   "author": "HeikoGr",

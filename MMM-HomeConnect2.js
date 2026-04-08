@@ -1,5 +1,13 @@
 /* global Module, Log */ // eslint-disable-line no-redeclare
 
+function generateInstanceId(prefix = "hc") {
+  if (globalThis.MMModuleRuntimeUtils?.generateScopedId) {
+    return globalThis.MMModuleRuntimeUtils.generateScopedId(prefix);
+  }
+
+  return `${prefix}_${Date.now().toString(36)}`;
+}
+
 function computeProgressDisplayState({
   device,
   effectiveRemainingSeconds,
@@ -245,8 +253,7 @@ Module.register("MMM-HomeConnect2", {
   },
 
   start() {
-    // Generate a unique instance ID
-    this.instanceId = `hc_${Math.random().toString(36).substr(2, 9)}`;
+    this.instanceId = generateInstanceId();
     this.ensureProgressRefreshTimer();
   },
 
@@ -374,7 +381,10 @@ Module.register("MMM-HomeConnect2", {
 
   getScripts() {
     // Use full module-relative path so the MagicMirror loader can find the file
-    return ["modules/MMM-HomeConnect2/lib/device-utils.js"];
+    return [
+      "modules/MMM-HomeConnect2/lib/runtime-utils.js",
+      "modules/MMM-HomeConnect2/lib/device-utils.js"
+    ];
   },
 
   getStyles() {

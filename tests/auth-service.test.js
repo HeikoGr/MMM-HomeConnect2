@@ -18,7 +18,7 @@ function createAuthService(overrides = {}) {
   const service = new AuthService({
     logger,
     broadcastToAllClients: (n, p) => broadcasts.push({ n, p }),
-    setModuleLogLevel: () => { },
+    setModuleLogLevel: () => {},
     globalSession,
     refreshTokenPath: path.join(__dirname, "fixtures", "missing-refresh-token.json"),
     maxInitAttempts: 1,

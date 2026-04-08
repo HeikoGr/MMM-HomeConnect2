@@ -196,7 +196,8 @@ module.exports = NodeHelper.create({
 
     const transitionFrom = transition.from;
     const allowedFromCurrent =
-      transitionFrom === "*" || (Array.isArray(transitionFrom) && transitionFrom.includes(prevState));
+      transitionFrom === "*" ||
+      (Array.isArray(transitionFrom) && transitionFrom.includes(prevState));
 
     if (!allowedFromCurrent) {
       moduleLog("warn", "Invalid session transition blocked", {
@@ -211,7 +212,8 @@ module.exports = NodeHelper.create({
       currentState: prevState,
       isRateLimited: Date.now() < globalSession.rateLimitUntil,
       hasAuthenticatedSession:
-        AUTHENTICATED_SESSION_STATES.has(prevState) || Boolean(this.hc && globalSession.refreshToken)
+        AUTHENTICATED_SESSION_STATES.has(prevState) ||
+        Boolean(this.hc && globalSession.refreshToken)
     };
     const nextState =
       typeof transition.resolve === "function"
