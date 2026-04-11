@@ -16,9 +16,9 @@ function installFrontendGlobals() {
   };
 
   globalThis.Log = {
-    log() {},
-    warn() {},
-    error() {}
+    log() { },
+    warn() { },
+    error() { }
   };
 
   globalThis.config = { language: "en" };
@@ -105,8 +105,8 @@ function createInstance(overrides = {}) {
     translate(key) {
       return key;
     },
-    updateDom() {},
-    sendSocketNotification() {}
+    updateDom() { },
+    sendSocketNotification() { }
   };
 }
 
@@ -398,6 +398,31 @@ function createInstance(overrides = {}) {
     const wrinkleGuardDom = wrinkleGuardInstance.getDom();
     assert.ok(wrinkleGuardDom.innerHTML.includes("WRINKLE_PROTECTION_ACTIVE"));
     assert.ok(!wrinkleGuardDom.innerHTML.includes("fa-play"));
+    assert.strictEqual(
+      (wrinkleGuardDom.innerHTML.match(/WRINKLE_PROTECTION_ACTIVE/g) || []).length,
+      1
+    );
+
+    const localizedWrinkleGuardInstance = createInstance({
+      devices: [
+        {
+          name: "Dryer",
+          type: "Dryer",
+          PowerState: "On",
+          OperationState: "BSH.Common.EnumType.OperationState.Finished",
+          ActiveProgramName: "Pflegeleicht",
+          ActiveProgramSource: "active",
+          ActiveProgramDetails: ["Trockenziel: Schranktrocken Plus", "Knitterschutz: 120 min"]
+        }
+      ]
+    });
+    const localizedWrinkleGuardDom = localizedWrinkleGuardInstance.getDom();
+    assert.ok(localizedWrinkleGuardDom.innerHTML.includes("WRINKLE_PROTECTION_ACTIVE"));
+    assert.ok(!localizedWrinkleGuardDom.innerHTML.includes("PROGRAM_FINISHED"));
+    assert.strictEqual(
+      (localizedWrinkleGuardDom.innerHTML.match(/WRINKLE_PROTECTION_ACTIVE/g) || []).length,
+      1
+    );
 
     const delayedStartInstance = createInstance({
       devices: [

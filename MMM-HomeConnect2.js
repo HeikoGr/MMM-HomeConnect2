@@ -134,6 +134,12 @@ function getOperationStateInfo(device) {
   };
 }
 
+function isWrinkleProtectionLabel(value) {
+  return (
+    typeof value === "string" && /(Wrinkle|Less\s+Ironing|Knitterschutz|Kr[oø]lle)/i.test(value)
+  );
+}
+
 function computeProgramDisplayState({
   device,
   operationStateDelayedStart,
@@ -177,9 +183,7 @@ function computeProgramDisplayState({
 
   const wrinkleProtectionActive =
     isFinished &&
-    [programPhase, ...programDetails].some(
-      (value) => typeof value === "string" && /Wrinkle|Ironing/i.test(value)
-    );
+    [programPhase, ...programDetails].some((value) => isWrinkleProtectionLabel(value));
   const effectiveStartInRelativeSeconds =
     startInRelativeSeconds > 0
       ? startInRelativeSeconds
@@ -414,8 +418,8 @@ Module.register("MMM-HomeConnect2", {
 
     const browserLanguages = Array.isArray(navigator?.languages)
       ? navigator.languages
-          .map((language) => (typeof language === "string" ? language.trim() : ""))
-          .filter(Boolean)
+        .map((language) => (typeof language === "string" ? language.trim() : ""))
+        .filter(Boolean)
       : [];
     if (browserLanguages.length > 0) {
       return browserLanguages[0];
@@ -849,24 +853,22 @@ Module.register("MMM-HomeConnect2", {
 
     const statusText = explicitlyDisconnected
       ? this.translate("DEVICE_NOT_CONNECTED")
-      : wrinkleProtectionActive
-        ? this.translate("WRINKLE_PROTECTION_ACTIVE")
-        : visibleRemainingSeconds > 0
-          ? `${this.translate("DONE_IN")} ${hasEstimatedDuration ? `${this.translate("APPROX_PREFIX")} ` : ""}${this.formatDuration(visibleRemainingSeconds)}`
-          : "";
+      : visibleRemainingSeconds > 0
+        ? `${this.translate("DONE_IN")} ${hasEstimatedDuration ? `${this.translate("APPROX_PREFIX")} ` : ""}${this.formatDuration(visibleRemainingSeconds)}`
+        : "";
     const showProgressDebug = (this.config?.logLevel || "").toLowerCase() === "debug";
     const progressDebug = showProgressDebug
       ? [
-          `src=${progressSource}`,
-          `api=${progressNumeric !== undefined ? `${progressNumeric}%` : "n/a"}`,
-          `total=${estimatedTotalPercent !== undefined ? `${estimatedTotalPercent}%` : "n/a"}`,
-          `initial=${initialPercent !== undefined ? `${initialPercent}%` : "n/a"}`,
-          `observed=${observedPercent !== undefined ? `${observedPercent}%` : "n/a"}`,
-          `remaining=${visibleRemainingSeconds !== null ? this.formatDuration(visibleRemainingSeconds) || `${visibleRemainingSeconds}s` : "n/a"}`,
-          `rawRemaining=${remainingSeconds !== null ? this.formatDuration(remainingSeconds) || `${remainingSeconds}s` : "n/a"}`,
-          `planned=${visiblePlannedDurationLabel || "n/a"}`,
-          `seen=${this.formatDebugAge(Number(device._remainingObservedAt))}`
-        ].join(" | ")
+        `src=${progressSource}`,
+        `api=${progressNumeric !== undefined ? `${progressNumeric}%` : "n/a"}`,
+        `total=${estimatedTotalPercent !== undefined ? `${estimatedTotalPercent}%` : "n/a"}`,
+        `initial=${initialPercent !== undefined ? `${initialPercent}%` : "n/a"}`,
+        `observed=${observedPercent !== undefined ? `${observedPercent}%` : "n/a"}`,
+        `remaining=${visibleRemainingSeconds !== null ? this.formatDuration(visibleRemainingSeconds) || `${visibleRemainingSeconds}s` : "n/a"}`,
+        `rawRemaining=${remainingSeconds !== null ? this.formatDuration(remainingSeconds) || `${remainingSeconds}s` : "n/a"}`,
+        `planned=${visiblePlannedDurationLabel || "n/a"}`,
+        `seen=${this.formatDebugAge(Number(device._remainingObservedAt))}`
+      ].join(" | ")
       : "";
 
     return {
@@ -1186,8 +1188,7 @@ Module.register("MMM-HomeConnect2", {
     // Status from INIT_STATUS gets rendered only in debug mode
     if (this.lastInitStatus && this.lastInitStatus.message) {
       rows.push(
-        `<div class='hc-debug-row'><span class='hc-debug-label'>last init status:</span> ${
-          this.lastInitStatus.message
+        `<div class='hc-debug-row'><span class='hc-debug-label'>last init status:</span> ${this.lastInitStatus.message
         }</div>`
       );
     }
