@@ -45,9 +45,28 @@ function setGlobalBuiltin(name, value) {
   });
 
   assert.strictEqual(device.RemainingProgramTime, 0);
+  assert.strictEqual(device.ProgramProgress, 37);
   assert.strictEqual(device._initialRemaining, undefined);
   assert.strictEqual(device._remainingObservedAt, undefined);
   assert.strictEqual(device.RemainingProgramTimeIsEstimated, undefined);
+
+  hc.applyEventToDevice(device, {
+    key: "BSH.Common.Status.ProgramProgress",
+    value: { value: "100" }
+  });
+
+  assert.strictEqual(device.ProgramProgress, 100);
+
+  hc.applyEventToDevice(device, {
+    key: "BSH.Common.Status.RemainingProgramTime",
+    value: { value: "PT33M" }
+  });
+
+  assert.strictEqual(device.RemainingProgramTime.value, "PT33M");
+  assert.strictEqual(device.ProgramProgress, undefined);
+  assert.strictEqual(device.OperationState, undefined);
+  assert.strictEqual(device._initialRemaining, 1980);
+  assert.ok(Number.isFinite(device._remainingObservedAt));
 
   hc.applyEventToDevice(device, {
     key: "Refrigeration.Common.Status.Door.Freezer",

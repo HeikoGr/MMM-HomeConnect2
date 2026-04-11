@@ -16,9 +16,9 @@ function installFrontendGlobals() {
   };
 
   globalThis.Log = {
-    log() {},
-    warn() {},
-    error() {}
+    log() { },
+    warn() { },
+    error() { }
   };
 
   globalThis.config = { language: "en" };
@@ -105,8 +105,8 @@ function createInstance(overrides = {}) {
     translate(key) {
       return key;
     },
-    updateDom() {},
-    sendSocketNotification() {}
+    updateDom() { },
+    sendSocketNotification() { }
   };
 }
 
@@ -230,6 +230,24 @@ function createInstance(overrides = {}) {
     assert.ok(runningSelectedDom.innerHTML.includes("Dryer"));
     assert.ok(!runningSelectedDom.innerHTML.includes("Synthetics"));
     assert.ok(!runningSelectedDom.innerHTML.includes("fa-play"));
+
+    const secondCycleDryerInstance = createInstance({
+      devices: [
+        {
+          name: "Dryer",
+          type: "Dryer",
+          PowerState: "On",
+          OperationState: "BSH.Common.EnumType.OperationState.Run",
+          RemainingProgramTime: { value: "PT33M" },
+          _initialRemaining: 1980,
+          _remainingObservedAt: Date.now()
+        }
+      ]
+    });
+    const secondCycleDryerDom = secondCycleDryerInstance.getDom();
+    assert.ok(secondCycleDryerDom.innerHTML.includes("fa-play"));
+    assert.ok(secondCycleDryerDom.innerHTML.includes("deviceProgressBar"));
+    assert.ok(!secondCycleDryerDom.innerHTML.includes("PROGRAM_FINISHED"));
 
     const recoveryNotifications = [];
     const recoveryInstance = createInstance();
