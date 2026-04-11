@@ -1,5 +1,13 @@
 /* global Module, Log */ // eslint-disable-line no-redeclare
 
+function generateInstanceId(prefix = "hc") {
+  if (globalThis.MMModuleRuntimeUtils?.generateScopedId) {
+    return globalThis.MMModuleRuntimeUtils.generateScopedId(prefix);
+  }
+
+  return `${prefix}_${Date.now().toString(36)}`;
+}
+
 function computeProgressDisplayState({
   device,
   effectiveRemainingSeconds,
@@ -245,8 +253,7 @@ Module.register("MMM-HomeConnect2", {
   },
 
   start() {
-    // Generate a unique instance ID
-    this.instanceId = `hc_${Math.random().toString(36).substr(2, 9)}`;
+    this.instanceId = generateInstanceId();
     this.ensureProgressRefreshTimer();
   },
 
@@ -374,7 +381,10 @@ Module.register("MMM-HomeConnect2", {
 
   getScripts() {
     // Use full module-relative path so the MagicMirror loader can find the file
-    return ["modules/MMM-HomeConnect2/lib/device-utils.js"];
+    return [
+      "modules/MMM-HomeConnect2/lib/runtime-utils.js",
+      "modules/MMM-HomeConnect2/lib/device-utils.js"
+    ];
   },
 
   getStyles() {
@@ -404,8 +414,8 @@ Module.register("MMM-HomeConnect2", {
 
     const browserLanguages = Array.isArray(navigator?.languages)
       ? navigator.languages
-        .map((language) => (typeof language === "string" ? language.trim() : ""))
-        .filter(Boolean)
+          .map((language) => (typeof language === "string" ? language.trim() : ""))
+          .filter(Boolean)
       : [];
     if (browserLanguages.length > 0) {
       return browserLanguages[0];
@@ -847,16 +857,16 @@ Module.register("MMM-HomeConnect2", {
     const showProgressDebug = (this.config?.logLevel || "").toLowerCase() === "debug";
     const progressDebug = showProgressDebug
       ? [
-        `src=${progressSource}`,
-        `api=${progressNumeric !== undefined ? `${progressNumeric}%` : "n/a"}`,
-        `total=${estimatedTotalPercent !== undefined ? `${estimatedTotalPercent}%` : "n/a"}`,
-        `initial=${initialPercent !== undefined ? `${initialPercent}%` : "n/a"}`,
-        `observed=${observedPercent !== undefined ? `${observedPercent}%` : "n/a"}`,
-        `remaining=${visibleRemainingSeconds !== null ? this.formatDuration(visibleRemainingSeconds) || `${visibleRemainingSeconds}s` : "n/a"}`,
-        `rawRemaining=${remainingSeconds !== null ? this.formatDuration(remainingSeconds) || `${remainingSeconds}s` : "n/a"}`,
-        `planned=${visiblePlannedDurationLabel || "n/a"}`,
-        `seen=${this.formatDebugAge(Number(device._remainingObservedAt))}`
-      ].join(" | ")
+          `src=${progressSource}`,
+          `api=${progressNumeric !== undefined ? `${progressNumeric}%` : "n/a"}`,
+          `total=${estimatedTotalPercent !== undefined ? `${estimatedTotalPercent}%` : "n/a"}`,
+          `initial=${initialPercent !== undefined ? `${initialPercent}%` : "n/a"}`,
+          `observed=${observedPercent !== undefined ? `${observedPercent}%` : "n/a"}`,
+          `remaining=${visibleRemainingSeconds !== null ? this.formatDuration(visibleRemainingSeconds) || `${visibleRemainingSeconds}s` : "n/a"}`,
+          `rawRemaining=${remainingSeconds !== null ? this.formatDuration(remainingSeconds) || `${remainingSeconds}s` : "n/a"}`,
+          `planned=${visiblePlannedDurationLabel || "n/a"}`,
+          `seen=${this.formatDebugAge(Number(device._remainingObservedAt))}`
+        ].join(" | ")
       : "";
 
     return {
@@ -1164,12 +1174,20 @@ Module.register("MMM-HomeConnect2", {
       return "";
     }
     const formatTime = (ts) => (ts ? new Date(ts).toLocaleTimeString() : "n/a");
+    const escapeHtml = (str) =>
+      String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
     const rows = [];
 
     // Status from INIT_STATUS gets rendered only in debug mode
     if (this.lastInitStatus && this.lastInitStatus.message) {
       rows.push(
-        `<div class='hc-debug-row'><span class='hc-debug-label'>last init status:</span> ${this.lastInitStatus.message
+        `<div class='hc-debug-row'><span class='hc-debug-label'>last init status:</span> ${
+          this.lastInitStatus.message
         }</div>`
       );
     }
@@ -1184,6 +1202,37 @@ Module.register("MMM-HomeConnect2", {
         this.debugStats.lastApiCallTs
       )}</div>`
     );
+
+    const session = this.debugStats.session || null;
+    if (session && typeof session === "object") {
+      const rateLimitRemainingSec = Number.isFinite(session.rateLimitRemainingMs)
+        ? Math.max(0, Math.ceil(session.rateLimitRemainingMs / 1000))
+        : 0;
+      rows.push(
+        `<div class='hc-debug-row'><span class='hc-debug-label'>session state:</span> ${escapeHtml(
+          session.state || "n/a"
+        )}</div>`
+      );
+      rows.push(
+        `<div class='hc-debug-row'><span class='hc-debug-label'>session event:</span> ${escapeHtml(
+          session.event || "n/a"
+        )}</div>`
+      );
+      if (session.reason) {
+        rows.push(
+          `<div class='hc-debug-row'><span class='hc-debug-label'>session reason:</span> ${escapeHtml(session.reason)}</div>`
+        );
+      }
+      rows.push(
+        `<div class='hc-debug-row'><span class='hc-debug-label'>session updated:</span> ${formatTime(
+          session.updatedAt
+        )}</div>`
+      );
+      rows.push(
+        `<div class='hc-debug-row'><span class='hc-debug-label'>rate limit remaining:</span> ${rateLimitRemainingSec}s</div>`
+      );
+    }
+
     const counters = this.debugStats.apiCounters || {};
     const counterEntries = Object.entries(counters);
     if (counterEntries.length) {

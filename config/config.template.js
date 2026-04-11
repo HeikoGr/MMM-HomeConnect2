@@ -18,16 +18,6 @@ let config = {
     { module: "clock", position: "top_left" },
 
     {
-      module: "MMM-APOD",
-      position: "top_center",
-      config: {
-        appid: "YOUR_NASA_API_KEY", // NASA API key (api.nasa.gov)
-        maxMediaWidth: 1900,
-        maxMediaHeight: 1020
-      }
-    },
-
-    {
       module: "MMM-HomeConnect2",
       header: "Home Connect Appliances",
       position: "top_right",

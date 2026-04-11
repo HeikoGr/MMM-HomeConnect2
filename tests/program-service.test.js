@@ -23,6 +23,9 @@ function createProgramService(overrides = {}) {
     globalSession,
     activeProgramManager: null,
     devices,
+    setRateLimitUntil: (untilTs) => {
+      globalSession.rateLimitUntil = Math.max(0, Number(untilTs || 0));
+    },
     ...overrides
   });
   service.attachClient({
@@ -172,7 +175,7 @@ function createProgramService(overrides = {}) {
           }
         };
       },
-      applyEventToDevice() { }
+      applyEventToDevice() {}
     });
 
     const result = await service.fetchActiveProgramForDevice("ha-1", "Washer");
@@ -214,7 +217,7 @@ function createProgramService(overrides = {}) {
           ]
         }
       }),
-      applyEventToDevice() { }
+      applyEventToDevice() {}
     });
 
     const result = await service.fetchActiveProgramForDevice("ha-1", "Washer");
@@ -262,7 +265,7 @@ function createProgramService(overrides = {}) {
           ]
         }
       }),
-      applyEventToDevice() { }
+      applyEventToDevice() {}
     });
 
     const result = await service.fetchActiveProgramForDevice("ha-hood", "Hood");

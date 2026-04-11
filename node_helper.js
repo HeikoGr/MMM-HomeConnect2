@@ -10,8 +10,6 @@ const { deviceAppearsActive, isDeviceConnected } = require("./lib/device-utils")
 /* eslint-disable n/no-missing-require */
 const NodeHelper = require("node_helper"),
   globalSession = {
-    isAuthenticated: false,
-    isAuthenticating: false,
     accessToken: null, // Access token for API requests
     refreshToken: null, // Refresh token for obtaining new access tokens
     clientInstances: new Set(), // Set of client instance IDs using this helper
@@ -25,31 +23,360 @@ const NodeHelper = require("node_helper"),
 const ACTIVE_PROGRAM_RETRY_DELAY_MS = 5000; // 5s
 const ACTIVE_PROGRAM_MAX_RETRIES = 3; // Maximum number of retries for active program requests
 
+const SESSION_STATES = Object.freeze({
+  BOOT: "boot",
+  AUTHENTICATING: "authenticating",
+  INITIALIZING: "initializing",
+  READY: "ready",
+  REFRESHING_DEVICES: "refreshing_devices",
+  REFRESHING_PROGRAMS: "refreshing_programs",
+  RATE_LIMITED: "rate_limited",
+  ERROR: "error"
+});
+
+const SESSION_EVENTS = Object.freeze({
+  CONFIG_RECEIVED: "CONFIG_RECEIVED",
+  AUTH_START: "AUTH_START",
+  HC_INIT_START: "HC_INIT_START",
+  AUTH_SUCCESS: "AUTH_SUCCESS",
+  AUTH_ERROR: "AUTH_ERROR",
+  DEVICE_REFRESH_START: "DEVICE_REFRESH_START",
+  DEVICE_REFRESH_DONE: "DEVICE_REFRESH_DONE",
+  PROGRAM_FETCH_START: "PROGRAM_FETCH_START",
+  PROGRAM_FETCH_DONE: "PROGRAM_FETCH_DONE",
+  RATE_LIMIT_HIT: "RATE_LIMIT_HIT",
+  RATE_LIMIT_CLEARED: "RATE_LIMIT_CLEARED",
+  ERROR: "ERROR",
+  RESET: "RESET"
+});
+
+const AUTHENTICATED_SESSION_STATES = new Set([
+  SESSION_STATES.READY,
+  SESSION_STATES.REFRESHING_DEVICES,
+  SESSION_STATES.REFRESHING_PROGRAMS,
+  SESSION_STATES.RATE_LIMITED
+]);
+
+const AUTH_FLOW_SESSION_STATES = new Set([
+  SESSION_STATES.AUTHENTICATING,
+  SESSION_STATES.INITIALIZING
+]);
+
+const ALL_SESSION_STATES = new Set(Object.values(SESSION_STATES));
+
+const SESSION_TRANSITIONS = Object.freeze({
+  [SESSION_EVENTS.CONFIG_RECEIVED]: {
+    from: "*",
+    resolve: ({ currentState, hasAuthenticatedSession }) => {
+      if (currentState === SESSION_STATES.BOOT && hasAuthenticatedSession) {
+        return SESSION_STATES.READY;
+      }
+      return currentState;
+    }
+  },
+  [SESSION_EVENTS.AUTH_START]: {
+    from: [SESSION_STATES.BOOT, SESSION_STATES.ERROR, SESSION_STATES.READY],
+    to: SESSION_STATES.AUTHENTICATING
+  },
+  [SESSION_EVENTS.HC_INIT_START]: {
+    from: [SESSION_STATES.BOOT, SESSION_STATES.AUTHENTICATING, SESSION_STATES.ERROR],
+    to: SESSION_STATES.INITIALIZING
+  },
+  [SESSION_EVENTS.AUTH_SUCCESS]: {
+    from: [SESSION_STATES.AUTHENTICATING, SESSION_STATES.INITIALIZING],
+    to: SESSION_STATES.READY
+  },
+  [SESSION_EVENTS.AUTH_ERROR]: {
+    from: [SESSION_STATES.AUTHENTICATING, SESSION_STATES.INITIALIZING],
+    to: SESSION_STATES.ERROR
+  },
+  [SESSION_EVENTS.DEVICE_REFRESH_START]: {
+    from: [SESSION_STATES.READY, SESSION_STATES.RATE_LIMITED, SESSION_STATES.REFRESHING_PROGRAMS],
+    to: SESSION_STATES.REFRESHING_DEVICES
+  },
+  [SESSION_EVENTS.DEVICE_REFRESH_DONE]: {
+    from: [SESSION_STATES.REFRESHING_DEVICES],
+    resolve: ({ isRateLimited }) =>
+      isRateLimited ? SESSION_STATES.RATE_LIMITED : SESSION_STATES.READY
+  },
+  [SESSION_EVENTS.PROGRAM_FETCH_START]: {
+    from: [SESSION_STATES.READY, SESSION_STATES.RATE_LIMITED, SESSION_STATES.REFRESHING_DEVICES],
+    to: SESSION_STATES.REFRESHING_PROGRAMS
+  },
+  [SESSION_EVENTS.PROGRAM_FETCH_DONE]: {
+    from: [SESSION_STATES.REFRESHING_PROGRAMS],
+    resolve: ({ isRateLimited }) =>
+      isRateLimited ? SESSION_STATES.RATE_LIMITED : SESSION_STATES.READY
+  },
+  [SESSION_EVENTS.RATE_LIMIT_HIT]: {
+    from: "*",
+    to: SESSION_STATES.RATE_LIMITED
+  },
+  [SESSION_EVENTS.RATE_LIMIT_CLEARED]: {
+    from: [SESSION_STATES.RATE_LIMITED],
+    resolve: ({ isRateLimited }) =>
+      isRateLimited ? SESSION_STATES.RATE_LIMITED : SESSION_STATES.READY
+  },
+  [SESSION_EVENTS.ERROR]: {
+    from: [
+      SESSION_STATES.BOOT,
+      SESSION_STATES.AUTHENTICATING,
+      SESSION_STATES.INITIALIZING,
+      SESSION_STATES.READY,
+      SESSION_STATES.REFRESHING_DEVICES,
+      SESSION_STATES.REFRESHING_PROGRAMS,
+      SESSION_STATES.RATE_LIMITED
+    ],
+    to: SESSION_STATES.ERROR
+  },
+  [SESSION_EVENTS.RESET]: {
+    from: "*",
+    to: SESSION_STATES.BOOT
+  }
+});
+
+const INIT_STATUS_MESSAGES = Object.freeze({
+  initializing: "Initialization started",
+  session_active: "Session active - using existing authentication",
+  auth_in_progress: "Authentication in progress",
+  complete: "Already initialized",
+  hc_not_ready: "HomeConnect not ready",
+  token_found: "Token found - initializing HomeConnect",
+  rate_limited: "Rate limit - please wait...",
+  initializing_hc: "Initializing HomeConnect...",
+  auth_failed: "Authentication failed - please check manually",
+  success: "Successfully initialized",
+  reauth_required: "Stored HomeConnect token invalid - re-authentication required",
+  fetching_programs: "Fetching active programs..."
+});
+
+const AUTH_STATUS_MESSAGES = Object.freeze({
+  success: "Authentication successful",
+  error: "Authentication failed",
+  token_invalid: "Token invalid - starting new authentication flow"
+});
+
 const { moduleLog, setModuleLogLevel } = require("./lib/logger");
 
 module.exports = NodeHelper.create({
   refreshToken: null,
   hc: null,
-  authInProgress: false,
   configReceived: false,
   initializationAttempts: 0,
   maxInitAttempts: 3,
   instanceId: null,
-  subscribed: false,
   activeProgramManager: null,
   authService: null,
   deviceService: null,
   programService: null,
-  serverPollTimer: null,
-  activeProgramSchedulerTimer: null,
+  sessionState: SESSION_STATES.BOOT,
+  sessionStateMeta: {
+    updatedAt: 0,
+    event: "init",
+    reason: null
+  },
+  rateLimitReleaseTimer: null,
   debugStats: {
     lastApiCallTs: null,
     lastSseEventTs: null,
     apiCounters: {}
   },
 
+  transitionSessionState(event, payload = {}) {
+    const prevState = this.sessionState || SESSION_STATES.BOOT;
+    const transition = SESSION_TRANSITIONS[event];
+
+    if (!transition) {
+      moduleLog("warn", "Unknown session event ignored", {
+        event,
+        state: prevState
+      });
+      return prevState;
+    }
+
+    const transitionFrom = transition.from;
+    const allowedFromCurrent =
+      transitionFrom === "*" ||
+      (Array.isArray(transitionFrom) && transitionFrom.includes(prevState));
+
+    if (!allowedFromCurrent) {
+      moduleLog("warn", "Invalid session transition blocked", {
+        event,
+        from: prevState,
+        allowedFrom: transitionFrom
+      });
+      return prevState;
+    }
+
+    const context = {
+      currentState: prevState,
+      isRateLimited: Date.now() < globalSession.rateLimitUntil,
+      hasAuthenticatedSession:
+        AUTHENTICATED_SESSION_STATES.has(prevState) ||
+        Boolean(this.hc && globalSession.refreshToken)
+    };
+    const nextState =
+      typeof transition.resolve === "function"
+        ? transition.resolve(context, payload)
+        : transition.to || prevState;
+
+    if (!ALL_SESSION_STATES.has(nextState)) {
+      moduleLog("warn", "Invalid target state ignored", {
+        event,
+        from: prevState,
+        to: nextState
+      });
+      return prevState;
+    }
+
+    this.sessionStateMeta = {
+      updatedAt: Date.now(),
+      event,
+      reason: payload.reason || null
+    };
+
+    if (nextState !== prevState) {
+      this.sessionState = nextState;
+      moduleLog("debug", `Session state transition: ${prevState} -> ${nextState}`, {
+        event,
+        reason: payload.reason || null
+      });
+      this.broadcastDebugStats();
+    }
+
+    return this.sessionState;
+  },
+
+  scheduleRateLimitRelease(untilTs) {
+    if (this.rateLimitReleaseTimer) {
+      clearTimeout(this.rateLimitReleaseTimer);
+      this.rateLimitReleaseTimer = null;
+    }
+
+    const waitMs = Math.max(0, Number(untilTs || 0) - Date.now());
+    if (waitMs <= 0) {
+      this.transitionSessionState(SESSION_EVENTS.RATE_LIMIT_CLEARED, {
+        reason: "rate_limit_elapsed"
+      });
+      return;
+    }
+
+    this.rateLimitReleaseTimer = setTimeout(() => {
+      this.rateLimitReleaseTimer = null;
+      if (Date.now() >= globalSession.rateLimitUntil) {
+        this.transitionSessionState(SESSION_EVENTS.RATE_LIMIT_CLEARED, {
+          reason: "rate_limit_elapsed"
+        });
+      }
+    }, waitMs);
+  },
+
+  syncRateLimitState() {
+    const now = Date.now();
+    if (now >= globalSession.rateLimitUntil) {
+      if (this.sessionState === SESSION_STATES.RATE_LIMITED) {
+        this.transitionSessionState(SESSION_EVENTS.RATE_LIMIT_CLEARED, {
+          reason: "rate_limit_elapsed"
+        });
+      }
+      return false;
+    }
+
+    this.transitionSessionState(SESSION_EVENTS.RATE_LIMIT_HIT, {
+      reason: "rate_limit_active"
+    });
+    this.scheduleRateLimitRelease(globalSession.rateLimitUntil);
+    return true;
+  },
+
+  getRateLimitUntil() {
+    return globalSession.rateLimitUntil || 0;
+  },
+
+  setRateLimitUntil(untilTs) {
+    globalSession.rateLimitUntil = Math.max(0, Number(untilTs || 0));
+    return globalSession.rateLimitUntil;
+  },
+
+  buildStatusPayload(messageMap, status, payload = {}) {
+    const baseMessage = messageMap[status] || "";
+    const message =
+      typeof payload.message === "string" && payload.message.length ? payload.message : baseMessage;
+
+    return {
+      status,
+      message,
+      ...payload
+    };
+  },
+
+  emitStatus(notification, messageMap, status, payload = {}, options = {}) {
+    const { broadcast = true } = options;
+    const builtPayload = this.buildStatusPayload(messageMap, status, payload);
+
+    if (broadcast) {
+      this.broadcastToAllClients(notification, builtPayload);
+      return;
+    }
+
+    this.sendSocketNotification(notification, builtPayload);
+  },
+
+  buildInitStatusPayload(status, payload = {}) {
+    return this.buildStatusPayload(INIT_STATUS_MESSAGES, status, payload);
+  },
+
+  emitInitStatus(status, payload = {}, options = {}) {
+    this.emitStatus("INIT_STATUS", INIT_STATUS_MESSAGES, status, payload, options);
+  },
+
+  buildAuthStatusPayload(status, payload = {}) {
+    return this.buildStatusPayload(AUTH_STATUS_MESSAGES, status, payload);
+  },
+
+  emitAuthStatus(status, payload = {}, options = {}) {
+    this.emitStatus("AUTH_STATUS", AUTH_STATUS_MESSAGES, status, payload, options);
+  },
+
+  isSessionAuthenticated() {
+    return AUTHENTICATED_SESSION_STATES.has(this.sessionState);
+  },
+
+  isAuthFlowInProgress() {
+    return AUTH_FLOW_SESSION_STATES.has(this.sessionState);
+  },
+
+  beginDeviceRefresh(reason) {
+    this.transitionSessionState(SESSION_EVENTS.DEVICE_REFRESH_START, { reason });
+  },
+
+  endDeviceRefresh(reason) {
+    this.transitionSessionState(SESSION_EVENTS.DEVICE_REFRESH_DONE, { reason });
+  },
+
+  makeDeviceRefreshCallback(doneReason) {
+    const sendSocketNotification = this.sendSocketNotification.bind(this);
+    let refreshCompleted = false;
+    return (notification, payload) => {
+      sendSocketNotification(notification, payload);
+      if (!refreshCompleted) {
+        refreshCompleted = true;
+        this.endDeviceRefresh(doneReason);
+      }
+    };
+  },
+
+  beginProgramFetch(reason) {
+    this.transitionSessionState(SESSION_EVENTS.PROGRAM_FETCH_START, { reason });
+  },
+
+  endProgramFetch(reason) {
+    this.transitionSessionState(SESSION_EVENTS.PROGRAM_FETCH_DONE, { reason });
+  },
+
   init() {
     moduleLog("info", "init module helper: MMM-HomeConnect2 (session-based)");
+    this.transitionSessionState(SESSION_EVENTS.CONFIG_RECEIVED, { reason: "helper_init" });
 
     this.authService = new AuthService({
       logger: moduleLog,
@@ -90,7 +417,8 @@ module.exports = NodeHelper.create({
       devices: this.deviceService.devices,
       debugHooks: {
         recordApiCall: this.recordApiCall.bind(this)
-      }
+      },
+      setRateLimitUntil: this.setRateLimitUntil.bind(this)
     });
   },
 
@@ -103,13 +431,9 @@ module.exports = NodeHelper.create({
     if (this.activeProgramManager && typeof this.activeProgramManager.clearAll === "function") {
       this.activeProgramManager.clearAll();
     }
-    if (this.serverPollTimer) {
-      clearInterval(this.serverPollTimer);
-      this.serverPollTimer = null;
-    }
-    if (this.activeProgramSchedulerTimer) {
-      clearInterval(this.activeProgramSchedulerTimer);
-      this.activeProgramSchedulerTimer = null;
+    if (this.rateLimitReleaseTimer) {
+      clearTimeout(this.rateLimitReleaseTimer);
+      this.rateLimitReleaseTimer = null;
     }
     if (this.deviceService && typeof this.deviceService.shutdown === "function") {
       this.deviceService.shutdown();
@@ -119,30 +443,34 @@ module.exports = NodeHelper.create({
   handleConfigNotificationFirstTime() {
     this.configReceived = true;
 
-    if (globalSession.isAuthenticated) {
+    if (this.isSessionAuthenticated()) {
       return this.handleSessionAlreadyActive();
     }
 
-    if (globalSession.isAuthenticating) {
+    if (this.isAuthFlowInProgress()) {
       return this.notifyAuthInProgress();
     }
 
-    this.sendSocketNotification("INIT_STATUS", {
-      status: "initializing",
-      message: "Initialization started",
-      instanceId: this.instanceId
-    });
+    this.emitInitStatus(
+      "initializing",
+      {
+        instanceId: this.instanceId
+      },
+      { broadcast: false }
+    );
 
     this.checkTokenAndInitialize();
   },
 
   handleSessionAlreadyActive() {
     moduleLog("info", "Session already authenticated - using existing tokens");
-    this.sendSocketNotification("INIT_STATUS", {
-      status: "session_active",
-      message: "Session active - using existing authentication",
-      instanceId: this.instanceId
-    });
+    this.emitInitStatus(
+      "session_active",
+      {
+        instanceId: this.instanceId
+      },
+      { broadcast: false }
+    );
 
     if (this.hc && this.deviceService) {
       setTimeout(() => {
@@ -153,30 +481,38 @@ module.exports = NodeHelper.create({
 
   notifyAuthInProgress() {
     moduleLog("info", "Authentication already in progress for another client instance");
-    this.sendSocketNotification("INIT_STATUS", {
-      status: "auth_in_progress",
-      message: "Authentication in progress",
-      instanceId: this.instanceId
-    });
+    this.emitInitStatus(
+      "auth_in_progress",
+      {
+        instanceId: this.instanceId
+      },
+      { broadcast: false }
+    );
   },
 
   handleConfigNotificationSubsequent() {
-    if (globalSession.isAuthenticated && this.hc && this.deviceService) {
-      this.sendSocketNotification("INIT_STATUS", {
-        status: "complete",
-        message: "Already initialized",
-        instanceId: this.instanceId
-      });
+    if (this.isSessionAuthenticated() && this.hc && this.deviceService) {
+      this.emitInitStatus(
+        "complete",
+        {
+          instanceId: this.instanceId
+        },
+        { broadcast: false }
+      );
 
       setTimeout(() => {
         this.deviceService.broadcastDevices(this.sendSocketNotification.bind(this));
       }, 500);
-    } else if (globalSession.isAuthenticating) {
+    } else if (this.isAuthFlowInProgress()) {
       this.notifyAuthInProgress();
     }
   },
 
   handleConfigNotification(payload) {
+    this.transitionSessionState(SESSION_EVENTS.CONFIG_RECEIVED, {
+      reason: "config_notification"
+    });
+
     this.instanceId = payload.instanceId || "default";
     globalSession.clientInstances.add(this.instanceId);
 
@@ -247,13 +583,14 @@ module.exports = NodeHelper.create({
       this.deviceService.subscribed && !this.deviceService.heartbeatStale && hasDevices;
     const shouldFetchDevices = forceRefresh || !sseHealthy;
 
-    if (shouldFetchDevices && this.hc && !globalSession.isAuthenticating) {
+    if (shouldFetchDevices && this.hc && !this.isAuthFlowInProgress()) {
+      this.beginDeviceRefresh("state_refresh_poll");
       moduleLog("info", "State refresh requires polling Home Connect", {
         requester,
         forceRefresh,
         sseHealthy
       });
-      this.deviceService.getDevices(this.sendSocketNotification.bind(this));
+      this.deviceService.getDevices(this.makeDeviceRefreshCallback("state_refresh_dispatched"));
     } else if (hasDevices) {
       moduleLog("debug", "State refresh served from cache (SSE data)", {
         requester,
@@ -264,6 +601,9 @@ module.exports = NodeHelper.create({
     } else {
       moduleLog("warn", "State refresh unable to respond - no device data available", {
         requester
+      });
+      this.transitionSessionState(SESSION_EVENTS.ERROR, {
+        reason: "state_refresh_no_devices"
       });
     }
 
@@ -290,9 +630,7 @@ module.exports = NodeHelper.create({
 
     if (!this.hc) {
       moduleLog("warn", "HomeConnect not initialized - cannot fetch active programs");
-      this.broadcastToAllClients("INIT_STATUS", {
-        status: "hc_not_ready",
-        message: "HomeConnect not ready",
+      this.emitInitStatus("hc_not_ready", {
         instanceId: requester
       });
       return;
@@ -300,11 +638,11 @@ module.exports = NodeHelper.create({
 
     const now = Date.now();
 
-    if (!force && now < globalSession.rateLimitUntil) {
+    const rateLimitActive = this.syncRateLimitState();
+    if (!force && rateLimitActive) {
       const remainingSeconds = Math.ceil((globalSession.rateLimitUntil - now) / 1000);
       moduleLog("info", `Rate limited - ${remainingSeconds}s remaining`);
-      this.broadcastToAllClients("INIT_STATUS", {
-        status: "device_error",
+      this.emitInitStatus("device_error", {
         message: `Rate limit active - please wait ${remainingSeconds}s`,
         rateLimitSeconds: remainingSeconds,
         statusCode: 429,
@@ -348,6 +686,7 @@ module.exports = NodeHelper.create({
       force
     });
 
+    this.beginProgramFetch("active_program_request");
     globalSession.lastActiveProgramFetch = now;
     this.fetchActiveProgramsForDevices(targetDevices, requester);
   },
@@ -390,7 +729,15 @@ module.exports = NodeHelper.create({
     this.broadcastToAllClients("DEBUG_STATS", {
       lastApiCallTs: this.debugStats.lastApiCallTs,
       lastSseEventTs: this.debugStats.lastSseEventTs,
-      apiCounters: { ...this.debugStats.apiCounters }
+      apiCounters: { ...this.debugStats.apiCounters },
+      session: {
+        state: this.sessionState,
+        event: this.sessionStateMeta.event,
+        updatedAt: this.sessionStateMeta.updatedAt,
+        reason: this.sessionStateMeta.reason,
+        rateLimitUntil: this.getRateLimitUntil(),
+        rateLimitRemainingMs: Math.max(0, this.getRateLimitUntil() - Date.now())
+      }
     });
   },
 
@@ -416,19 +763,23 @@ module.exports = NodeHelper.create({
   checkRateLimit() {
     const now = Date.now();
     if (now - globalSession.lastAuthAttempt < globalSession.MIN_AUTH_INTERVAL) {
-      moduleLog("warn", "Rate limit: waiting before next auth attempt");
-      this.broadcastToAllClients("INIT_STATUS", {
-        status: "rate_limited",
-        message: "Rate limit - please wait..."
+      globalSession.rateLimitUntil =
+        globalSession.lastAuthAttempt + globalSession.MIN_AUTH_INTERVAL;
+      this.transitionSessionState(SESSION_EVENTS.RATE_LIMIT_HIT, {
+        reason: "auth_interval_rate_limit"
       });
+      moduleLog("warn", "Rate limit: waiting before next auth attempt");
+      this.emitInitStatus("rate_limited");
+      this.scheduleRateLimitRelease(globalSession.rateLimitUntil);
       return false;
     }
+    globalSession.rateLimitUntil = 0;
     return true;
   },
 
   initiateAuthFlow() {
     this.authService.initiateAuthFlow();
-    if (!globalSession.isAuthenticating && !globalSession.refreshToken) {
+    if (!globalSession.refreshToken) {
       this.initWithHeadlessAuth();
     }
   },
@@ -441,10 +792,7 @@ module.exports = NodeHelper.create({
       globalSession.refreshToken = token;
       this.refreshToken = token;
 
-      this.broadcastToAllClients("INIT_STATUS", {
-        status: "token_found",
-        message: "Token found - initializing HomeConnect"
-      });
+      this.emitInitStatus("token_found");
 
       this.initializeHomeConnect(token);
       return;
@@ -464,27 +812,24 @@ module.exports = NodeHelper.create({
     globalSession.refreshToken = tokens.refresh_token;
     globalSession.accessToken = tokens.access_token;
 
-    this.broadcastToAllClients("INIT_STATUS", {
-      status: "initializing_hc",
-      message: "Initializing HomeConnect..."
-    });
+    this.emitInitStatus("initializing_hc");
 
     return this.initializeHomeConnect(tokens.refresh_token);
   },
 
   handleHeadlessAuthError(error) {
-    globalSession.isAuthenticating = false;
+    this.transitionSessionState(SESSION_EVENTS.AUTH_ERROR, {
+      reason: error && error.message ? error.message : "headless_auth_error"
+    });
     moduleLog("error", "Headless authentication failed:", error.message);
 
-    this.broadcastToAllClients("AUTH_STATUS", {
-      status: "error",
+    this.emitAuthStatus("error", {
       message: `Authentication failed: ${error.message}`
     });
 
     if (error.message.includes("polling too quickly")) {
       moduleLog("info", "Rate limiting detected - will not retry automatically");
-      this.broadcastToAllClients("INIT_STATUS", {
-        status: "rate_limited",
+      this.emitInitStatus("rate_limited", {
         message: "Rate limit reached - please restart in 2 minutes"
       });
       return;
@@ -504,19 +849,18 @@ module.exports = NodeHelper.create({
     }
 
     moduleLog("error", "Max initialization attempts reached - aborting headless authentication");
-    this.broadcastToAllClients("INIT_STATUS", {
-      status: "auth_failed",
-      message: "Authentication failed - please check manually"
-    });
+    this.emitInitStatus("auth_failed");
   },
 
   async initWithHeadlessAuth() {
-    if (globalSession.isAuthenticating) {
+    if (this.isAuthFlowInProgress()) {
       moduleLog("warn", "Authentication already in progress, skipping...");
       return;
     }
 
-    globalSession.isAuthenticating = true;
+    this.transitionSessionState(SESSION_EVENTS.AUTH_START, {
+      reason: "headless_auth"
+    });
     this.initializationAttempts++;
 
     moduleLog(
@@ -525,9 +869,15 @@ module.exports = NodeHelper.create({
     );
 
     try {
-      const tokens = await this.authService.headlessAuth((notification, payload) =>
-        this.broadcastToAllClients(notification, payload)
-      );
+      const tokens = await this.authService.headlessAuth((notification, payload) => {
+        if (notification === "AUTH_STATUS") {
+          const status = payload && payload.status ? payload.status : "error";
+          this.emitAuthStatus(status, payload || {});
+          return;
+        }
+
+        this.broadcastToAllClients(notification, payload);
+      });
 
       await this.handleHeadlessAuthSuccess(tokens);
     } catch (error) {
@@ -538,26 +888,29 @@ module.exports = NodeHelper.create({
   handleHomeConnectInitSuccess() {
     moduleLog("info", "HomeConnect initialized successfully");
 
-    globalSession.isAuthenticated = true;
-    globalSession.isAuthenticating = false;
-
-    this.broadcastToAllClients("INIT_STATUS", {
-      status: "success",
-      message: "Successfully initialized"
+    this.transitionSessionState(SESSION_EVENTS.AUTH_SUCCESS, {
+      reason: "homeconnect_initialized"
     });
+
+    this.emitInitStatus("success");
 
     if (this.deviceService) {
       // Perform a single initial device fetch; further updates are normally
       // driven by SSE, with fallback polling only when SSE is unhealthy.
       setTimeout(() => {
-        this.deviceService.getDevices(this.sendSocketNotification.bind(this));
+        this.beginDeviceRefresh("initial_device_fetch");
+        this.deviceService.getDevices(
+          this.makeDeviceRefreshCallback("initial_device_fetch_dispatched")
+        );
       }, 2000);
     }
   },
 
   handleHomeConnectInitError(error) {
     moduleLog("error", "HomeConnect initialization failed:", error);
-    globalSession.isAuthenticating = false;
+    this.transitionSessionState(SESSION_EVENTS.AUTH_ERROR, {
+      reason: error && error.message ? error.message : "homeconnect_init_error"
+    });
 
     const errorMessage = error && error.message ? error.message : String(error || "");
     const normalizedMsg = typeof errorMessage === "string" ? errorMessage.toLowerCase() : "";
@@ -569,15 +922,9 @@ module.exports = NodeHelper.create({
         "Detected invalid_grant response while initializing HomeConnect - triggering re-authentication"
       );
 
-      this.broadcastToAllClients("INIT_STATUS", {
-        status: "reauth_required",
-        message: "Stored HomeConnect token invalid - re-authentication required"
-      });
+      this.emitInitStatus("reauth_required");
 
-      this.broadcastToAllClients("AUTH_STATUS", {
-        status: "token_invalid",
-        message: "Token invalid - starting new authentication flow"
-      });
+      this.emitAuthStatus("token_invalid");
 
       try {
         if (fs.existsSync(refreshTokenPath)) {
@@ -588,7 +935,6 @@ module.exports = NodeHelper.create({
         moduleLog("warn", "Failed to delete cached refresh token file:", fsErr);
       }
 
-      globalSession.isAuthenticated = false;
       globalSession.refreshToken = null;
       globalSession.accessToken = null;
       this.refreshToken = null;
@@ -597,11 +943,14 @@ module.exports = NodeHelper.create({
       // Reset attempts so a fresh authentication cycle can proceed without hitting attempt limits.
       this.initializationAttempts = 0;
       globalSession.lastAuthAttempt = 0;
-      globalSession.rateLimitUntil = 0;
+      this.setRateLimitUntil(0);
+      this.transitionSessionState(SESSION_EVENTS.RESET, {
+        reason: "invalid_grant"
+      });
 
       // Start a fresh headless authentication flow (shows QR code on clients)
       setTimeout(() => {
-        if (!globalSession.isAuthenticating) {
+        if (!this.isAuthFlowInProgress()) {
           this.initWithHeadlessAuth();
         }
       }, 1500);
@@ -609,8 +958,7 @@ module.exports = NodeHelper.create({
       return;
     }
 
-    this.broadcastToAllClients("INIT_STATUS", {
-      status: "hc_error",
+    this.emitInitStatus("hc_error", {
       message: `HomeConnect error: ${error.message}`
     });
   },
@@ -622,9 +970,11 @@ module.exports = NodeHelper.create({
       globalSession.refreshToken = refreshToken;
       // After init has completed (subscriptions established), refresh devices on token update.
       // During initial init (subscribed === false), skip to avoid double fetching.
-      if (this.subscribed && this.deviceService) {
+      if (this.deviceService && this.deviceService.subscribed) {
         moduleLog("info", "Token updated post-init - refreshing device list");
+        this.beginDeviceRefresh("token_refresh_device_sync");
         this.deviceService.getDevices(this.sendSocketNotification.bind(this));
+        this.endDeviceRefresh("token_refresh_device_sync_dispatched");
       } else {
         moduleLog("info", "Token updated during initialization");
       }
@@ -634,6 +984,9 @@ module.exports = NodeHelper.create({
   async initializeHomeConnect(refreshToken) {
     return new Promise((resolve, reject) => {
       moduleLog("info", "Initializing HomeConnect with token...");
+      this.transitionSessionState(SESSION_EVENTS.HC_INIT_START, {
+        reason: "initialize_homeconnect"
+      });
       if (!HomeConnect) {
         HomeConnect = require("./lib/homeconnect-api.js");
       }
@@ -651,7 +1004,9 @@ module.exports = NodeHelper.create({
 
       const initTimeout = setTimeout(() => {
         moduleLog("error", "HomeConnect initialization timeout");
-        globalSession.isAuthenticating = false;
+        this.transitionSessionState(SESSION_EVENTS.AUTH_ERROR, {
+          reason: "homeconnect_init_timeout"
+        });
         reject(new Error("HomeConnect initialization timeout"));
       }, 30000);
 
@@ -676,8 +1031,9 @@ module.exports = NodeHelper.create({
 
   retryAuthentication() {
     moduleLog("info", "Manual authentication retry");
-    globalSession.isAuthenticated = false;
-    globalSession.isAuthenticating = false;
+    this.transitionSessionState(SESSION_EVENTS.RESET, {
+      reason: "manual_retry_auth"
+    });
     globalSession.accessToken = null;
     globalSession.refreshToken = null;
     globalSession.clientInstances.clear();
@@ -691,7 +1047,6 @@ module.exports = NodeHelper.create({
         this.deviceService.shutdown();
       }
     }
-    this.subscribed = false;
     if (this.activeProgramManager && typeof this.activeProgramManager.clearAll === "function") {
       this.activeProgramManager.clearAll();
     }
@@ -730,9 +1085,7 @@ module.exports = NodeHelper.create({
 
     moduleLog("info", `Fetching active programs for ${deviceArray.length} device(s)`);
 
-    this.broadcastToAllClients("INIT_STATUS", {
-      status: "fetching_programs",
-      message: "Fetching active programs...",
+    this.emitInitStatus("fetching_programs", {
       instanceId: requestingInstanceId
     });
 
@@ -847,12 +1200,24 @@ module.exports = NodeHelper.create({
       }
     } catch (error) {
       this.handleActiveProgramFetchError(error);
+    } finally {
+      this.endProgramFetch("active_program_cycle_finished");
     }
   },
 
   handleActiveProgramFetchError(error) {
     if (!this.programService) return;
     this.programService.handleActiveProgramFetchError(error, this.broadcastToAllClients.bind(this));
+    if (globalSession.rateLimitUntil > Date.now()) {
+      this.transitionSessionState(SESSION_EVENTS.RATE_LIMIT_HIT, {
+        reason: "active_program_429"
+      });
+      this.scheduleRateLimitRelease(globalSession.rateLimitUntil);
+    } else {
+      this.transitionSessionState(SESSION_EVENTS.ERROR, {
+        reason: error && error.message ? error.message : "active_program_error"
+      });
+    }
   },
 
   applyProgramResult(result) {

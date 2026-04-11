@@ -16,9 +16,9 @@ function installFrontendGlobals() {
   };
 
   globalThis.Log = {
-    log() { },
-    warn() { },
-    error() { }
+    log() {},
+    warn() {},
+    error() {}
   };
 
   globalThis.config = { language: "en" };
@@ -105,8 +105,8 @@ function createInstance(overrides = {}) {
     translate(key) {
       return key;
     },
-    updateDom() { },
-    sendSocketNotification() { }
+    updateDom() {},
+    sendSocketNotification() {}
   };
 }
 
@@ -206,7 +206,7 @@ function createInstance(overrides = {}) {
       ]
     });
     const selectedDom = selectedProgramInstance.getDom();
-    assert.ok(selectedDom.innerHTML.includes("NO_ACTIVE_APPLIANCES"));
+    assert.ok(selectedDom.innerHTML.includes("Dryer"));
     assert.ok(!selectedDom.innerHTML.includes("Synthetics"));
     assert.ok(!selectedDom.innerHTML.includes("SELECTED_PROGRAM"));
     assert.ok(!selectedDom.innerHTML.includes("Cupboard Dry Plus • Low Heat"));
@@ -227,7 +227,7 @@ function createInstance(overrides = {}) {
       ]
     });
     const runningSelectedDom = runningSelectedProgramInstance.getDom();
-    assert.ok(runningSelectedDom.innerHTML.includes("NO_ACTIVE_APPLIANCES"));
+    assert.ok(runningSelectedDom.innerHTML.includes("Dryer"));
     assert.ok(!runningSelectedDom.innerHTML.includes("Synthetics"));
     assert.ok(!runningSelectedDom.innerHTML.includes("fa-play"));
 
@@ -546,6 +546,39 @@ function createInstance(overrides = {}) {
     const rateLimitDom = rateLimitInstance.getDom();
     assert.ok(rateLimitDom.innerHTML.includes("HTTP 429"));
     assert.ok(rateLimitDom.innerHTML.includes("Rate limit active - please wait 120s"));
+
+    const debugSessionInstance = createInstance({
+      config: {
+        logLevel: "debug"
+      },
+      devices: [
+        {
+          name: "Washer",
+          type: "Washer",
+          PowerState: "On",
+          ActiveProgramName: "Eco 40-60",
+          ActiveProgramSource: "active"
+        }
+      ],
+      debugStats: {
+        lastApiCallTs: Date.now(),
+        lastSseEventTs: Date.now(),
+        apiCounters: { homeappliances: 3 },
+        session: {
+          state: "rate_limited",
+          event: "RATE_LIMIT_HIT",
+          updatedAt: Date.now(),
+          reason: "active_program_429",
+          rateLimitRemainingMs: 120000
+        }
+      }
+    });
+    const debugSessionDom = debugSessionInstance.getDom();
+    assert.ok(debugSessionDom.innerHTML.includes("session state:"));
+    assert.ok(debugSessionDom.innerHTML.includes("rate_limited"));
+    assert.ok(debugSessionDom.innerHTML.includes("session reason:"));
+    assert.ok(debugSessionDom.innerHTML.includes("active_program_429"));
+    assert.ok(debugSessionDom.innerHTML.includes("rate limit remaining:"));
 
     console.log("frontend-render.test.js OK");
   } finally {
