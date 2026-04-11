@@ -354,6 +354,18 @@ module.exports = NodeHelper.create({
     this.transitionSessionState(SESSION_EVENTS.DEVICE_REFRESH_DONE, { reason });
   },
 
+  makeDeviceRefreshCallback(doneReason) {
+    const sendSocketNotification = this.sendSocketNotification.bind(this);
+    let refreshCompleted = false;
+    return (notification, payload) => {
+      sendSocketNotification(notification, payload);
+      if (!refreshCompleted) {
+        refreshCompleted = true;
+        this.endDeviceRefresh(doneReason);
+      }
+    };
+  },
+
   beginProgramFetch(reason) {
     this.transitionSessionState(SESSION_EVENTS.PROGRAM_FETCH_START, { reason });
   },
@@ -578,8 +590,7 @@ module.exports = NodeHelper.create({
         forceRefresh,
         sseHealthy
       });
-      this.deviceService.getDevices(this.sendSocketNotification.bind(this));
-      this.endDeviceRefresh("state_refresh_dispatched");
+      this.deviceService.getDevices(this.makeDeviceRefreshCallback("state_refresh_dispatched"));
     } else if (hasDevices) {
       moduleLog("debug", "State refresh served from cache (SSE data)", {
         requester,
@@ -587,7 +598,6 @@ module.exports = NodeHelper.create({
         sseHealthy
       });
       this.deviceService.broadcastDevices(this.sendSocketNotification.bind(this));
-      this.endDeviceRefresh("state_refresh_cache");
     } else {
       moduleLog("warn", "State refresh unable to respond - no device data available", {
         requester
@@ -753,13 +763,17 @@ module.exports = NodeHelper.create({
   checkRateLimit() {
     const now = Date.now();
     if (now - globalSession.lastAuthAttempt < globalSession.MIN_AUTH_INTERVAL) {
+      globalSession.rateLimitUntil =
+        globalSession.lastAuthAttempt + globalSession.MIN_AUTH_INTERVAL;
       this.transitionSessionState(SESSION_EVENTS.RATE_LIMIT_HIT, {
         reason: "auth_interval_rate_limit"
       });
       moduleLog("warn", "Rate limit: waiting before next auth attempt");
       this.emitInitStatus("rate_limited");
+      this.scheduleRateLimitRelease(globalSession.rateLimitUntil);
       return false;
     }
+    globalSession.rateLimitUntil = 0;
     return true;
   },
 
@@ -885,8 +899,9 @@ module.exports = NodeHelper.create({
       // driven by SSE, with fallback polling only when SSE is unhealthy.
       setTimeout(() => {
         this.beginDeviceRefresh("initial_device_fetch");
-        this.deviceService.getDevices(this.sendSocketNotification.bind(this));
-        this.endDeviceRefresh("initial_device_fetch_dispatched");
+        this.deviceService.getDevices(
+          this.makeDeviceRefreshCallback("initial_device_fetch_dispatched")
+        );
       }, 2000);
     }
   },

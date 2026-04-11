@@ -1174,6 +1174,13 @@ Module.register("MMM-HomeConnect2", {
       return "";
     }
     const formatTime = (ts) => (ts ? new Date(ts).toLocaleTimeString() : "n/a");
+    const escapeHtml = (str) =>
+      String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
     const rows = [];
 
     // Status from INIT_STATUS gets rendered only in debug mode
@@ -1202,18 +1209,18 @@ Module.register("MMM-HomeConnect2", {
         ? Math.max(0, Math.ceil(session.rateLimitRemainingMs / 1000))
         : 0;
       rows.push(
-        `<div class='hc-debug-row'><span class='hc-debug-label'>session state:</span> ${
+        `<div class='hc-debug-row'><span class='hc-debug-label'>session state:</span> ${escapeHtml(
           session.state || "n/a"
-        }</div>`
+        )}</div>`
       );
       rows.push(
-        `<div class='hc-debug-row'><span class='hc-debug-label'>session event:</span> ${
+        `<div class='hc-debug-row'><span class='hc-debug-label'>session event:</span> ${escapeHtml(
           session.event || "n/a"
-        }</div>`
+        )}</div>`
       );
       if (session.reason) {
         rows.push(
-          `<div class='hc-debug-row'><span class='hc-debug-label'>session reason:</span> ${session.reason}</div>`
+          `<div class='hc-debug-row'><span class='hc-debug-label'>session reason:</span> ${escapeHtml(session.reason)}</div>`
         );
       }
       rows.push(
