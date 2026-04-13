@@ -70,7 +70,7 @@ function loadModuleDefinition() {
   let definition = null;
 
   global.Module = {
-    register(name, moduleDefinition) {
+    register(_name, moduleDefinition) {
       definition = moduleDefinition;
       return moduleDefinition;
     }
