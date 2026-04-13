@@ -1023,7 +1023,7 @@ Module.register("MMM-HomeConnect2", {
     let container = `<div class='${containerClasses.join(" ")}'>`;
     if (this.config.showDeviceIcon) {
       if (displayState.imageName) {
-        container += `<img src='modules/MMM-HomeConnect2/Icons/${displayState.imageName}' class='device_img'>`;
+        container += `<img src='modules/MMM-HomeConnect2/icons/${displayState.imageName}' class='device_img'>`;
       } else {
         container += `<div class='device_img deviceIconFallback'><i class='fa ${displayState.fallbackIconClass}'></i></div>`;
       }

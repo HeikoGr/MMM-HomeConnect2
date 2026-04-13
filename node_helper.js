@@ -519,9 +519,9 @@ module.exports = NodeHelper.create({
     moduleLog("debug", `Processing CONFIG notification for instance: ${this.instanceId}`);
     moduleLog("debug", `Registered clients: ${globalSession.clientInstances.size}`);
 
-    // Wenn bereits Debug-Informationen gesammelt wurden, sofort einen Snapshot
-    // an alle bekannten Clients senden, damit auch frisch geladene Instanzen
-    // das Debug-Panel ohne weitere Events sehen.
+    // If debug information has already been collected, immediately send a snapshot
+    // to all known clients so newly loaded instances can see the debug panel
+    // without waiting for additional events.
     try {
       if (this.debugStats && (this.debugStats.lastApiCallTs || this.debugStats.lastSseEventTs)) {
         this.broadcastDebugStats();

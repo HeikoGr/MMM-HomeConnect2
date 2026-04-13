@@ -15,7 +15,7 @@ Thanks for wanting to contribute! Here are simple steps:
 - Run `node --run lint` and `node --run test:spelling`.
 
 4) Style
-- Use ESLint and Prettier (see `package.json` scripts).
+- Use Biome (see `package.json` scripts).
 
 5) PR checklist
 - Does `node --run lint` pass?
@@ -25,4 +25,4 @@ Thanks for wanting to contribute! Here are simple steps:
 If unsure, open an issue first.
 
 ---
-Kurze Version: Fork → Branch → Arbeit → `node --run lint` → PR öffnen.
+Short version: Fork -> Branch -> Work -> `node --run lint` -> Open PR.

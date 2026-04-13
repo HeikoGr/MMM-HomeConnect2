@@ -1,20 +1,20 @@
 # API Call And Event Flow Diagrams
 
-Dieses Dokument sammelt die bisher erstellten Mermaid-Diagramme zur Frage:
-Wann werden welche Home-Connect-API-Calls ausgefuehrt und wie werden Events verarbeitet.
+This document collects the Mermaid diagrams created so far for the question:
+When are which Home Connect API calls executed, and how are events processed.
 
-## Diagramm 1: Gesamtfluss als Flowchart
+## Diagram 1: Overall Flow as Flowchart
 
 ```mermaid
 flowchart TD
   %% =========================
   %% OVERVIEW
   %% =========================
-  A[Frontend startet Modul] --> B[sendSocketNotification: CONFIG]
+  A[Frontend starts module] --> B[sendSocketNotification: CONFIG]
   B --> C[Node Helper: handleConfigNotification]
 
-  C -->|Token vorhanden| D[initializeHomeConnect]
-  C -->|Kein Token| E[Headless Device Flow Auth]
+  C -->|Token available| D[initializeHomeConnect]
+  C -->|No token| E[Headless Device Flow Auth]
 
   %% =========================
   %% AUTH FLOW
@@ -22,47 +22,47 @@ flowchart TD
   subgraph AUTH[Auth / Token]
     E --> E1[POST /security/oauth/device_authorization]
     E1 --> E2[pollForToken: POST /security/oauth/token]
-    E2 -->|Intervall: deviceAuth.interval, mindestens 5s| E2
-    E2 -->|slow_down| E3[Intervall +5s, mindestens 10s]
+    E2 -->|Interval: deviceAuth.interval, minimum 5s| E2
+    E2 -->|slow_down| E3[Interval +5s, minimum 10s]
     E3 --> E2
     E2 -->|success| D
 
     D --> D1[refresh token to access token]
-    D1 --> D2[Token Refresh Timer setzen]
-    D2 -->|bei 90 Prozent von expires_in| D3[refreshTokens]
+    D1 --> D2[Set token refresh timer]
+    D2 -->|at 90 percent of expires_in| D3[refreshTokens]
     D3 --> D2
-    D3 -->|Fehler| D4[Retry in 60s]
+    D3 -->|Error| D4[Retry in 60s]
     D4 --> D3
   end
 
   %% =========================
   %% INITIAL DEVICE FETCH
   %% =========================
-  D --> F[Initialer Device-Fetch nach 2s]
+  D --> F[Initial device fetch after 2s]
   F --> G[DeviceService getDevices]
   G --> G1[API: getHomeAppliances]
-  G1 --> G2[Pro Device: getStatus + getSettings]
-  G2 --> G3[Broadcast MMM-HomeConnect_Update ans Frontend]
+  G1 --> G2[Per device: getStatus + getSettings]
+  G2 --> G3[Broadcast MMM-HomeConnect_Update to frontend]
 
   %% =========================
   %% SSE SUBSCRIPTION + HEARTBEAT
   %% =========================
-  G1 --> H[SSE Subscriptions aufbauen]
+  G1 --> H[Set up SSE subscriptions]
   H --> H0[Pre-SSE Token Refresh optional]
   H0 --> H1[subscribe NOTIFY + STATUS + EVENT]
-  H1 --> H2[SSE Heartbeat Monitor starten]
+  H1 --> H2[Start SSE heartbeat monitor]
 
-  subgraph SSE[SSE Laufzeitverhalten]
-    H2 --> H3[Heartbeat Check alle 60s]
-    H3 -->|keine Events fuer 3min oder laenger| H4[INIT_STATUS sse_stale]
-    H3 -->|Event empfangen| H5[applyEventToDevice + broadcastDevices]
-    H5 --> H6[INIT_STATUS sse_recovered falls vorher stale]
+  subgraph SSE[SSE Runtime Behavior]
+    H2 --> H3[Heartbeat check every 60s]
+    H3 -->|no events for 3min or longer| H4[INIT_STATUS sse_stale]
+    H3 -->|event received| H5[applyEventToDevice + broadcastDevices]
+    H5 --> H6[INIT_STATUS sse_recovered if previously stale]
 
     H1 --> H7[EventSource Error]
     H7 -->|HTTP 401/403| H8[recoverFromAuthError -> refreshTokens]
-    H8 -->|bei Fehler| H9[Recreate EventSources in 30s]
+    H8 -->|on error| H9[Recreate EventSources in 30s]
     H7 -->|HTTP 429| H9
-    H7 -->|sonstige Fehler| H10[Recreate EventSources in 5s]
+    H7 -->|other errors| H10[Recreate EventSources in 5s]
     H9 --> H1
     H10 --> H1
   end
@@ -70,21 +70,21 @@ flowchart TD
   %% =========================
   %% FRONTEND PERIODIC/UI TRIGGERS
   %% =========================
-  subgraph FE[Frontend Trigger]
-    G3 --> I[Frontend empfaengt MMM-HomeConnect_Update]
+  subgraph FE[Frontend triggers]
+    G3 --> I[Frontend receives MMM-HomeConnect_Update]
     I --> I1[updateDom]
     I --> I2[scheduleActiveProgramSnapshot]
     I --> I3[recoverMissingActivePrograms]
 
-    I2 -->|nur wenn seit letztem Request >= minActiveProgramIntervalMs| J[REQUEST_DEVICE_REFRESH mit haIds]
+    I2 -->|only if since last request >= minActiveProgramIntervalMs| J[REQUEST_DEVICE_REFRESH with haIds]
     I2 -->|Default minActiveProgramIntervalMs: 10min| J
 
-    I3 -->|nur 1x pro Recovery-Zyklus je Geraet| K[REQUEST_DEVICE_REFRESH mit bypassActiveProgramThrottle=true]
-    I3 -->|wenn ActiveProgramSource active oder Geraet nicht laeuft State reset| I3
+    I3 -->|only once per recovery cycle per device| K[REQUEST_DEVICE_REFRESH with bypassActiveProgramThrottle=true]
+    I3 -->|if ActiveProgramSource is active or device is not running state reset| I3
 
-    I4[UI Progress Timer] -->|alle 30s, min 5s| I1
-    I5[resume] -->|sofort| L[REQUEST_DEVICE_REFRESH forceRefresh true bypassActiveProgramThrottle true]
-    I5 -->|nach 1.5s| M[GET_ACTIVE_PROGRAMS force=true]
+    I4[UI Progress Timer] -->|every 30s, min 5s| I1
+    I5[resume] -->|immediately| L[REQUEST_DEVICE_REFRESH forceRefresh true bypassActiveProgramThrottle true]
+    I5 -->|after 1.5s| M[GET_ACTIVE_PROGRAMS force=true]
   end
 
   %% =========================
@@ -95,58 +95,58 @@ flowchart TD
   L --> N
 
   N --> N1{SSE healthy?}
-  N1 -->|ja und nicht forceRefresh| N2[broadcastDevices aus Cache]
-  N1 -->|nein oder forceRefresh| N3[getDevices dann HomeAppliances Status Settings]
-  N2 --> O[handleGetActivePrograms mit bypassActiveProgramThrottle]
+  N1 -->|yes and not forceRefresh| N2[broadcastDevices from cache]
+  N1 -->|no or forceRefresh| N3[getDevices then HomeAppliances Status Settings]
+  N2 --> O[handleGetActivePrograms with bypassActiveProgramThrottle]
   N3 --> O
 
   %% =========================
   %% ACTIVE PROGRAM FETCH PATH
   %% =========================
   M --> O
-  O --> O1{rateLimitUntil aktiv und force false}
-  O1 -->|ja| O2[INIT_STATUS device_error 429 plus remainingSeconds]
-  O1 -->|nein| O3{MIN_ACTIVE_PROGRAM_INTERVAL erfuellt?}
-  O3 -->|nein und force false| O4[Throttled kein API Call]
-  O3 -->|ja oder force true| O5[fetchActiveProgramsForDevices]
+  O --> O1{rateLimitUntil active and force false}
+  O1 -->|yes| O2[INIT_STATUS device_error 429 plus remainingSeconds]
+  O1 -->|no| O3{MIN_ACTIVE_PROGRAM_INTERVAL satisfied?}
+  O3 -->|no and force false| O4[Throttled no API call]
+  O3 -->|yes or force true| O5[fetchActiveProgramsForDevices]
 
-  subgraph PROGRAMS[Program API Calls pro Device]
-    O5 --> P1{Device connected ODER appearsActive?}
-    P1 -->|nein| P2[skip]
-    P1 -->|ja| P3[getActiveProgram]
-    P3 -->|200| P4[optional: getAvailableProgram fuer Constraints]
+  subgraph PROGRAMS[Program API calls per device]
+    O5 --> P1{Device connected OR appearsActive?}
+    P1 -->|no| P2[skip]
+    P1 -->|yes| P3[getActiveProgram]
+    P3 -->|200| P4[optional: getAvailableProgram for constraints]
     P3 -->|404| P5[getSelectedProgram]
-    P5 -->|wenn noetig| P6[getAvailablePrograms und getAvailableProgram]
+    P5 -->|if needed| P6[getAvailablePrograms and getAvailableProgram]
     P3 -->|429| P7[RateLimit Error]
     P4 --> P8[applyProgramResult]
     P5 --> P8
     P6 --> P8
-    P8 --> P9[zwischen Devices: 500ms Delay]
+    P8 --> P9[between devices: 500ms delay]
   end
 
-  O5 --> Q[Broadcast ACTIVE_PROGRAMS_DATA und MMM-HomeConnect_Update]
+  O5 --> Q[Broadcast ACTIVE_PROGRAMS_DATA and MMM-HomeConnect_Update]
   P7 --> R[handleActiveProgramFetchError]
-  R --> R1[rateLimitUntil gesetzt auf now plus Backoff]
-  R1 -->|Backoff zufaellig: 2, 4 oder 8 Minuten| R2[INIT_STATUS device_error 429]
+  R --> R1[rateLimitUntil set to now plus backoff]
+  R1 -->|Backoff random: 2, 4 or 8 minutes| R2[INIT_STATUS device_error 429]
 
   %% =========================
   %% RETRY MANAGER
   %% =========================
-  O5 --> S{No active program, aber appearsActive?}
-  S -->|ja| T[ActiveProgramManager.schedule]
+  O5 --> S{No active program, but appearsActive?}
+  S -->|yes| T[ActiveProgramManager.schedule]
   T -->|retryDelayMs: 5s| U[Retry getActiveProgram]
-  U -->|max 3 Versuche je Geraet| U
+  U -->|max 3 retries per device| U
   U -->|success| Q
 
   %% =========================
   %% VISUAL RATE LIMIT
   %% =========================
-  R2 --> V[Frontend erkennt statusCode 429 oder isRateLimit]
+  R2 --> V[Frontend detects statusCode 429 or isRateLimit]
   O2 --> V
-  V --> W[Anzeige Banner: HTTP 429 + Meldung + Wartezeit]
+  V --> W[Display banner: HTTP 429 + message + wait time]
 ```
 
-## Diagramm 2: Sequence Diagram
+## Diagram 2: Sequence Diagram
 
 ```mermaid
 sequenceDiagram
@@ -163,30 +163,30 @@ sequenceDiagram
   FE->>NH: CONFIG(instanceId, config)
   NH->>NH: updateActiveProgramInterval()\nDefault: 10 min
 
-  alt Refresh-Token vorhanden
+  alt Refresh-Token available
     NH->>HC: init(refresh_token)
-  else Kein Token
+  else No token
     NH->>HC: POST /security/oauth/device_authorization
-    loop Device-Flow Polling (min 5s Intervall)
+    loop Device flow polling (min 5s interval)
       NH->>HC: POST /security/oauth/token
       alt authorization_pending
-        HC-->>NH: warten
+        HC-->>NH: wait
       else slow_down
-        HC-->>NH: Intervall erhoehen (+5s, min 10s)
+        HC-->>NH: increase interval (+5s, min 10s)
       else success
         HC-->>NH: access_token + refresh_token
       end
     end
   end
 
-  Note over NH,HC: Nach erfolgreicher Init
+  Note over NH,HC: After successful init
   NH->>DS: attachClient(hc)
   NH->>PS: attachClient(hc)
-  NH->>DS: getDevices() (initial nach ~2s)
+  NH->>DS: getDevices() (initial after ~2s)
 
   DS->>HC: getHomeAppliances
-  HC-->>DS: Geraete-Liste
-  loop pro Geraet (wenn connected oder appearsActive)
+  HC-->>DS: Device list
+  loop per device (if connected or appearsActive)
     DS->>HC: getStatus
     DS->>HC: getSettings
   end
@@ -194,15 +194,15 @@ sequenceDiagram
   DS-->>FE: MMM-HomeConnect_Update(devices)
 
   Note over DS,SSE: SSE-Heartbeat
-  loop alle 60s (default)
+  loop every 60s (default)
     DS->>DS: heartbeat check
-    alt >=3 min keine Events
+    alt >=3 min no events
       DS-->>FE: INIT_STATUS(sse_stale)
-    else Event empfangen
+    else event received
       SSE-->>DS: event payload
       DS->>DS: applyEventToDevice + recordSseEvent
       DS-->>FE: MMM-HomeConnect_Update(devices)
-      DS-->>FE: INIT_STATUS(sse_recovered) (falls vorher stale)
+      DS-->>FE: INIT_STATUS(sse_recovered) (if previously stale)
     end
   end
 
@@ -211,52 +211,52 @@ sequenceDiagram
     FE->>FE: updateDom()
   end
 
-  Note over FE: Bei MMM-HomeConnect_Update
+  Note over FE: On MMM-HomeConnect_Update
   FE->>FE: recoverMissingActivePrograms()
-  alt fehlende ActiveProgram-Daten und laufend
-    FE->>NH: REQUEST_DEVICE_REFRESH(haIds, bypassActiveProgramThrottle=true)\n(max 1x pro Recovery-Zyklus je Geraet)
+  alt missing ActiveProgram data and running
+    FE->>NH: REQUEST_DEVICE_REFRESH(haIds, bypassActiveProgramThrottle=true)\n(max once per recovery cycle per device)
   end
 
   FE->>FE: scheduleActiveProgramSnapshot()
-  alt seit letztem Request >= minActiveProgramIntervalMs (default 10 min)
+  alt since last request >= minActiveProgramIntervalMs (default 10 min)
     FE->>NH: REQUEST_DEVICE_REFRESH(haIds)
   end
 
-  Note over NH: REQUEST_DEVICE_REFRESH verarbeitet
+  Note over NH: REQUEST_DEVICE_REFRESH processed
   NH->>NH: sseHealthy? subscribed && !heartbeatStale && hasDevices
-  alt forceRefresh oder SSE ungesund
+  alt forceRefresh or SSE unhealthy
     NH->>DS: getDevices() -> HomeAppliances/Status/Settings
-  else SSE gesund
-    NH->>DS: broadcastDevices() aus Cache
+  else SSE healthy
+    NH->>DS: broadcastDevices() from cache
   end
   NH->>NH: handleGetActivePrograms(force=bypassActiveProgramThrottle)
 
-  alt rateLimitUntil aktiv und force=false
+  alt rateLimitUntil active and force=false
     NH-->>FE: INIT_STATUS(device_error, 429, remainingSeconds)
-  else Throttle aktiv (MIN_ACTIVE_PROGRAM_INTERVAL)
-    NH->>NH: kein Program-API-Call
-  else ActiveProgram-Call erlaubt
+  else Throttle active (MIN_ACTIVE_PROGRAM_INTERVAL)
+    NH->>NH: no program API call
+  else ActiveProgram call allowed
     NH->>NH: fetchActiveProgramsForDevices()
-    loop pro Zielgeraet (sequentiell)
-      alt connected oder appearsActive
+    loop per target device (sequential)
+      alt connected or appearsActive
         NH->>PS: fetchActiveProgramForDevice(haId)
         PS->>HC: getActiveProgram
         alt 200 OK
           HC-->>PS: active program
-          opt Constraints laden
-            PS->>HC: getAvailableProgram(programKey)\n(Cache pro haId+programKey)
+          opt load constraints
+            PS->>HC: getAvailableProgram(programKey)\n(Cache per haId+programKey)
             HC-->>PS: program definition
           end
         else 404
           HC-->>PS: not found
           PS->>HC: getSelectedProgram
-          alt selected vorhanden
+          alt selected present
             HC-->>PS: selected program
-            opt Constraints laden (gecached)
+            opt load constraints (cached)
               PS->>HC: getAvailableProgram(programKey)
               HC-->>PS: program definition
             end
-          else fallback erlaubt (nicht fuer blockierte Typen)
+          else fallback allowed (not for blocked types)
             PS->>HC: getAvailablePrograms
             HC-->>PS: available list
             PS->>HC: getAvailableProgram(firstProgramKey)
@@ -266,20 +266,20 @@ sequenceDiagram
           HC-->>PS: rate limit
           PS->>PS: throw 429
         end
-        Note over NH: 500ms Delay zwischen Geraeten
-      else skip Geraet
+        Note over NH: 500ms delay between devices
+      else skip device
         NH->>NH: no call
       end
     end
 
-    alt Ergebnisse vorhanden
+    alt results available
       NH->>PS: applyProgramResult()
       NH-->>FE: MMM-HomeConnect_Update
       NH-->>FE: ACTIVE_PROGRAMS_DATA
     end
 
-    alt No active program aber appearsActive
-      NH->>APM: schedule retry\nDelay 5s, max 3 Versuche
+    alt No active program but appearsActive
+      NH->>APM: schedule retry\nDelay 5s, max 3 retries
       loop Retry
         APM->>PS: fetchActiveProgramForDevice
         PS->>HC: getActiveProgram
@@ -289,32 +289,32 @@ sequenceDiagram
 
   alt 429 in Program-Flow
     PS->>PS: rateLimitUntil = now + backoff
-    Note over PS: backoff zufaellig: 2 / 4 / 8 min
+    Note over PS: backoff random: 2 / 4 / 8 min
     PS-->>FE: INIT_STATUS(device_error, statusCode=429, isRateLimit=true)
-    FE->>FE: Banner HTTP 429 anzeigen
+    FE->>FE: show HTTP 429 banner
   end
 
-  Note over HC: Token-Refresh-Zyklus
-  loop bei ~90% token lifetime
+  Note over HC: Token refresh cycle
+  loop at ~90% token lifetime
     HC->>HC: refreshTokens()
-    alt Erfolg
+    alt Success
       HC->>HC: recreateEventSources()
-    else Fehler
-      HC->>HC: Retry nach 60s
+    else Error
+      HC->>HC: Retry after 60s
     end
   end
 
-  Note over SSE,HC: EventSource Fehlerbehandlung
+  Note over SSE,HC: EventSource error handling
   alt 401/403
     HC->>HC: auth recovery + refreshTokens
     HC->>HC: recreate in 30s (authDelayMs)
   else 429
     HC->>HC: recreate in 30s (authDelayMs)
-  else sonstige Fehler
+  else other errors
     HC->>HC: recreate in 5s (baseDelayMs)
   end
 
   Note over FE: resume()
   FE->>NH: REQUEST_DEVICE_REFRESH(forceRefresh=true, bypassActiveProgramThrottle=true)
-  FE->>NH: GET_ACTIVE_PROGRAMS(force=true) nach 1.5s
+  FE->>NH: GET_ACTIVE_PROGRAMS(force=true) after 1.5s
 ```

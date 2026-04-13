@@ -1,7 +1,7 @@
 # MMM-HomeConnect2 Documentation
 
-Der Einstieg fuer Installation, Konfiguration und Nutzung liegt in [../README.md](../README.md). Dieses Verzeichnis enthaelt Zusatzdokumentation, die nicht in die Root-README gehoert.
+The main entry point for installation, configuration, and usage is [../README.md](../README.md). This directory contains additional documentation that does not belong in the root README.
 
-## Inhalte
+## Contents
 
-- [DEVCONTAINER.md](DEVCONTAINER.md): Devcontainer-Setup, Lifecycle und vorinstallierte Tools
+- [DEVCONTAINER.md](DEVCONTAINER.md): Devcontainer setup, lifecycle, and preinstalled tools
