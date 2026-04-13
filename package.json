@@ -30,8 +30,8 @@
     "test": "node tests/run-all.js",
     "test:spelling": "cspell .",
     "mmcheck": "node scripts/magicmirror-check.mjs --devcontainer-only --current",
-    "deps:check": "npm outdated && npx npm-check-updates",
-    "deps:update": "npx npm-check-updates -u && npm install"
+    "deps:check": "npm outdated && ncu",
+    "deps:update": "ncu -u && npm install"
   },
   "lint-staged": {
     "*.{js,json,css,html}": [
