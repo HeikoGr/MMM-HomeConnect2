@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.4.11/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.4.12/schema.json",
   "vcs": {
     "enabled": true,
     "clientKind": "git",
@@ -8,13 +8,7 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": [
-      "**",
-      "!**/node_modules",
-      "!**/icons",
-      "!**/sounds",
-      "!**/.mm-module-checker"
-    ]
+    "includes": ["**", "!**/node_modules", "!**/icons", "!**/sounds", "!**/.mm-module-checker"]
   },
   "formatter": {
     "enabled": false,
@@ -52,26 +46,13 @@
       "arrowParentheses": "always",
       "bracketSameLine": false
     },
-    "globals": [
-      "Log",
-      "Module",
-      "config"
-    ]
+    "globals": ["Log", "Module", "config"]
   },
   "overrides": [
     {
-      "includes": [
-        "tests/**/*.js"
-      ],
+      "includes": ["tests/**/*.js"],
       "javascript": {
-        "globals": [
-          "describe",
-          "it",
-          "before",
-          "after",
-          "beforeEach",
-          "afterEach"
-        ]
+        "globals": ["describe", "it", "before", "after", "beforeEach", "afterEach"]
       }
     }
   ]
