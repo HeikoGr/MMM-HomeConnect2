@@ -43,7 +43,7 @@
     "qrcode": "^1.5.4"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.16"
+    "@biomejs/biome": "^2.5.1"
   },
   "bugs": {
     "url": "https://github.com/HeikoGr/MMM-HomeConnect2/issues"
