@@ -1,6 +1,6 @@
 {
   "name": "mmm-homeconnect2",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "MagicMirror² Module for Home Connect",
   "main": "MMM-HomeConnect2.js",
   "author": "HeikoGr",
@@ -31,7 +31,8 @@
     "test:spelling": "cspell .",
     "mmcheck": "node scripts/magicmirror-check.mjs --devcontainer-only --current",
     "deps:check": "npm outdated && ncu",
-    "deps:update": "ncu -u && npm install"
+    "deps:update": "ncu -u && npm install",
+    "biome:migrate": "biome migrate --write"
   },
   "lint-staged": {
     "*.{js,json,css,html}": [
@@ -43,7 +44,7 @@
     "qrcode": "^1.5.4"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.16"
+    "@biomejs/biome": "^2.5.1"
   },
   "bugs": {
     "url": "https://github.com/HeikoGr/MMM-HomeConnect2/issues"
