@@ -37,8 +37,8 @@ function createDeviceService(overrides = {}) {
     const globalSession = { clientInstances: new Set(["frontend-a", "frontend-b", "frontend-c"]) };
     const notifications = [];
     const service = new DeviceService({
-      logger: () => {},
-      broadcastToAllClients: () => {},
+      logger: () => { },
+      broadcastToAllClients: () => { },
       globalSession
     });
     service.devices.set("ha-1", { haId: "ha-1", name: "Washer" });
@@ -109,12 +109,12 @@ function createDeviceService(overrides = {}) {
     const hcMock = {
       subscribe: (type) => subscribeCalls.push(type),
       refreshTokens: () => Promise.resolve(),
-      closeEventSources: () => {}
+      closeEventSources: () => { }
     };
     sseService.attachClient(hcMock);
     sseService.setConfig({ enableSSEHeartbeat: false });
 
-    const handler = () => {};
+    const handler = () => { };
 
     sseService.subscribeToDeviceEvents(handler);
     await wait(0);
@@ -140,12 +140,12 @@ function createDeviceService(overrides = {}) {
     const { service } = createDeviceService();
     const closeCalls = [];
     const oldClient = {
-      setEventSourceRetryConfig: () => {},
+      setEventSourceRetryConfig: () => { },
       closeEventSources: (opts) => closeCalls.push(opts)
     };
     const newClient = {
-      setEventSourceRetryConfig: () => {},
-      closeEventSources: () => {}
+      setEventSourceRetryConfig: () => { },
+      closeEventSources: () => { }
     };
 
     service.attachClient(oldClient);
@@ -157,6 +157,45 @@ function createDeviceService(overrides = {}) {
       "Previous client should be closed when new client attached"
     );
     assert.deepStrictEqual(closeCalls[0], { devices: true, global: true });
+  }
+
+  // SSE heartbeat: detect silent stream before first event and trigger one recovery callback
+  {
+    let staleRecoveries = 0;
+    const { service, notifications } = createDeviceService({
+      onSseStale: () => {
+        staleRecoveries += 1;
+      }
+    });
+    const subscribeCalls = [];
+    const hcMock = {
+      subscribe: (type) => subscribeCalls.push(type),
+      refreshTokens: () => Promise.resolve(),
+      closeEventSources: () => { }
+    };
+
+    service.attachClient(hcMock);
+    service.devices.set("ha-1", { haId: "ha-1", name: "Washer" });
+    service.setConfig({
+      enableSSEHeartbeat: true,
+      sseHeartbeatCheckIntervalMs: 10,
+      sseHeartbeatStaleThresholdMs: 20,
+      sseRecoveryCooldownMs: 1000
+    });
+
+    service.subscribeToDeviceEvents(() => { });
+    await wait(80);
+
+    const staleEvent = notifications.find((entry) => entry.n === "INIT_STATUS");
+    assert.ok(staleEvent);
+    assert.strictEqual(staleEvent.p.status, "sse_stale");
+    assert.strictEqual(staleRecoveries, 1);
+    assert.strictEqual(
+      JSON.stringify(subscribeCalls),
+      JSON.stringify(["NOTIFY", "STATUS", "EVENT"])
+    );
+
+    service.shutdown();
   }
 
   console.log("device-service.test.js OK");

@@ -241,3 +241,94 @@ function setGlobalBuiltin(name, value) {
     delete require.cache[modulePath];
   }
 })();
+
+(async () => {
+  const originalFetch = getGlobalBuiltin("fetch");
+  const originalHeaders = getGlobalBuiltin("Headers");
+
+  class TestHeaders {
+    constructor(init) {
+      this.map = new Map();
+      if (init instanceof TestHeaders) {
+        for (const [key, value] of init.entries()) {
+          this.set(key, value);
+        }
+      } else if (init && typeof init === "object") {
+        for (const [key, value] of Object.entries(init)) {
+          this.set(key, value);
+        }
+      }
+    }
+
+    set(key, value) {
+      this.map.set(String(key).toLowerCase(), String(value));
+    }
+
+    has(key) {
+      return this.map.has(String(key).toLowerCase());
+    }
+
+    get(key) {
+      return this.map.get(String(key).toLowerCase()) || null;
+    }
+
+    entries() {
+      return this.map.entries();
+    }
+  }
+
+  setGlobalBuiltin("Headers", TestHeaders);
+  setGlobalBuiltin("fetch", (url, options = {}) => {
+    if (String(url).includes("security/oauth/token")) {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          access_token: "token-timeout",
+          refresh_token: "refresh-timeout",
+          expires_in: 3600
+        }),
+        text: async () => ""
+      });
+    }
+
+    return new Promise((_, reject) => {
+      if (options.signal && typeof options.signal.addEventListener === "function") {
+        options.signal.addEventListener("abort", () => {
+          const error = new Error("aborted");
+          error.name = "AbortError";
+          reject(error);
+        });
+      }
+    });
+  });
+
+  delete require.cache[modulePath];
+  const HomeConnectWithTimeoutStub = require(modulePath);
+  let hc = null;
+
+  try {
+    hc = new HomeConnectWithTimeoutStub("client", "secret", "refresh", {
+      acceptLanguage: "de",
+      requestTimeoutMs: 20
+    });
+    await hc.init({ isSimulated: false });
+
+    const result = await hc.getStatus("ha-timeout");
+    assert.strictEqual(result.success, false);
+    assert.strictEqual(result.statusCode, 408);
+    assert.ok(/Request timeout after 20ms/.test(result.error));
+  } finally {
+    if (hc) {
+      if (hc.tokenRefreshTimeout) {
+        clearTimeout(hc.tokenRefreshTimeout);
+        hc.tokenRefreshTimeout = null;
+      }
+      if (typeof hc.closeEventSources === "function") {
+        hc.closeEventSources({ devices: true, global: true });
+      }
+    }
+    setGlobalBuiltin("fetch", originalFetch);
+    setGlobalBuiltin("Headers", originalHeaders);
+    delete require.cache[modulePath];
+  }
+})();

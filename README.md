@@ -37,6 +37,8 @@ npm install
 
 ## Configuration
 
+All module options are optional unless stated otherwise. In practice, only clientId is required for normal use. New runtime protection settings such as apiRequestTimeoutMs and sseRecoveryCooldownMs have built-in defaults and do not need to be added to your MagicMirror config unless you want to override them.
+
 Simple config example for your MagicMirror `config/config.js`:
 
 ```js
@@ -48,6 +50,8 @@ Simple config example for your MagicMirror `config/config.js`:
         apiLanguage: "en",
         showDeviceIcon: true,
         showDeviceIfInfoIsAvailable: true,
+        apiRequestTimeoutMs: 15 * 1000,
+        sseRecoveryCooldownMs: 60 * 1000,
         progressRefreshIntervalMs: 30 * 1000,
         minActiveProgramIntervalMs: 10 * 60 * 1000
     }
@@ -55,12 +59,20 @@ Simple config example for your MagicMirror `config/config.js`:
 ```
 
 Common module options
-- apiLanguage: Preferred Home Connect API language. Examples: en, de, da, en-GB.
-- showDeviceIfInfoIsAvailable: Also display devices when program or status information is available even if the device is otherwise idle.
-- showAlwaysAllDevices: Always render all appliances, even when they are currently idle.
-- progressRefreshIntervalMs: Frontend-only refresh interval for countdown/progress rendering.
-- minActiveProgramIntervalMs: Backend throttle for active-program snapshot requests.
-- logLevel: Module log verbosity: none, error, warn, info, debug.
+- clientId: Required. Home Connect application client ID.
+- clientSecret: Optional. Only needed if your Home Connect application uses one.
+- apiLanguage: Optional. Preferred Home Connect API language. Examples: en, de, da, en-GB. Default: auto-detect from MagicMirror/browser language.
+- showDeviceIcon: Optional. Default: true.
+- showDeviceIfInfoIsAvailable: Optional. Also display devices when program or status information is available even if the device is otherwise idle. Default: true.
+- showAlwaysAllDevices: Optional. Always render all appliances, even when they are currently idle. Default: false.
+- enableSSEHeartbeat: Optional. Enable SSE health monitoring. Default: true.
+- sseHeartbeatCheckIntervalMs: Optional. SSE health check interval. Default: 60000.
+- sseHeartbeatStaleThresholdMs: Optional. Silence threshold before SSE is considered stale. Default: 180000.
+- apiRequestTimeoutMs: Optional. Hard timeout for Home Connect HTTP requests. Helps the module recover from hanging network/API calls during startup, resume, and refresh. Default: 15000.
+- sseRecoveryCooldownMs: Optional. Minimum delay between automatic watchdog recovery polls when the SSE stream stays silent after subscription or goes stale. Default: max(sseHeartbeatStaleThresholdMs, 2 x sseHeartbeatCheckIntervalMs, 60000).
+- progressRefreshIntervalMs: Optional. Frontend-only refresh interval for countdown/progress rendering. Default: 30000.
+- minActiveProgramIntervalMs: Optional. Backend throttle for non-forced active-program snapshot requests. Default: 600000.
+- logLevel: Optional. Module log verbosity: none, error, warn, info, debug.
 
 Display behavior
 - By default the module focuses on appliances with meaningful state such as active programs, failures, open doors, lighting, or other available program/status data.
@@ -86,6 +98,16 @@ Troubleshooting
 - If you see "polling too quickly" errors, wait a minute and try again.
 - Check logs with `pm2 logs mm` or in your terminal.
 - Token file: `MMM-HomeConnect2/refresh_token.json` in the module directory (do not commit this file).
+
+Network protection and request rate limits
+- The module does not poll the Home Connect API continuously in the background.
+- Regular device updates are expected to come from SSE after the initial device fetch.
+- Non-forced active-program snapshot requests are throttled by minActiveProgramIntervalMs, which defaults to 10 minutes.
+- Automatic active-program retries are capped at 3 attempts per device with a 5 second delay between attempts.
+- SSE watchdog recovery is rate-limited by sseRecoveryCooldownMs and defaults to at least 60 seconds, and in practice to at least the SSE stale threshold.
+- Concurrent overlapping active-program fetches are deduplicated so resume and recovery paths do not fan out into parallel program requests.
+- If the Home Connect API responds with HTTP 429, the module enters a backoff window before allowing more non-forced program fetches.
+- EventSource reconnects after SSE transport errors back off to 5 seconds for generic transport errors and 30 seconds for auth-related or 429-like SSE failures.
 
 Testing
 - `npm test` runs the deterministic unit test suite.

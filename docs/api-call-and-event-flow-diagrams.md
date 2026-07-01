@@ -55,6 +55,8 @@ flowchart TD
   subgraph SSE[SSE Runtime Behavior]
     H2 --> H3[Heartbeat check every 60s]
     H3 -->|no events for 3min or longer| H4[INIT_STATUS sse_stale]
+    H4 --> H4A[Trigger watchdog recovery poll]
+    H4A -->|cooldown default >= 60s and >= stale threshold| H4B[REQUEST_DEVICE_REFRESH forceRefresh true bypassActiveProgramThrottle true]
     H3 -->|event received| H5[applyEventToDevice + broadcastDevices]
     H5 --> H6[INIT_STATUS sse_recovered if previously stale]
 
@@ -104,7 +106,9 @@ flowchart TD
   %% ACTIVE PROGRAM FETCH PATH
   %% =========================
   M --> O
-  O --> O1{rateLimitUntil active and force false}
+  O --> O0{Program fetch already in flight for same or overlapping request?}
+  O0 -->|yes| O0A[Skip duplicate / overlapping request]
+  O0 -->|no| O1{rateLimitUntil active and force false}
   O1 -->|yes| O2[INIT_STATUS device_error 429 plus remainingSeconds]
   O1 -->|no| O3{MIN_ACTIVE_PROGRAM_INTERVAL satisfied?}
   O3 -->|no and force false| O4[Throttled no API call]
@@ -198,6 +202,8 @@ sequenceDiagram
     DS->>DS: heartbeat check
     alt >=3 min no events
       DS-->>FE: INIT_STATUS(sse_stale)
+      DS->>NH: watchdog recovery callback
+      NH->>DS: REQUEST_DEVICE_REFRESH(forceRefresh=true, bypassActiveProgramThrottle=true)
     else event received
       SSE-->>DS: event payload
       DS->>DS: applyEventToDevice + recordSseEvent
@@ -231,7 +237,9 @@ sequenceDiagram
   end
   NH->>NH: handleGetActivePrograms(force=bypassActiveProgramThrottle)
 
-  alt rateLimitUntil active and force=false
+  alt duplicate or overlapping fetch already in flight
+    NH->>NH: skip request
+  else rateLimitUntil active and force=false
     NH-->>FE: INIT_STATUS(device_error, 429, remainingSeconds)
   else Throttle active (MIN_ACTIVE_PROGRAM_INTERVAL)
     NH->>NH: no program API call

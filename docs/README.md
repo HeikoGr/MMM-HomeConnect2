@@ -5,3 +5,4 @@ The main entry point for installation, configuration, and usage is [../README.md
 ## Contents
 
 - [DEVCONTAINER.md](DEVCONTAINER.md): Devcontainer setup, lifecycle, and preinstalled tools
+- [api-call-and-event-flow-diagrams.md](api-call-and-event-flow-diagrams.md): Request, SSE, retry, throttle, and recovery flow diagrams

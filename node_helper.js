@@ -176,6 +176,8 @@ module.exports = NodeHelper.create({
     reason: null
   },
   rateLimitReleaseTimer: null,
+  activeProgramFetchInFlight: false,
+  activeProgramFetchSignature: null,
   debugStats: {
     lastApiCallTs: null,
     lastSseEventTs: null,
@@ -374,6 +376,17 @@ module.exports = NodeHelper.create({
     this.transitionSessionState(SESSION_EVENTS.PROGRAM_FETCH_DONE, { reason });
   },
 
+  buildActiveProgramFetchSignature(devices, requester) {
+    const deviceIds = Array.isArray(devices)
+      ? devices
+        .map((device) => device && device.haId)
+        .filter((haId) => typeof haId === "string" && haId.length)
+        .sort()
+      : [];
+
+    return `${requester || "unknown"}:${deviceIds.join(",") || "all"}`;
+  },
+
   init() {
     moduleLog("info", "init module helper: MMM-HomeConnect2 (session-based)");
     this.transitionSessionState(SESSION_EVENTS.CONFIG_RECEIVED, { reason: "helper_init" });
@@ -390,6 +403,7 @@ module.exports = NodeHelper.create({
       logger: moduleLog,
       broadcastToAllClients: this.broadcastToAllClients.bind(this),
       globalSession,
+      onSseStale: this.handleSseStale.bind(this),
       debugHooks: {
         recordApiCall: this.recordApiCall.bind(this),
         recordSseEvent: this.recordSseEvent.bind(this)
@@ -590,7 +604,22 @@ module.exports = NodeHelper.create({
         forceRefresh,
         sseHealthy
       });
-      this.deviceService.getDevices(this.makeDeviceRefreshCallback("state_refresh_dispatched"));
+      const sendSocketNotification = this.makeDeviceRefreshCallback("state_refresh_dispatched");
+      let followUpRequested = false;
+      this.deviceService.getDevices((notification, callbackPayload) => {
+        sendSocketNotification(notification, callbackPayload);
+
+        if (followUpRequested || notification !== "MMM-HomeConnect_Update") {
+          return;
+        }
+
+        followUpRequested = true;
+        this.handleGetActivePrograms({
+          instanceId: requester,
+          haIds,
+          force: bypassActiveProgramThrottle
+        });
+      });
     } else if (hasDevices) {
       moduleLog("debug", "State refresh served from cache (SSE data)", {
         requester,
@@ -607,11 +636,13 @@ module.exports = NodeHelper.create({
       });
     }
 
-    this.handleGetActivePrograms({
-      instanceId: requester,
-      haIds,
-      force: bypassActiveProgramThrottle
-    });
+    if (!shouldFetchDevices || !this.hc || this.isAuthFlowInProgress()) {
+      this.handleGetActivePrograms({
+        instanceId: requester,
+        haIds,
+        force: bypassActiveProgramThrottle
+      });
+    }
   },
 
   handleRetryAuth() {
@@ -686,7 +717,29 @@ module.exports = NodeHelper.create({
       force
     });
 
+    const fetchSignature = this.buildActiveProgramFetchSignature(targetDevices, requesterLabel);
+    if (this.activeProgramFetchInFlight) {
+      if (this.activeProgramFetchSignature === fetchSignature) {
+        moduleLog("debug", "Skipping duplicate active program request while fetch in flight", {
+          requester: requesterLabel,
+          deviceCount: targetDevices.length,
+          force
+        });
+        return;
+      }
+
+      moduleLog("debug", "Skipping overlapping active program request while another fetch is in flight", {
+        requester: requesterLabel,
+        deviceCount: targetDevices.length,
+        force,
+        activeFetchSignature: this.activeProgramFetchSignature
+      });
+      return;
+    }
+
     this.beginProgramFetch("active_program_request");
+    this.activeProgramFetchInFlight = true;
+    this.activeProgramFetchSignature = fetchSignature;
     globalSession.lastActiveProgramFetch = now;
     this.fetchActiveProgramsForDevices(targetDevices, requester);
   },
@@ -754,6 +807,20 @@ module.exports = NodeHelper.create({
   recordSseEvent() {
     this.debugStats.lastSseEventTs = Date.now();
     this.broadcastDebugStats();
+  },
+
+  handleSseStale(context = {}) {
+    if (!this.hc || this.isAuthFlowInProgress()) {
+      moduleLog("debug", "Ignoring SSE stale recovery while HomeConnect is unavailable", context);
+      return;
+    }
+
+    moduleLog("warn", "SSE watchdog triggered recovery poll", context);
+    this.handleStateRefreshRequest({
+      instanceId: "sse_watchdog",
+      forceRefresh: true,
+      bypassActiveProgramThrottle: true
+    });
   },
 
   readRefreshTokenFromFile() {
@@ -991,7 +1058,8 @@ module.exports = NodeHelper.create({
         HomeConnect = require("./lib/homeconnect-api.js");
       }
       this.hc = new HomeConnect(this.config.clientId, this.config.clientSecret, refreshToken, {
-        acceptLanguage: this.config.apiLanguage
+        acceptLanguage: this.config.apiLanguage,
+        requestTimeoutMs: this.config.apiRequestTimeoutMs
       });
 
       // attach client to services
@@ -1201,6 +1269,8 @@ module.exports = NodeHelper.create({
     } catch (error) {
       this.handleActiveProgramFetchError(error);
     } finally {
+      this.activeProgramFetchInFlight = false;
+      this.activeProgramFetchSignature = null;
       this.endProgramFetch("active_program_cycle_finished");
     }
   },

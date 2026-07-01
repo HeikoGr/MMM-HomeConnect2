@@ -28,6 +28,8 @@ function resetHelperState() {
     reason: null
   };
   helper.hc = null;
+  helper.activeProgramFetchInFlight = false;
+  helper.activeProgramFetchSignature = null;
   helper.setRateLimitUntil(0);
   if (helper.rateLimitReleaseTimer) {
     clearTimeout(helper.rateLimitReleaseTimer);
@@ -135,6 +137,72 @@ function resetHelperState() {
 
   await wait(70);
   assert.strictEqual(helper.sessionState, "ready");
+
+  // Forced state refresh should fetch active programs only after refreshed device data arrived.
+  resetHelperState();
+  const sequence = [];
+  helper.hc = {};
+  helper.sessionState = "ready";
+  helper.instanceId = "test-instance";
+  helper.deviceService = {
+    devices: new Map([["ha-1", { haId: "ha-1", name: "Washer" }]]),
+    subscribed: false,
+    heartbeatStale: true,
+    getDevices(callback) {
+      sequence.push("device_refresh_start");
+      callback("MMM-HomeConnect_Update", [{ haId: "ha-1", name: "Washer" }]);
+    }
+  };
+  helper.sendSocketNotification = (notification) => {
+    if (notification === "MMM-HomeConnect_Update") {
+      sequence.push("device_update_sent");
+    }
+  };
+  const originalHandleGetActivePrograms = helper.handleGetActivePrograms;
+  helper.handleGetActivePrograms = (payload = {}) => {
+    sequence.push(`program_fetch:${payload.instanceId || "unknown"}`);
+  };
+
+  helper.handleStateRefreshRequest({
+    instanceId: "test-instance",
+    forceRefresh: true,
+    bypassActiveProgramThrottle: true,
+    haIds: ["ha-1"]
+  });
+
+  assert.deepStrictEqual(sequence, [
+    "device_refresh_start",
+    "device_update_sent",
+    "program_fetch:test-instance"
+  ]);
+
+  helper.handleGetActivePrograms = originalHandleGetActivePrograms;
+
+  // Overlapping forced active-program requests should be deduplicated while one fetch is in flight.
+  resetHelperState();
+  helper.hc = {};
+  helper.sessionState = "ready";
+  helper.deviceService = {
+    devices: new Map([["ha-1", { haId: "ha-1", name: "Washer" }]])
+  };
+  let fetchCalls = 0;
+  helper.fetchActiveProgramsForDevices = () => {
+    fetchCalls += 1;
+  };
+
+  helper.handleGetActivePrograms({
+    instanceId: "resume-followup",
+    haIds: ["ha-1"],
+    force: true
+  });
+  helper.handleGetActivePrograms({
+    instanceId: "resume-followup",
+    haIds: ["ha-1"],
+    force: true
+  });
+
+  assert.strictEqual(fetchCalls, 1);
+  assert.strictEqual(helper.activeProgramFetchInFlight, true);
 
   helper.transitionSessionState("RESET", {
     reason: "test_reset"
