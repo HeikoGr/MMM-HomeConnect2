@@ -239,46 +239,6 @@ function resetHelperState() {
 
   helper.handleGetActivePrograms = staleOriginalHandleGetActivePrograms;
 
-  // Forced state refresh should fetch active programs only after refreshed device data arrived.
-  resetHelperState();
-  const sequence = [];
-  helper.hc = {};
-  helper.sessionState = "ready";
-  helper.instanceId = "test-instance";
-  helper.deviceService = {
-    devices: new Map([["ha-1", { haId: "ha-1", name: "Washer" }]]),
-    subscribed: false,
-    heartbeatStale: true,
-    getDevices(callback) {
-      sequence.push("device_refresh_start");
-      callback("MMM-HomeConnect_Update", [{ haId: "ha-1", name: "Washer" }]);
-    }
-  };
-  helper.sendSocketNotification = (notification) => {
-    if (notification === "MMM-HomeConnect_Update") {
-      sequence.push("device_update_sent");
-    }
-  };
-  const originalHandleGetActivePrograms = helper.handleGetActivePrograms;
-  helper.handleGetActivePrograms = (payload = {}) => {
-    sequence.push(`program_fetch:${payload.instanceId || "unknown"}`);
-  };
-
-  helper.handleStateRefreshRequest({
-    instanceId: "test-instance",
-    forceRefresh: true,
-    bypassActiveProgramThrottle: true,
-    haIds: ["ha-1"]
-  });
-
-  assert.deepStrictEqual(sequence, [
-    "device_refresh_start",
-    "device_update_sent",
-    "program_fetch:test-instance"
-  ]);
-
-  helper.handleGetActivePrograms = originalHandleGetActivePrograms;
-
   // An already authenticated session should start the initial device fetch immediately.
   resetHelperState();
   helper.hc = {};
@@ -325,7 +285,7 @@ function resetHelperState() {
   assert.deepStrictEqual(initSequence, [
     "device_refresh_start",
     "device_update_sent",
-    "program_fetch:test-instance:false"
+    "program_fetch:initial_sync:false"
   ]);
 
   helper.handleGetActivePrograms = originalInitHandleGetActivePrograms;

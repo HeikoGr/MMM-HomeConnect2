@@ -80,6 +80,33 @@ function createDeviceService(overrides = {}) {
     assert.strictEqual(updated.connected, false);
   }
 
+  // processDevice: initial settings fetch is skipped for standard devices like washers
+  {
+    const { service } = createDeviceService();
+    let statusCalls = 0;
+    let settingsCalls = 0;
+    service.fetchDeviceStatus = async () => {
+      statusCalls += 1;
+    };
+    service.fetchDeviceSettings = async () => {
+      settingsCalls += 1;
+    };
+
+    await service.processDevice(
+      {
+        haId: "ha-washer",
+        name: "Washer",
+        type: "Washer",
+        connected: true,
+        PowerState: "On"
+      },
+      0
+    );
+
+    assert.strictEqual(statusCalls, 1);
+    assert.strictEqual(settingsCalls, 0);
+  }
+
   // handleGetDevicesSuccess: broadcasts the base device list immediately before slow enrichment settles
   {
     const { service, notifications } = createDeviceService();

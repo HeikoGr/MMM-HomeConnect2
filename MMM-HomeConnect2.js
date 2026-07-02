@@ -232,7 +232,6 @@ Module.register("MMM-HomeConnect2", {
   instanceId: null,
   deviceRuntimeHints: {},
   lastActiveProgramRequestTs: 0,
-  activeProgramRecoveryRequestTsByHaId: {},
   debugStats: null,
   progressRefreshTimer: null,
 
@@ -286,40 +285,6 @@ Module.register("MMM-HomeConnect2", {
       clearInterval(this.progressRefreshTimer);
       this.progressRefreshTimer = null;
     }
-  },
-
-  getActiveProgramRecoveryCooldownMs() {
-    return 15 * 1000;
-  },
-
-  getActiveProgramRecoveryCycleKey(device, operationState) {
-    return [
-      device?.PowerState || "",
-      device?.OperationState || "",
-      operationState?.label || "",
-      device?.ActiveProgramSource || "",
-      device?.ActiveProgramName || ""
-    ].join("|");
-  },
-
-  getActiveProgramRecoveryState() {
-    if (!this.activeProgramRecoveryRequestTsByHaId) {
-      this.activeProgramRecoveryRequestTsByHaId = {};
-    }
-
-    return this.activeProgramRecoveryRequestTsByHaId;
-  },
-
-  recoverMissingActivePrograms(devices = this.devices) {
-    return;
-  },
-
-  requestStateRefresh(options = {}) {
-    const payload = {
-      instanceId: this.instanceId,
-      ...options
-    };
-    this.sendSocketNotification("REQUEST_DEVICE_REFRESH", payload);
   },
 
   loaded(callback) {
@@ -455,10 +420,6 @@ Module.register("MMM-HomeConnect2", {
 
   stop() {
     this.clearProgressRefreshTimer();
-  },
-
-  scheduleActiveProgramSnapshot() {
-    return;
   },
 
   getDeviceUtils() {

@@ -7,7 +7,6 @@ const DeviceService = require("./lib/device-service");
 const { refreshTokenPath } = require("./lib/module-paths");
 const ProgramService = require("./lib/program-service");
 const { deviceAppearsActive, getDeviceTypeMeta, isDeviceConnected } = require("./lib/device-utils");
-/* eslint-disable n/no-missing-require */
 const NodeHelper = require("node_helper"),
   globalSession = {
     accessToken: null, // Access token for API requests
@@ -577,9 +576,11 @@ module.exports = NodeHelper.create({
       { broadcast: false }
     );
 
-    if (this.hc && this.deviceService) {
-      this.deviceService.getDevices(this.sendSocketNotification.bind(this));
-    }
+    this.dispatchDeviceRefreshWithProgramSync({
+      reason: "session_active_refresh",
+      requester: this.instanceId || "session_active",
+      forcePrograms: false
+    });
   },
 
   notifyAuthInProgress() {
@@ -624,7 +625,12 @@ module.exports = NodeHelper.create({
     // to all known clients so newly loaded instances can see the debug panel
     // without waiting for additional events.
     try {
-      if (this.debugStats && (this.debugStats.lastApiCallTs || this.debugStats.lastSseEventTs)) {
+      if (
+        this.debugStats &&
+        (this.debugStats.lastApiCallTs ||
+          this.debugStats.lastSseEventTs ||
+          this.debugStats.lastSseTrafficTs)
+      ) {
         this.broadcastDebugStats();
       }
     } catch (e) {
@@ -664,71 +670,6 @@ module.exports = NodeHelper.create({
         this.hc.setAcceptLanguage(this.config.apiLanguage);
       }
       this.handleConfigNotificationSubsequent();
-    }
-  },
-
-  handleStateRefreshRequest(payload = {}) {
-    const requester = payload.instanceId || this.instanceId || "unknown";
-    if (!this.deviceService) {
-      moduleLog("warn", "State refresh requested but DeviceService unavailable", {
-        requester
-      });
-      return;
-    }
-
-    const forceRefresh = Boolean(payload.forceRefresh);
-    const bypassActiveProgramThrottle = Boolean(payload.bypassActiveProgramThrottle);
-    const haIds = Array.isArray(payload.haIds) ? payload.haIds : null;
-    const hasDevices = this.deviceService.devices && this.deviceService.devices.size > 0;
-    const sseHealthy =
-      this.deviceService.subscribed && !this.deviceService.heartbeatStale && hasDevices;
-    const shouldFetchDevices = forceRefresh || !sseHealthy;
-
-    if (shouldFetchDevices && this.hc && !this.isAuthFlowInProgress()) {
-      this.beginDeviceRefresh("state_refresh_poll");
-      moduleLog("info", "State refresh requires polling Home Connect", {
-        requester,
-        forceRefresh,
-        sseHealthy
-      });
-      const sendSocketNotification = this.makeDeviceRefreshCallback("state_refresh_dispatched");
-      let followUpRequested = false;
-      this.deviceService.getDevices((notification, callbackPayload) => {
-        sendSocketNotification(notification, callbackPayload);
-
-        if (followUpRequested || notification !== "MMM-HomeConnect_Update") {
-          return;
-        }
-
-        followUpRequested = true;
-        this.handleGetActivePrograms({
-          instanceId: requester,
-          haIds,
-          force: bypassActiveProgramThrottle
-        });
-      });
-    } else if (hasDevices) {
-      moduleLog("debug", "State refresh served from cache (SSE data)", {
-        requester,
-        forceRefresh,
-        sseHealthy
-      });
-      this.deviceService.broadcastDevices(this.sendSocketNotification.bind(this));
-    } else {
-      moduleLog("warn", "State refresh unable to respond - no device data available", {
-        requester
-      });
-      this.transitionSessionState(SESSION_EVENTS.ERROR, {
-        reason: "state_refresh_no_devices"
-      });
-    }
-
-    if (!shouldFetchDevices || !this.hc || this.isAuthFlowInProgress()) {
-      this.handleGetActivePrograms({
-        instanceId: requester,
-        haIds,
-        force: bypassActiveProgramThrottle
-      });
     }
   },
 
@@ -849,10 +790,6 @@ module.exports = NodeHelper.create({
     switch (notification) {
       case "CONFIG":
         this.handleConfigNotification(safePayload);
-        break;
-
-      case "REQUEST_DEVICE_REFRESH":
-        this.handleStateRefreshRequest(safePayload);
         break;
 
       case "RETRY_AUTH":

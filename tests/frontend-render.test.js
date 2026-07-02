@@ -100,7 +100,6 @@ function createInstance(overrides = {}) {
     debugStats: overrides.debugStats || null,
     lastInitStatus: overrides.lastInitStatus || null,
     deviceRuntimeHints: overrides.deviceRuntimeHints || {},
-    activeProgramRecoveryRequestTsByHaId: overrides.activeProgramRecoveryRequestTsByHaId || {},
     instanceId: "test-instance",
     translate(key) {
       return key;
@@ -332,22 +331,6 @@ function createInstance(overrides = {}) {
       delayedStartNotifications.length,
       0,
       "Expected no recovery request for delayed start with selected program"
-    );
-
-    const snapshotNotifications = [];
-    const snapshotInstance = createInstance({
-      devices: [{ haId: "washer-1", name: "Washer" }]
-    });
-    snapshotInstance.sendSocketNotification = (notification, payload) => {
-      snapshotNotifications.push({ notification, payload });
-    };
-
-    snapshotInstance.scheduleActiveProgramSnapshot();
-
-    assert.strictEqual(
-      snapshotNotifications.length,
-      0,
-      "Expected no frontend-induced initial program snapshot request"
     );
 
     const selectedDoorOpenInstance = createInstance({
