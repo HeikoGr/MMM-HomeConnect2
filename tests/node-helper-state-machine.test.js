@@ -179,6 +179,23 @@ function resetHelperState() {
 
   helper.handleGetActivePrograms = originalHandleGetActivePrograms;
 
+  // An already authenticated session should start the initial device fetch immediately.
+  resetHelperState();
+  helper.hc = {};
+  helper.sessionState = "ready";
+  let immediateGetDevicesCalls = 0;
+  helper.deviceService = {
+    getDevices() {
+      immediateGetDevicesCalls += 1;
+    }
+  };
+  helper.sendSocketNotification = () => { };
+  helper.emitInitStatus = () => { };
+
+  helper.handleSessionAlreadyActive();
+
+  assert.strictEqual(immediateGetDevicesCalls, 1);
+
   // Overlapping forced active-program requests should be deduplicated while one fetch is in flight.
   resetHelperState();
   helper.hc = {};

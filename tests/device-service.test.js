@@ -80,6 +80,48 @@ function createDeviceService(overrides = {}) {
     assert.strictEqual(updated.connected, false);
   }
 
+  // handleGetDevicesSuccess: broadcasts the base device list immediately before slow enrichment settles
+  {
+    const { service, notifications } = createDeviceService();
+    const sendSocketNotificationCalls = [];
+    service.attachClient({
+      subscribe: () => { },
+      refreshTokens: () => Promise.resolve(),
+      closeEventSources: () => { }
+    });
+    service.setConfig({ enableSSEHeartbeat: false });
+    service.fetchDeviceStatus = () => wait(40);
+    service.fetchDeviceSettings = () => wait(40);
+
+    service.handleGetDevicesSuccess(
+      {
+        data: {
+          homeappliances: [{ haId: "ha-1", name: "Washer", connected: true }]
+        }
+      },
+      (n, payload) => {
+        sendSocketNotificationCalls.push({ n, payload });
+      }
+    );
+
+    assert.ok(
+      sendSocketNotificationCalls.some((entry) => entry.n === "MMM-HomeConnect_Update"),
+      "Expected an immediate device broadcast"
+    );
+    assert.strictEqual(
+      notifications.some((entry) => entry.n === "INIT_STATUS" && entry.p.status === "complete"),
+      false,
+      "Expected device enrichment to still be pending immediately after the first broadcast"
+    );
+
+    await wait(70);
+
+    assert.ok(
+      notifications.some((entry) => entry.n === "INIT_STATUS" && entry.p.status === "complete"),
+      "Expected completion status after slow enrichment settles"
+    );
+  }
+
   // handleGetDevicesError: broadcasts device_error
   {
     const { service, notifications } = createDeviceService();

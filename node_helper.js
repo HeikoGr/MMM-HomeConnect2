@@ -509,9 +509,7 @@ module.exports = NodeHelper.create({
     );
 
     if (this.hc && this.deviceService) {
-      setTimeout(() => {
-        this.deviceService.getDevices(this.sendSocketNotification.bind(this));
-      }, 1000);
+      this.deviceService.getDevices(this.sendSocketNotification.bind(this));
     }
   },
 
@@ -536,9 +534,7 @@ module.exports = NodeHelper.create({
         { broadcast: false }
       );
 
-      setTimeout(() => {
-        this.deviceService.broadcastDevices(this.sendSocketNotification.bind(this));
-      }, 500);
+      this.deviceService.broadcastDevices(this.sendSocketNotification.bind(this));
     } else if (this.isAuthFlowInProgress()) {
       this.notifyAuthInProgress();
     }
