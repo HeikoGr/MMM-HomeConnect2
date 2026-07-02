@@ -248,8 +248,8 @@ Module.register("MMM-HomeConnect2", {
     showDeviceIfFailure: true,
     showDeviceIfInfoIsAvailable: true,
     enableSSEHeartbeat: true, // Enable SSE heartbeat checks by default
-    sseHeartbeatCheckIntervalMs: 60 * 1000, // 1 minute
-    sseHeartbeatStaleThresholdMs: 3 * 60 * 1000, // 3 minutes
+    sseHeartbeatCheckIntervalMs: 10 * 1000, // 10 seconds
+    sseHeartbeatStaleThresholdMs: 70 * 1000, // 70 seconds
     apiRequestTimeoutMs: 15 * 1000,
     progressRefreshIntervalMs: 30 * 1000,
     minActiveProgramIntervalMs: 10 * 60 * 1000, // 10 minutes between active program fetches (backend throttle)
@@ -311,66 +311,7 @@ Module.register("MMM-HomeConnect2", {
   },
 
   recoverMissingActivePrograms(devices = this.devices) {
-    const deviceUtils = this.getDeviceUtils();
-    const requestState = this.getActiveProgramRecoveryState();
-    const recoverHaIds = [];
-    const now = Date.now();
-
-    devices.forEach((device) => {
-      const haId = device?.haId || device?.haid || device?.id;
-      if (!haId) {
-        return;
-      }
-
-      const operationState = getOperationStateInfo(device);
-      const appearsActive = deviceUtils.deviceAppearsActive(device);
-      const running =
-        device.PowerState !== "Off" &&
-        (operationState.isActive || appearsActive) &&
-        !operationState.isDelayedStart;
-      const cycleKey = this.getActiveProgramRecoveryCycleKey(device, operationState);
-      const existingRequest = requestState[haId];
-
-      if (device.ActiveProgramSource === "active") {
-        delete requestState[haId];
-        return;
-      }
-
-      if (!running) {
-        delete requestState[haId];
-        return;
-      }
-
-      const needsRecovery =
-        device.ActiveProgramSource === "selected" ||
-        !device.ActiveProgramName ||
-        !device.ActiveProgramSource;
-
-      if (!needsRecovery) {
-        return;
-      }
-
-      if (existingRequest && existingRequest.cycleKey === cycleKey) {
-        return;
-      }
-
-      requestState[haId] = {
-        cycleKey,
-        requestedAt: now
-      };
-      recoverHaIds.push(haId);
-    });
-
-    if (!recoverHaIds.length) {
-      return;
-    }
-
-    this.lastActiveProgramRequestTs = now;
-    this.sendSocketNotification("GET_ACTIVE_PROGRAMS", {
-      instanceId: this.instanceId,
-      haIds: recoverHaIds,
-      force: true
-    });
+    return;
   },
 
   requestStateRefresh(options = {}) {
@@ -466,11 +407,7 @@ Module.register("MMM-HomeConnect2", {
     switch (notification) {
       case "MMM-HomeConnect_Update":
         this.devices = safePayload || [];
-        this.recoverMissingActivePrograms(this.devices);
         this.updateDom();
-        // After initial device list arrives, request a snapshot of active programs
-        // so RemainingProgramTime / ProgramProgress are populated even before SSE events come in.
-        this.scheduleActiveProgramSnapshot();
         break;
       case "AUTH_INFO":
         this.authInfo = safePayload;
@@ -513,31 +450,7 @@ Module.register("MMM-HomeConnect2", {
 
   resume() {
     this.suspended = false;
-    // On resume, trigger a revalidation: request a fresh device update and
-    // explicitly request active program snapshots so UI resumes reflecting
-    // currently running programs immediately.
-    try {
-      this.lastActiveProgramRequestTs = 0;
-      this.requestStateRefresh({ forceRefresh: true, bypassActiveProgramThrottle: true });
-
-      const haIds = this.devices
-        .map((d) => d.haId || d.haid || d.id)
-        .filter((id) => typeof id === "string" && id.length);
-
-      setTimeout(() => {
-        try {
-          this.sendSocketNotification("GET_ACTIVE_PROGRAMS", {
-            instanceId: this.instanceId,
-            haIds,
-            force: true
-          });
-        } catch (err) {
-          Log.error(`${this.name} resume fallback active program request failed: ${err}`);
-        }
-      }, 1500);
-    } catch (e) {
-      Log.error(`${this.name} resume actions failed: ${e}`);
-    }
+    this.updateDom();
   },
 
   stop() {
@@ -545,30 +458,7 @@ Module.register("MMM-HomeConnect2", {
   },
 
   scheduleActiveProgramSnapshot() {
-    try {
-      const haIds = this.devices.map((d) => d.haId || d.haid || d.id).filter((id) => !!id);
-      if (!haIds.length) {
-        return;
-      }
-
-      const now = Date.now();
-      const elapsed = now - (this.lastActiveProgramRequestTs || 0);
-      const minInterval =
-        typeof this.config.minActiveProgramIntervalMs === "number"
-          ? Math.max(0, this.config.minActiveProgramIntervalMs)
-          : this.defaults.minActiveProgramIntervalMs;
-
-      if (!this.lastActiveProgramRequestTs || elapsed >= minInterval) {
-        this.lastActiveProgramRequestTs = now;
-        this.sendSocketNotification("GET_ACTIVE_PROGRAMS", {
-          instanceId: this.instanceId,
-          haIds,
-          force: false
-        });
-      }
-    } catch (e) {
-      Log.error(`${this.name} failed scheduling active programs: ${e}`);
-    }
+    return;
   },
 
   getDeviceUtils() {

@@ -27,7 +27,9 @@ let config = {
         showDeviceIcon: true,
         showDeviceIfInfoIsAvailable: true,
         apiRequestTimeoutMs: 15 * 1000,
-        sseRecoveryCooldownMs: 60 * 1000,
+        sseHeartbeatCheckIntervalMs: 10 * 1000,
+        sseHeartbeatStaleThresholdMs: 70 * 1000,
+        sseRecoveryCooldownMs: 70 * 1000,
         progressRefreshIntervalMs: 30 * 1000,
         minActiveProgramIntervalMs: 10 * 60 * 1000
       }

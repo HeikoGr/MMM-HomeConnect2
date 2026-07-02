@@ -268,10 +268,7 @@ function createInstance(overrides = {}) {
       }
     ]);
 
-    assert.strictEqual(recoveryNotifications.length, 1);
-    assert.strictEqual(recoveryNotifications[0].notification, "GET_ACTIVE_PROGRAMS");
-    assert.deepStrictEqual(recoveryNotifications[0].payload.haIds, ["dryer-1"]);
-    assert.strictEqual(recoveryNotifications[0].payload.force, true);
+    assert.strictEqual(recoveryNotifications.length, 0);
 
     recoveryInstance.socketNotificationReceived("MMM-HomeConnect_Update", [
       {
@@ -288,8 +285,8 @@ function createInstance(overrides = {}) {
 
     assert.strictEqual(
       recoveryNotifications.length,
-      1,
-      "Expected recovery request to run only once per active program cycle"
+      0,
+      "Expected no frontend-induced recovery request during active program cycle"
     );
 
     recoveryInstance.socketNotificationReceived("MMM-HomeConnect_Update", [
@@ -307,8 +304,8 @@ function createInstance(overrides = {}) {
 
     assert.strictEqual(
       recoveryNotifications.length,
-      2,
-      "Expected a new recovery request when the active program cycle changes"
+      0,
+      "Expected no frontend-induced recovery request when the active program cycle changes"
     );
 
     const delayedStartNotifications = [];
@@ -347,10 +344,11 @@ function createInstance(overrides = {}) {
 
     snapshotInstance.scheduleActiveProgramSnapshot();
 
-    assert.strictEqual(snapshotNotifications.length, 1);
-    assert.strictEqual(snapshotNotifications[0].notification, "GET_ACTIVE_PROGRAMS");
-    assert.deepStrictEqual(snapshotNotifications[0].payload.haIds, ["washer-1"]);
-    assert.strictEqual(snapshotNotifications[0].payload.force, false);
+    assert.strictEqual(
+      snapshotNotifications.length,
+      0,
+      "Expected no frontend-induced initial program snapshot request"
+    );
 
     const selectedDoorOpenInstance = createInstance({
       devices: [

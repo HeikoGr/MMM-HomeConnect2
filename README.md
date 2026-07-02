@@ -66,10 +66,10 @@ Common module options
 - showDeviceIfInfoIsAvailable: Optional. Also display devices when program or status information is available even if the device is otherwise idle. Default: true.
 - showAlwaysAllDevices: Optional. Always render all appliances, even when they are currently idle. Default: false.
 - enableSSEHeartbeat: Optional. Enable SSE health monitoring. Default: true.
-- sseHeartbeatCheckIntervalMs: Optional. SSE health check interval. Default: 60000.
-- sseHeartbeatStaleThresholdMs: Optional. Silence threshold before SSE is considered stale. Default: 180000.
+- sseHeartbeatCheckIntervalMs: Optional. SSE health check interval. Default: 10000.
+- sseHeartbeatStaleThresholdMs: Optional. Silence threshold before SSE is considered stale. Default: 70000.
 - apiRequestTimeoutMs: Optional. Hard timeout for Home Connect HTTP requests. Helps the module recover from hanging network/API calls during startup, resume, and refresh. Default: 15000.
-- sseRecoveryCooldownMs: Optional. Minimum delay between automatic watchdog recovery polls when a previously active SSE stream goes stale. Default: max(sseHeartbeatStaleThresholdMs, 2 x sseHeartbeatCheckIntervalMs, 60000).
+- sseRecoveryCooldownMs: Optional. Minimum delay between automatic SSE subscription rebuilds when a previously active SSE stream goes stale. Default: max(sseHeartbeatStaleThresholdMs, 2 x sseHeartbeatCheckIntervalMs, 60000).
 - progressRefreshIntervalMs: Optional. Frontend-only refresh interval for countdown/progress rendering. Default: 30000.
 - minActiveProgramIntervalMs: Optional. Backend throttle for non-forced active-program snapshot requests. Default: 600000.
 - logLevel: Optional. Module log verbosity: none, error, warn, info, debug.
@@ -101,10 +101,10 @@ Troubleshooting
 
 Network protection and request rate limits
 - The module does not poll the Home Connect API continuously in the background.
-- Regular device updates are expected to come from SSE after the initial device fetch.
+- After the initial device fetch, regular device and program updates are expected to come exclusively from SSE.
 - Non-forced active-program snapshot requests are throttled by minActiveProgramIntervalMs, which defaults to 10 minutes.
 - Automatic active-program retries are capped at 3 attempts per device with a 5 second delay between attempts.
-- SSE watchdog recovery only starts after the module has received at least one SSE event, and is then rate-limited by sseRecoveryCooldownMs.
+- SSE watchdog recovery only starts after the module has received at least one KEEP-ALIVE or device event, and then rebuilds the SSE subscription if no further SSE traffic arrives for 70 seconds by default.
 - In debug logLevel, the frontend debug panel now shows observed SSE gap statistics so you can compare real event spacing with your stale threshold.
 - Concurrent overlapping active-program fetches are deduplicated so resume and recovery paths do not fan out into parallel program requests.
 - If the Home Connect API responds with HTTP 429, the module enters a backoff window before allowing more non-forced program fetches.

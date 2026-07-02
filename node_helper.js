@@ -397,6 +397,38 @@ module.exports = NodeHelper.create({
     };
   },
 
+  dispatchDeviceRefreshWithProgramSync({
+    reason,
+    requester,
+    forcePrograms = false,
+    haIds = null
+  } = {}) {
+    if (!this.deviceService || !this.hc || this.isAuthFlowInProgress()) {
+      return false;
+    }
+
+    this.beginDeviceRefresh(reason || "device_refresh");
+    const sendSocketNotification = this.makeDeviceRefreshCallback(`${reason || "device_refresh"}_dispatched`);
+    let followUpRequested = false;
+
+    this.deviceService.getDevices((notification, callbackPayload) => {
+      sendSocketNotification(notification, callbackPayload);
+
+      if (followUpRequested || notification !== "MMM-HomeConnect_Update") {
+        return;
+      }
+
+      followUpRequested = true;
+      this.handleGetActivePrograms({
+        instanceId: requester || this.instanceId || "unknown",
+        haIds,
+        force: forcePrograms
+      });
+    });
+
+    return true;
+  },
+
   beginProgramFetch(reason) {
     this.transitionSessionState(SESSION_EVENTS.PROGRAM_FETCH_START, { reason });
   },
@@ -947,11 +979,22 @@ module.exports = NodeHelper.create({
       return;
     }
 
-    moduleLog("warn", "SSE watchdog triggered recovery poll", context);
-    this.handleStateRefreshRequest({
-      instanceId: "sse_watchdog",
-      forceRefresh: true,
-      bypassActiveProgramThrottle: true
+    if (!this.deviceService || typeof this.deviceService.reconnectEventSubscriptions !== "function") {
+      moduleLog("warn", "SSE watchdog cannot rebuild subscriptions - DeviceService unavailable", context);
+      return;
+    }
+
+    moduleLog("warn", "SSE watchdog triggered subscription rebuild", context);
+    this.deviceService.reconnectEventSubscriptions().then((rebuilt) => {
+      if (!rebuilt) {
+        return;
+      }
+
+      this.dispatchDeviceRefreshWithProgramSync({
+        reason: "sse_watchdog_resync",
+        requester: "sse_watchdog",
+        forcePrograms: true
+      });
     });
   },
 
@@ -1094,12 +1137,12 @@ module.exports = NodeHelper.create({
     this.emitInitStatus("success");
 
     if (this.deviceService) {
-      // Perform a single initial device fetch; further updates are normally
-      // driven by SSE, with fallback polling only when SSE is unhealthy.
-      this.beginDeviceRefresh("initial_device_fetch");
-      this.deviceService.getDevices(
-        this.makeDeviceRefreshCallback("initial_device_fetch_dispatched")
-      );
+      // Perform a single initial snapshot from the API, then rely on SSE deltas.
+      this.dispatchDeviceRefreshWithProgramSync({
+        reason: "initial_device_fetch",
+        requester: this.instanceId || "initial_sync",
+        forcePrograms: false
+      });
     }
   },
 
@@ -1168,13 +1211,8 @@ module.exports = NodeHelper.create({
       if (this.deviceService && typeof this.deviceService.noteTokenRefreshed === "function") {
         this.deviceService.noteTokenRefreshed();
       }
-      // After init has completed (subscriptions established), refresh devices on token update.
-      // During initial init (subscribed === false), skip to avoid double fetching.
       if (this.deviceService && this.deviceService.subscribed) {
-        moduleLog("info", "Token updated post-init - refreshing device list");
-        this.beginDeviceRefresh("token_refresh_device_sync");
-        this.deviceService.getDevices(this.sendSocketNotification.bind(this));
-        this.endDeviceRefresh("token_refresh_device_sync_dispatched");
+        moduleLog("info", "Token updated post-init - SSE session remains authoritative");
       } else {
         moduleLog("info", "Token updated during initialization");
       }

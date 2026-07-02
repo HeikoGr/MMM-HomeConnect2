@@ -202,6 +202,43 @@ function resetHelperState() {
   assert.strictEqual(helper.debugStats.keepAlive.lastGapMs, 5500);
   assert.strictEqual(helper.debugStats.keepAlive.avgGapMs, 5500);
 
+  // SSE stale should rebuild subscriptions and then perform one full resync.
+  resetHelperState();
+  helper.hc = {};
+  helper.sessionState = "ready";
+  const staleSequence = [];
+  helper.deviceService = {
+    reconnectEventSubscriptions() {
+      staleSequence.push("rebuild");
+      return Promise.resolve(true);
+    },
+    getDevices(callback) {
+      staleSequence.push("device_refresh_start");
+      callback("MMM-HomeConnect_Update", [{ haId: "ha-1", name: "Washer" }]);
+    }
+  };
+  helper.sendSocketNotification = (notification) => {
+    if (notification === "MMM-HomeConnect_Update") {
+      staleSequence.push("device_update_sent");
+    }
+  };
+  const staleOriginalHandleGetActivePrograms = helper.handleGetActivePrograms;
+  helper.handleGetActivePrograms = (payload = {}) => {
+    staleSequence.push(`program_fetch:${payload.instanceId || "unknown"}:${payload.force}`);
+  };
+
+  helper.handleSseStale({ silenceMs: 71000 });
+  await wait(0);
+
+  assert.deepStrictEqual(staleSequence, [
+    "rebuild",
+    "device_refresh_start",
+    "device_update_sent",
+    "program_fetch:sse_watchdog:true"
+  ]);
+
+  helper.handleGetActivePrograms = staleOriginalHandleGetActivePrograms;
+
   // Forced state refresh should fetch active programs only after refreshed device data arrived.
   resetHelperState();
   const sequence = [];
@@ -259,22 +296,39 @@ function resetHelperState() {
 
   assert.strictEqual(immediateGetDevicesCalls, 1);
 
-  // Initial device fetch after HomeConnect init should start immediately without a timer delay.
+  // Initial device fetch after HomeConnect init should start immediately and trigger one program snapshot.
   resetHelperState();
   helper.hc = {};
+  const initSequence = [];
   helper.deviceService = {
     getDevices(callback) {
       immediateGetDevicesCalls += 1;
+      initSequence.push("device_refresh_start");
       callback("MMM-HomeConnect_Update", []);
     }
   };
-  helper.sendSocketNotification = () => { };
+  helper.sendSocketNotification = (notification) => {
+    if (notification === "MMM-HomeConnect_Update") {
+      initSequence.push("device_update_sent");
+    }
+  };
   helper.emitInitStatus = () => { };
   immediateGetDevicesCalls = 0;
+  const originalInitHandleGetActivePrograms = helper.handleGetActivePrograms;
+  helper.handleGetActivePrograms = (payload = {}) => {
+    initSequence.push(`program_fetch:${payload.instanceId || "unknown"}:${payload.force}`);
+  };
 
   helper.handleHomeConnectInitSuccess();
 
   assert.strictEqual(immediateGetDevicesCalls, 1);
+  assert.deepStrictEqual(initSequence, [
+    "device_refresh_start",
+    "device_update_sent",
+    "program_fetch:test-instance:false"
+  ]);
+
+  helper.handleGetActivePrograms = originalInitHandleGetActivePrograms;
 
   // Washers should not enter active-program retry loops when the API reports no active program.
   resetHelperState();
