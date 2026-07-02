@@ -6,7 +6,7 @@ const AuthService = require("./lib/auth-service");
 const DeviceService = require("./lib/device-service");
 const { refreshTokenPath } = require("./lib/module-paths");
 const ProgramService = require("./lib/program-service");
-const { deviceAppearsActive, isDeviceConnected } = require("./lib/device-utils");
+const { deviceAppearsActive, getDeviceTypeMeta, isDeviceConnected } = require("./lib/device-utils");
 /* eslint-disable n/no-missing-require */
 const NodeHelper = require("node_helper"),
   globalSession = {
@@ -23,6 +23,15 @@ const NodeHelper = require("node_helper"),
 const ACTIVE_PROGRAM_RETRY_DELAY_MS = 5000; // 5s
 const ACTIVE_PROGRAM_MAX_RETRIES = 3; // Maximum number of retries for active program requests
 const FORCED_ACTIVE_PROGRAM_DEDUP_WINDOW_MS = 15000;
+const NO_ACTIVE_PROGRAM_RETRY_BLOCKED_TYPES = new Set([
+  "Washer",
+  "Dryer",
+  "WasherDryer",
+  "Dishwasher",
+  "CoffeeMaker",
+  "Hood",
+  "Oven"
+]);
 
 const SESSION_STATES = Object.freeze({
   BOOT: "boot",
@@ -183,6 +192,24 @@ module.exports = NodeHelper.create({
   debugStats: {
     lastApiCallTs: null,
     lastSseEventTs: null,
+    lastSseTrafficTs: null,
+    sse: {
+      sampleCount: 0,
+      lastGapMs: null,
+      minGapMs: null,
+      maxGapMs: null,
+      avgGapMs: null,
+      totalGapMs: 0
+    },
+    keepAlive: {
+      sampleCount: 0,
+      lastGapMs: null,
+      minGapMs: null,
+      maxGapMs: null,
+      avgGapMs: null,
+      totalGapMs: 0,
+      lastTs: null
+    },
     apiCounters: {}
   },
 
@@ -409,6 +436,15 @@ module.exports = NodeHelper.create({
     };
   },
 
+  shouldRetryNoActiveProgram(device) {
+    if (!deviceAppearsActive(device)) {
+      return false;
+    }
+
+    const canonicalType = getDeviceTypeMeta(device?.type).canonicalType;
+    return !NO_ACTIVE_PROGRAM_RETRY_BLOCKED_TYPES.has(canonicalType);
+  },
+
   init() {
     moduleLog("info", "init module helper: MMM-HomeConnect2 (session-based)");
     this.transitionSessionState(SESSION_EVENTS.CONFIG_RECEIVED, { reason: "helper_init" });
@@ -428,7 +464,8 @@ module.exports = NodeHelper.create({
       onSseStale: this.handleSseStale.bind(this),
       debugHooks: {
         recordApiCall: this.recordApiCall.bind(this),
-        recordSseEvent: this.recordSseEvent.bind(this)
+        recordSseEvent: this.recordSseEvent.bind(this),
+        recordSseKeepAlive: this.recordSseKeepAlive.bind(this)
       }
     });
 
@@ -812,6 +849,9 @@ module.exports = NodeHelper.create({
     this.broadcastToAllClients("DEBUG_STATS", {
       lastApiCallTs: this.debugStats.lastApiCallTs,
       lastSseEventTs: this.debugStats.lastSseEventTs,
+      lastSseTrafficTs: this.debugStats.lastSseTrafficTs,
+      sse: { ...(this.debugStats.sse || {}) },
+      keepAlive: { ...(this.debugStats.keepAlive || {}) },
       apiCounters: { ...this.debugStats.apiCounters },
       session: {
         state: this.sessionState,
@@ -835,7 +875,69 @@ module.exports = NodeHelper.create({
   },
 
   recordSseEvent() {
-    this.debugStats.lastSseEventTs = Date.now();
+    const now = Date.now();
+    const previousTs = this.debugStats.lastSseEventTs;
+    const sseStats = this.debugStats.sse || {
+      sampleCount: 0,
+      lastGapMs: null,
+      minGapMs: null,
+      maxGapMs: null,
+      avgGapMs: null,
+      totalGapMs: 0
+    };
+
+    if (Number.isFinite(previousTs) && previousTs > 0 && now >= previousTs) {
+      const gapMs = now - previousTs;
+      const sampleCount = (sseStats.sampleCount || 0) + 1;
+      const totalGapMs = (sseStats.totalGapMs || 0) + gapMs;
+      sseStats.sampleCount = sampleCount;
+      sseStats.lastGapMs = gapMs;
+      sseStats.minGapMs =
+        sseStats.minGapMs === null ? gapMs : Math.min(sseStats.minGapMs, gapMs);
+      sseStats.maxGapMs =
+        sseStats.maxGapMs === null ? gapMs : Math.max(sseStats.maxGapMs, gapMs);
+      sseStats.totalGapMs = totalGapMs;
+      sseStats.avgGapMs = Math.round(totalGapMs / sampleCount);
+      this.debugStats.sse = sseStats;
+    } else if (!this.debugStats.sse) {
+      this.debugStats.sse = sseStats;
+    }
+
+    this.debugStats.lastSseEventTs = now;
+    this.debugStats.lastSseTrafficTs = now;
+    this.broadcastDebugStats();
+  },
+
+  recordSseKeepAlive() {
+    const now = Date.now();
+    const keepAliveStats = this.debugStats.keepAlive || {
+      sampleCount: 0,
+      lastGapMs: null,
+      minGapMs: null,
+      maxGapMs: null,
+      avgGapMs: null,
+      totalGapMs: 0,
+      lastTs: null
+    };
+    const previousTs = keepAliveStats.lastTs;
+
+    if (Number.isFinite(previousTs) && previousTs > 0 && now >= previousTs) {
+      const gapMs = now - previousTs;
+      const sampleCount = (keepAliveStats.sampleCount || 0) + 1;
+      const totalGapMs = (keepAliveStats.totalGapMs || 0) + gapMs;
+      keepAliveStats.sampleCount = sampleCount;
+      keepAliveStats.lastGapMs = gapMs;
+      keepAliveStats.minGapMs =
+        keepAliveStats.minGapMs === null ? gapMs : Math.min(keepAliveStats.minGapMs, gapMs);
+      keepAliveStats.maxGapMs =
+        keepAliveStats.maxGapMs === null ? gapMs : Math.max(keepAliveStats.maxGapMs, gapMs);
+      keepAliveStats.totalGapMs = totalGapMs;
+      keepAliveStats.avgGapMs = Math.round(totalGapMs / sampleCount);
+    }
+
+    keepAliveStats.lastTs = now;
+    this.debugStats.keepAlive = keepAliveStats;
+    this.debugStats.lastSseTrafficTs = now;
     this.broadcastDebugStats();
   },
 
@@ -994,12 +1096,10 @@ module.exports = NodeHelper.create({
     if (this.deviceService) {
       // Perform a single initial device fetch; further updates are normally
       // driven by SSE, with fallback polling only when SSE is unhealthy.
-      setTimeout(() => {
-        this.beginDeviceRefresh("initial_device_fetch");
-        this.deviceService.getDevices(
-          this.makeDeviceRefreshCallback("initial_device_fetch_dispatched")
-        );
-      }, 2000);
+      this.beginDeviceRefresh("initial_device_fetch");
+      this.deviceService.getDevices(
+        this.makeDeviceRefreshCallback("initial_device_fetch_dispatched")
+      );
     }
   },
 
@@ -1065,6 +1165,9 @@ module.exports = NodeHelper.create({
       fs.writeFileSync(refreshTokenPath, refreshToken);
       moduleLog("info", "Refresh token updated");
       globalSession.refreshToken = refreshToken;
+      if (this.deviceService && typeof this.deviceService.noteTokenRefreshed === "function") {
+        this.deviceService.noteTokenRefreshed();
+      }
       // After init has completed (subscriptions established), refresh devices on token update.
       // During initial init (subscribed === false), skip to avoid double fetching.
       if (this.deviceService && this.deviceService.subscribed) {
@@ -1269,12 +1372,12 @@ module.exports = NodeHelper.create({
         } else if (result.error === "No active program") {
           const device = this.deviceService.devices.get(result.haId);
           if (device) {
-            const appearsActive = deviceAppearsActive(device);
+            const shouldRetry = this.shouldRetryNoActiveProgram(device);
             moduleLog(
               "debug",
-              `Device ${device.name} reported no active program (appearsActive=${appearsActive})`
+              `Device ${device.name} reported no active program (retry=${shouldRetry})`
             );
-            if (appearsActive) {
+            if (shouldRetry) {
               retryCandidates.push(device);
             }
           }

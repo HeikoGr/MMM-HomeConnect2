@@ -27,6 +27,29 @@ function resetHelperState() {
     event: "init",
     reason: null
   };
+  helper.debugStats = {
+    lastApiCallTs: null,
+    lastSseEventTs: null,
+    lastSseTrafficTs: null,
+    sse: {
+      sampleCount: 0,
+      lastGapMs: null,
+      minGapMs: null,
+      maxGapMs: null,
+      avgGapMs: null,
+      totalGapMs: 0
+    },
+    keepAlive: {
+      sampleCount: 0,
+      lastGapMs: null,
+      minGapMs: null,
+      maxGapMs: null,
+      avgGapMs: null,
+      totalGapMs: 0,
+      lastTs: null
+    },
+    apiCounters: {}
+  };
   helper.hc = null;
   helper.activeProgramFetchInFlight = false;
   helper.activeProgramFetchSignature = null;
@@ -139,6 +162,46 @@ function resetHelperState() {
   await wait(70);
   assert.strictEqual(helper.sessionState, "ready");
 
+  // SSE debug stats should track real gaps between events.
+  resetHelperState();
+  const originalDateNow = Date.now;
+  const fakeTimes = [1000, 1600, 2200];
+  Date.now = () => fakeTimes.shift();
+  helper.broadcastDebugStats = () => { };
+
+  helper.recordSseEvent();
+  helper.recordSseEvent();
+  helper.recordSseEvent();
+
+  Date.now = originalDateNow;
+
+  assert.strictEqual(helper.debugStats.lastSseEventTs, 2200);
+  assert.strictEqual(helper.debugStats.lastSseTrafficTs, 2200);
+  assert.strictEqual(helper.debugStats.sse.sampleCount, 2);
+  assert.strictEqual(helper.debugStats.sse.lastGapMs, 600);
+  assert.strictEqual(helper.debugStats.sse.minGapMs, 600);
+  assert.strictEqual(helper.debugStats.sse.maxGapMs, 600);
+  assert.strictEqual(helper.debugStats.sse.avgGapMs, 600);
+
+  // KEEP-ALIVE debug stats should track transport traffic even without domain events.
+  resetHelperState();
+  const originalKeepAliveDateNow = Date.now;
+  const keepAliveTimes = [5000, 10500, 16000];
+  Date.now = () => keepAliveTimes.shift();
+  helper.broadcastDebugStats = () => { };
+
+  helper.recordSseKeepAlive();
+  helper.recordSseKeepAlive();
+  helper.recordSseKeepAlive();
+
+  Date.now = originalKeepAliveDateNow;
+
+  assert.strictEqual(helper.debugStats.lastSseTrafficTs, 16000);
+  assert.strictEqual(helper.debugStats.keepAlive.lastTs, 16000);
+  assert.strictEqual(helper.debugStats.keepAlive.sampleCount, 2);
+  assert.strictEqual(helper.debugStats.keepAlive.lastGapMs, 5500);
+  assert.strictEqual(helper.debugStats.keepAlive.avgGapMs, 5500);
+
   // Forced state refresh should fetch active programs only after refreshed device data arrived.
   resetHelperState();
   const sequence = [];
@@ -195,6 +258,61 @@ function resetHelperState() {
   helper.handleSessionAlreadyActive();
 
   assert.strictEqual(immediateGetDevicesCalls, 1);
+
+  // Initial device fetch after HomeConnect init should start immediately without a timer delay.
+  resetHelperState();
+  helper.hc = {};
+  helper.deviceService = {
+    getDevices(callback) {
+      immediateGetDevicesCalls += 1;
+      callback("MMM-HomeConnect_Update", []);
+    }
+  };
+  helper.sendSocketNotification = () => { };
+  helper.emitInitStatus = () => { };
+  immediateGetDevicesCalls = 0;
+
+  helper.handleHomeConnectInitSuccess();
+
+  assert.strictEqual(immediateGetDevicesCalls, 1);
+
+  // Washers should not enter active-program retry loops when the API reports no active program.
+  resetHelperState();
+  helper.hc = {};
+  helper.sessionState = "ready";
+  const washerDevice = {
+    haId: "ha-washer",
+    name: "Washer",
+    type: "Washer",
+    connected: true,
+    OperationState: "BSH.Common.EnumType.OperationState.Run",
+    RemainingProgramTime: { value: "PT10M" }
+  };
+  helper.deviceService = {
+    devices: new Map([["ha-washer", washerDevice]])
+  };
+  const scheduledRetries = [];
+  helper.activeProgramManager = {
+    schedule(devices) {
+      scheduledRetries.push(...devices);
+    },
+    clear() { }
+  };
+  helper.programService = {
+    applyProgramResult() {
+      return null;
+    }
+  };
+  helper.fetchActiveProgramForDevice = async () => ({
+    haId: "ha-washer",
+    success: false,
+    error: "No active program"
+  });
+  helper.broadcastProgramData = () => { };
+
+  await helper.fetchActiveProgramsForDevices([washerDevice], "frontend-a");
+
+  assert.strictEqual(scheduledRetries.length, 0);
 
   // Overlapping forced active-program requests should be deduplicated while one fetch is in flight.
   resetHelperState();

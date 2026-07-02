@@ -105,6 +105,7 @@ Network protection and request rate limits
 - Non-forced active-program snapshot requests are throttled by minActiveProgramIntervalMs, which defaults to 10 minutes.
 - Automatic active-program retries are capped at 3 attempts per device with a 5 second delay between attempts.
 - SSE watchdog recovery only starts after the module has received at least one SSE event, and is then rate-limited by sseRecoveryCooldownMs.
+- In debug logLevel, the frontend debug panel now shows observed SSE gap statistics so you can compare real event spacing with your stale threshold.
 - Concurrent overlapping active-program fetches are deduplicated so resume and recovery paths do not fan out into parallel program requests.
 - If the Home Connect API responds with HTTP 429, the module enters a backoff window before allowing more non-forced program fetches.
 - EventSource reconnects after SSE transport errors back off to 5 seconds for generic transport errors and 30 seconds for auth-related or 429-like SSE failures.

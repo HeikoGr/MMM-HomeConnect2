@@ -269,9 +269,9 @@ function createInstance(overrides = {}) {
     ]);
 
     assert.strictEqual(recoveryNotifications.length, 1);
-    assert.strictEqual(recoveryNotifications[0].notification, "REQUEST_DEVICE_REFRESH");
+    assert.strictEqual(recoveryNotifications[0].notification, "GET_ACTIVE_PROGRAMS");
     assert.deepStrictEqual(recoveryNotifications[0].payload.haIds, ["dryer-1"]);
-    assert.strictEqual(recoveryNotifications[0].payload.bypassActiveProgramThrottle, true);
+    assert.strictEqual(recoveryNotifications[0].payload.force, true);
 
     recoveryInstance.socketNotificationReceived("MMM-HomeConnect_Update", [
       {
@@ -336,6 +336,21 @@ function createInstance(overrides = {}) {
       0,
       "Expected no recovery request for delayed start with selected program"
     );
+
+    const snapshotNotifications = [];
+    const snapshotInstance = createInstance({
+      devices: [{ haId: "washer-1", name: "Washer" }]
+    });
+    snapshotInstance.sendSocketNotification = (notification, payload) => {
+      snapshotNotifications.push({ notification, payload });
+    };
+
+    snapshotInstance.scheduleActiveProgramSnapshot();
+
+    assert.strictEqual(snapshotNotifications.length, 1);
+    assert.strictEqual(snapshotNotifications[0].notification, "GET_ACTIVE_PROGRAMS");
+    assert.deepStrictEqual(snapshotNotifications[0].payload.haIds, ["washer-1"]);
+    assert.strictEqual(snapshotNotifications[0].payload.force, false);
 
     const selectedDoorOpenInstance = createInstance({
       devices: [
@@ -605,7 +620,25 @@ function createInstance(overrides = {}) {
       ],
       debugStats: {
         lastApiCallTs: Date.now(),
-        lastSseEventTs: Date.now(),
+        lastSseEventTs: null,
+        lastSseTrafficTs: Date.now(),
+        sse: {
+          sampleCount: 4,
+          lastGapMs: 90000,
+          minGapMs: 15000,
+          maxGapMs: 180000,
+          avgGapMs: 60000,
+          totalGapMs: 240000
+        },
+        keepAlive: {
+          sampleCount: 3,
+          lastGapMs: 55000,
+          minGapMs: 55000,
+          maxGapMs: 55001,
+          avgGapMs: 55000,
+          totalGapMs: 110001,
+          lastTs: Date.now()
+        },
         apiCounters: { homeappliances: 3 },
         session: {
           state: "rate_limited",
@@ -617,11 +650,21 @@ function createInstance(overrides = {}) {
       }
     });
     const debugSessionDom = debugSessionInstance.getDom();
+    assert.ok(debugSessionDom.innerHTML.includes("SSE traffic:"));
+    assert.ok(debugSessionDom.innerHTML.includes("SSE event:"));
+    assert.ok(debugSessionDom.innerHTML.includes("n/a"));
+    assert.ok(debugSessionDom.innerHTML.includes("KEEP-ALIVE last:"));
+    assert.ok(debugSessionDom.innerHTML.includes("55s"));
     assert.ok(debugSessionDom.innerHTML.includes("session state:"));
     assert.ok(debugSessionDom.innerHTML.includes("rate_limited"));
     assert.ok(debugSessionDom.innerHTML.includes("session reason:"));
     assert.ok(debugSessionDom.innerHTML.includes("active_program_429"));
     assert.ok(debugSessionDom.innerHTML.includes("rate limit remaining:"));
+    assert.ok(debugSessionDom.innerHTML.includes("SSE gap last:"));
+    assert.ok(debugSessionDom.innerHTML.includes("1m 30s"));
+    assert.ok(debugSessionDom.innerHTML.includes("SSE gap max:"));
+    assert.ok(debugSessionDom.innerHTML.includes("3m"));
+
 
     console.log("frontend-render.test.js OK");
   } finally {

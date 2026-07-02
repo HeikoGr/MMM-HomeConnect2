@@ -122,6 +122,22 @@ function createDeviceService(overrides = {}) {
     );
   }
 
+  // noteTokenRefreshed: prevents immediate redundant token refresh before first SSE subscribe
+  {
+    const { service } = createDeviceService();
+    let refreshCalls = 0;
+    service.attachClient({
+      refreshTokens: async () => {
+        refreshCalls += 1;
+      }
+    });
+    service.noteTokenRefreshed(Date.now());
+
+    await service.ensureFreshTokenForSSE();
+
+    assert.strictEqual(refreshCalls, 0);
+  }
+
   // handleGetDevicesError: broadcasts device_error
   {
     const { service, notifications } = createDeviceService();
@@ -162,8 +178,8 @@ function createDeviceService(overrides = {}) {
     await wait(0);
     assert.strictEqual(
       JSON.stringify(subscribeCalls),
-      JSON.stringify(["NOTIFY", "STATUS", "EVENT"]),
-      "Expected a single immediate subscription for NOTIFY/STATUS/EVENT"
+      JSON.stringify(["KEEP-ALIVE", "NOTIFY", "STATUS", "EVENT"]),
+      "Expected a single immediate subscription for KEEP-ALIVE/NOTIFY/STATUS/EVENT"
     );
 
     // Calling subscribeToDeviceEvents again with the same handler should not
@@ -172,8 +188,26 @@ function createDeviceService(overrides = {}) {
     await wait(0);
     assert.strictEqual(
       JSON.stringify(subscribeCalls),
-      JSON.stringify(["NOTIFY", "STATUS", "EVENT"]),
+      JSON.stringify(["KEEP-ALIVE", "NOTIFY", "STATUS", "EVENT"]),
       "Expected no additional subscriptions when reusing same handler"
+    );
+  }
+
+  // SSE keep-alive: logs debug traffic and refreshes heartbeat state
+  {
+    const { service, logs, notifications } = createDeviceService();
+    service.heartbeatStale = true;
+
+    service.handleKeepAliveEvent({ data: "ping" });
+
+    assert.strictEqual(service.heartbeatArmed, true);
+    assert.ok(Number.isFinite(service.lastKeepAliveTimestamp));
+    assert.ok(
+      logs.some((entry) => entry.level === "debug" && entry.message.includes("SSE KEEP-ALIVE received"))
+    );
+    assert.ok(!logs.some((entry) => entry.message.includes("undefined")));
+    assert.ok(
+      notifications.some((entry) => entry.n === "INIT_STATUS" && entry.p.status === "sse_recovered")
     );
   }
 
@@ -233,6 +267,10 @@ function createDeviceService(overrides = {}) {
     );
     assert.strictEqual(staleEvent, undefined);
     assert.strictEqual(staleRecoveries, 0);
+    assert.strictEqual(
+      JSON.stringify(subscribeCalls),
+      JSON.stringify(["KEEP-ALIVE", "NOTIFY", "STATUS", "EVENT"])
+    );
 
     service.shutdown();
   }
