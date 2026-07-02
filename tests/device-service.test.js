@@ -159,7 +159,7 @@ function createDeviceService(overrides = {}) {
     assert.deepStrictEqual(closeCalls[0], { devices: true, global: true });
   }
 
-  // SSE heartbeat: detect silent stream before first event and trigger one recovery callback
+  // SSE heartbeat: a silent stream before the first event must not trigger recovery
   {
     let staleRecoveries = 0;
     const { service, notifications } = createDeviceService({
@@ -186,13 +186,74 @@ function createDeviceService(overrides = {}) {
     service.subscribeToDeviceEvents(() => { });
     await wait(80);
 
-    const staleEvent = notifications.find((entry) => entry.n === "INIT_STATUS");
+    const staleEvent = notifications.find(
+      (entry) => entry.n === "INIT_STATUS" && entry.p.status === "sse_stale"
+    );
+    assert.strictEqual(staleEvent, undefined);
+    assert.strictEqual(staleRecoveries, 0);
+
+    service.shutdown();
+  }
+
+  // SSE heartbeat: after at least one event, prolonged silence still triggers recovery once
+  {
+    let staleRecoveries = 0;
+    const { service, notifications } = createDeviceService({
+      onSseStale: () => {
+        staleRecoveries += 1;
+      }
+    });
+    const hcMock = {
+      subscribe: () => { },
+      refreshTokens: () => Promise.resolve(),
+      closeEventSources: () => { },
+      applyEventToDevice: (device, item) => {
+        device[item.key] = item.value;
+      }
+    };
+
+    service.attachClient(hcMock);
+    service.devices.set("ha-1", { haId: "ha-1", name: "Washer" });
+    service.setConfig({
+      enableSSEHeartbeat: true,
+      sseHeartbeatCheckIntervalMs: 10,
+      sseHeartbeatStaleThresholdMs: 20,
+      sseRecoveryCooldownMs: 1000
+    });
+
+    const socketNotifications = [];
+    service.subscribeToDeviceEvents((payload) => service.deviceEvent(payload, (n, data) => {
+      socketNotifications.push({ n, data });
+    }));
+    await wait(0);
+
+    service.deviceEvent(
+      {
+        data: JSON.stringify({
+          items: [
+            {
+              key: "BSH.Common.Option.ProgramProgress",
+              value: 42,
+              uri: "/api/homeappliances/ha-1/events"
+            }
+          ]
+        })
+      },
+      (n, data) => {
+        socketNotifications.push({ n, data });
+      }
+    );
+
+    await wait(80);
+
+    const staleEvent = notifications.find(
+      (entry) => entry.n === "INIT_STATUS" && entry.p.status === "sse_stale"
+    );
     assert.ok(staleEvent);
-    assert.strictEqual(staleEvent.p.status, "sse_stale");
     assert.strictEqual(staleRecoveries, 1);
-    assert.strictEqual(
-      JSON.stringify(subscribeCalls),
-      JSON.stringify(["NOTIFY", "STATUS", "EVENT"])
+    assert.ok(
+      socketNotifications.some((entry) => entry.n === "MMM-HomeConnect_Update"),
+      "Expected the incoming SSE event to update the frontend cache"
     );
 
     service.shutdown();

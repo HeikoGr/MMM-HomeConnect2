@@ -30,6 +30,7 @@ function resetHelperState() {
   helper.hc = null;
   helper.activeProgramFetchInFlight = false;
   helper.activeProgramFetchSignature = null;
+  helper.recentForcedProgramFetch = null;
   helper.setRateLimitUntil(0);
   if (helper.rateLimitReleaseTimer) {
     clearTimeout(helper.rateLimitReleaseTimer);
@@ -203,6 +204,37 @@ function resetHelperState() {
 
   assert.strictEqual(fetchCalls, 1);
   assert.strictEqual(helper.activeProgramFetchInFlight, true);
+
+  // Recently completed forced requests for the same devices should be deduplicated
+  // across different frontend instances for a short window.
+  resetHelperState();
+  helper.hc = {};
+  helper.sessionState = "ready";
+  helper.deviceService = {
+    devices: new Map([["ha-1", { haId: "ha-1", name: "Washer" }]])
+  };
+  fetchCalls = 0;
+  helper.fetchActiveProgramsForDevices = (_devices, _instanceId, requestMeta = {}) => {
+    fetchCalls += 1;
+    if (requestMeta.force && requestMeta.scopeKey) {
+      helper.rememberForcedProgramFetch(requestMeta.scopeKey, Date.now());
+    }
+    helper.activeProgramFetchInFlight = false;
+    helper.activeProgramFetchSignature = null;
+  };
+
+  helper.handleGetActivePrograms({
+    instanceId: "frontend-a",
+    haIds: ["ha-1"],
+    force: true
+  });
+  helper.handleGetActivePrograms({
+    instanceId: "frontend-b",
+    haIds: ["ha-1"],
+    force: true
+  });
+
+  assert.strictEqual(fetchCalls, 1);
 
   helper.transitionSessionState("RESET", {
     reason: "test_reset"

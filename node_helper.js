@@ -22,6 +22,7 @@ const NodeHelper = require("node_helper"),
 
 const ACTIVE_PROGRAM_RETRY_DELAY_MS = 5000; // 5s
 const ACTIVE_PROGRAM_MAX_RETRIES = 3; // Maximum number of retries for active program requests
+const FORCED_ACTIVE_PROGRAM_DEDUP_WINDOW_MS = 15000;
 
 const SESSION_STATES = Object.freeze({
   BOOT: "boot",
@@ -178,6 +179,7 @@ module.exports = NodeHelper.create({
   rateLimitReleaseTimer: null,
   activeProgramFetchInFlight: false,
   activeProgramFetchSignature: null,
+  recentForcedProgramFetch: null,
   debugStats: {
     lastApiCallTs: null,
     lastSseEventTs: null,
@@ -376,7 +378,7 @@ module.exports = NodeHelper.create({
     this.transitionSessionState(SESSION_EVENTS.PROGRAM_FETCH_DONE, { reason });
   },
 
-  buildActiveProgramFetchSignature(devices, requester) {
+  buildActiveProgramFetchScopeKey(devices) {
     const deviceIds = Array.isArray(devices)
       ? devices
         .map((device) => device && device.haId)
@@ -384,7 +386,27 @@ module.exports = NodeHelper.create({
         .sort()
       : [];
 
-    return `${requester || "unknown"}:${deviceIds.join(",") || "all"}`;
+    return deviceIds.join(",") || "all";
+  },
+
+  buildActiveProgramFetchSignature(devices, requester) {
+    return `${requester || "unknown"}:${this.buildActiveProgramFetchScopeKey(devices)}`;
+  },
+
+  hasRecentForcedProgramFetch(scopeKey, now = Date.now()) {
+    const recentFetch = this.recentForcedProgramFetch;
+    if (!recentFetch || recentFetch.scopeKey !== scopeKey) {
+      return false;
+    }
+
+    return now - recentFetch.completedAt < FORCED_ACTIVE_PROGRAM_DEDUP_WINDOW_MS;
+  },
+
+  rememberForcedProgramFetch(scopeKey, completedAt = Date.now()) {
+    this.recentForcedProgramFetch = {
+      scopeKey,
+      completedAt
+    };
   },
 
   init() {
@@ -717,6 +739,15 @@ module.exports = NodeHelper.create({
       force
     });
 
+    const scopeKey = this.buildActiveProgramFetchScopeKey(targetDevices);
+    if (force && this.hasRecentForcedProgramFetch(scopeKey, now)) {
+      moduleLog("debug", "Skipping recently completed forced active program request", {
+        requester: requesterLabel,
+        scopeKey
+      });
+      return;
+    }
+
     const fetchSignature = this.buildActiveProgramFetchSignature(targetDevices, requesterLabel);
     if (this.activeProgramFetchInFlight) {
       if (this.activeProgramFetchSignature === fetchSignature) {
@@ -741,7 +772,10 @@ module.exports = NodeHelper.create({
     this.activeProgramFetchInFlight = true;
     this.activeProgramFetchSignature = fetchSignature;
     globalSession.lastActiveProgramFetch = now;
-    this.fetchActiveProgramsForDevices(targetDevices, requester);
+    this.fetchActiveProgramsForDevices(targetDevices, requester, {
+      force,
+      scopeKey
+    });
   },
 
   socketNotificationReceived(notification, payload) {
@@ -1140,7 +1174,7 @@ module.exports = NodeHelper.create({
     return this.programService.fetchActiveProgramForDevice(haId, deviceName);
   },
 
-  async fetchActiveProgramsForDevices(deviceArray, requestingInstanceId) {
+  async fetchActiveProgramsForDevices(deviceArray, requestingInstanceId, requestMeta = {}) {
     if (!this.deviceService) {
       moduleLog("debug", "DeviceService not available - cannot fetch programs");
       return;
@@ -1269,6 +1303,9 @@ module.exports = NodeHelper.create({
     } catch (error) {
       this.handleActiveProgramFetchError(error);
     } finally {
+      if (requestMeta.force && requestMeta.scopeKey) {
+        this.rememberForcedProgramFetch(requestMeta.scopeKey);
+      }
       this.activeProgramFetchInFlight = false;
       this.activeProgramFetchSignature = null;
       this.endProgramFetch("active_program_cycle_finished");
