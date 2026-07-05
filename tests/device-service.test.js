@@ -29,7 +29,7 @@ function createDeviceService(overrides = {}) {
       notifications.push({ n, payload });
     };
     service.broadcastDevices(sendSocketNotification);
-    assert.ok(notifications.some((e) => e.n === "MMM-HomeConnect_Update"));
+    assert.ok(notifications.some((e) => e.n === "DEVICES_UPDATE"));
   }
 
   // broadcastDevices: emits only one socket notification even with multiple clients
@@ -48,7 +48,7 @@ function createDeviceService(overrides = {}) {
     });
 
     assert.strictEqual(notifications.length, 1);
-    assert.strictEqual(notifications[0].n, "MMM-HomeConnect_Update");
+    assert.strictEqual(notifications[0].n, "DEVICES_UPDATE");
     assert.deepStrictEqual(notifications[0].payload, [{ haId: "ha-1", name: "Washer" }]);
   }
 
@@ -132,7 +132,7 @@ function createDeviceService(overrides = {}) {
     );
 
     assert.ok(
-      sendSocketNotificationCalls.some((entry) => entry.n === "MMM-HomeConnect_Update"),
+      sendSocketNotificationCalls.some((entry) => entry.n === "DEVICES_UPDATE"),
       "Expected an immediate device broadcast"
     );
     assert.strictEqual(
@@ -359,7 +359,7 @@ function createDeviceService(overrides = {}) {
     assert.ok(staleEvent);
     assert.strictEqual(staleRecoveries, 1);
     assert.ok(
-      socketNotifications.some((entry) => entry.n === "MMM-HomeConnect_Update"),
+      socketNotifications.some((entry) => entry.n === "DEVICES_UPDATE"),
       "Expected the incoming SSE event to update the frontend cache"
     );
 

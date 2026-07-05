@@ -7,6 +7,7 @@ const DeviceService = require("./lib/device-service");
 const { refreshTokenPath } = require("./lib/module-paths");
 const ProgramService = require("./lib/program-service");
 const { deviceAppearsActive, getDeviceTypeMeta, isDeviceConnected } = require("./lib/device-utils");
+const shared = require("./lib/mmm-shared");
 const NodeHelper = require("node_helper"),
   globalSession = {
     accessToken: null, // Access token for API requests
@@ -343,13 +344,41 @@ module.exports = NodeHelper.create({
   emitStatus(notification, messageMap, status, payload = {}, options = {}) {
     const { broadcast = true } = options;
     const builtPayload = this.buildStatusPayload(messageMap, status, payload);
+    const action = this.mapNotificationToAction(notification);
 
     if (broadcast) {
       this.broadcastToAllClients(notification, builtPayload);
       return;
     }
 
-    this.sendSocketNotification(notification, builtPayload);
+    this.sendEventToInstance(this.instanceId || "default", action, builtPayload);
+  },
+
+  mapNotificationToAction(notification) {
+    const mapping = {
+      DEVICES_UPDATE: "DEVICES_UPDATE",
+      AUTH_INFO: "AUTH_INFO",
+      AUTH_STATUS: "AUTH_STATUS",
+      INIT_STATUS: "INIT_STATUS",
+      DEBUG_STATS: "DEBUG_STATS"
+    };
+
+    return mapping[notification] || notification;
+  },
+
+  sendEventToInstance(instanceId, action, data) {
+    this.sendSocketNotification(
+      this.notifications.EVENT,
+      shared.createEnvelope({
+        identifier: instanceId || "default",
+        instanceId: instanceId || "default",
+        action,
+        ok: true,
+        data,
+        error: null,
+        meta: {}
+      })
+    );
   },
 
   buildInitStatusPayload(status, payload = {}) {
@@ -385,10 +414,10 @@ module.exports = NodeHelper.create({
   },
 
   makeDeviceRefreshCallback(doneReason) {
-    const sendSocketNotification = this.sendSocketNotification.bind(this);
+    const broadcast = this.broadcastToAllClients.bind(this);
     let refreshCompleted = false;
     return (notification, payload) => {
-      sendSocketNotification(notification, payload);
+      broadcast(notification, payload);
       if (!refreshCompleted) {
         refreshCompleted = true;
         this.endDeviceRefresh(doneReason);
@@ -413,7 +442,7 @@ module.exports = NodeHelper.create({
     this.deviceService.getDevices((notification, callbackPayload) => {
       sendSocketNotification(notification, callbackPayload);
 
-      if (followUpRequested || notification !== "MMM-HomeConnect_Update") {
+      if (followUpRequested || notification !== "DEVICES_UPDATE") {
         return;
       }
 
@@ -478,6 +507,7 @@ module.exports = NodeHelper.create({
 
   init() {
     moduleLog("info", "init module helper: MMM-HomeConnect2 (session-based)");
+    this.notifications = shared.buildNotifications("MMM-HomeConnect2");
     this.transitionSessionState(SESSION_EVENTS.CONFIG_RECEIVED, { reason: "helper_init" });
 
     this.authService = new AuthService({
@@ -604,7 +634,7 @@ module.exports = NodeHelper.create({
         { broadcast: false }
       );
 
-      this.deviceService.broadcastDevices(this.sendSocketNotification.bind(this));
+      this.deviceService.broadcastDevices(this.broadcastToAllClients.bind(this));
     } else if (this.isAuthFlowInProgress()) {
       this.notifyAuthInProgress();
     }
@@ -639,18 +669,6 @@ module.exports = NodeHelper.create({
 
     if (!this.configReceived) {
       this.config = payload;
-      // Normalize legacy config keys (support both snake_case and camelCase)
-      if (this.config && typeof this.config === "object") {
-        if (!this.config.clientId && this.config.client_ID) {
-          this.config.clientId = this.config.client_ID;
-        }
-        if (!this.config.clientSecret && this.config.client_Secret) {
-          this.config.clientSecret = this.config.client_Secret;
-        }
-        if (!this.config.apiLanguage && this.config.api_language) {
-          this.config.apiLanguage = this.config.api_language;
-        }
-      }
       // apply configured log level for module-level logging via auth service
       this.authService.setConfig(this.config);
       this.updateActiveProgramInterval();
@@ -785,11 +803,19 @@ module.exports = NodeHelper.create({
   },
 
   socketNotificationReceived(notification, payload) {
-    const safePayload = payload || {};
+    if (notification !== this.notifications.REQUEST) {
+      return;
+    }
 
-    switch (notification) {
-      case "CONFIG":
-        this.handleConfigNotification(safePayload);
+    const safePayload = payload || {};
+    const action = safePayload.action;
+
+    switch (action) {
+      case "CONFIGURE":
+        this.handleConfigNotification({
+          ...(safePayload?.data?.config || {}),
+          instanceId: safePayload.instanceId || safePayload.identifier || "default"
+        });
         break;
 
       case "RETRY_AUTH":
@@ -797,7 +823,10 @@ module.exports = NodeHelper.create({
         break;
 
       case "GET_ACTIVE_PROGRAMS":
-        this.handleGetActivePrograms(safePayload);
+        this.handleGetActivePrograms({
+          ...(safePayload?.data || {}),
+          instanceId: safePayload.instanceId || safePayload.identifier || "default"
+        });
         break;
 
       default:
@@ -807,10 +836,8 @@ module.exports = NodeHelper.create({
 
   broadcastToAllClients(notification, payload) {
     globalSession.clientInstances.forEach((instanceId) => {
-      this.sendSocketNotification(notification, {
-        ...payload,
-        instanceId
-      });
+      // Keep payload shape intact (arrays must remain arrays for DEVICES_UPDATE).
+      this.sendEventToInstance(instanceId, this.mapNotificationToAction(notification), payload);
     });
   },
 
@@ -1239,7 +1266,7 @@ module.exports = NodeHelper.create({
 
   broadcastDevices() {
     if (!this.deviceService) return;
-    this.deviceService.broadcastDevices(this.sendSocketNotification.bind(this));
+    this.deviceService.broadcastDevices(this.broadcastToAllClients.bind(this));
   },
 
   async fetchActiveProgramForDevice(haId, deviceName) {

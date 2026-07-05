@@ -101,6 +101,9 @@ function createInstance(overrides = {}) {
     lastInitStatus: overrides.lastInitStatus || null,
     deviceRuntimeHints: overrides.deviceRuntimeHints || {},
     instanceId: "test-instance",
+    notifications: {
+      EVENT: "MMM-HomeConnect2_EVENT"
+    },
     translate(key) {
       return key;
     },
@@ -254,33 +257,43 @@ function createInstance(overrides = {}) {
       recoveryNotifications.push({ notification, payload });
     };
 
-    recoveryInstance.socketNotificationReceived("MMM-HomeConnect_Update", [
-      {
-        haId: "dryer-1",
-        name: "Dryer",
-        type: "Dryer",
-        PowerState: "On",
-        OperationState: "BSH.Common.EnumType.OperationState.Run",
-        ActiveProgramName: "Synthetics",
-        ActiveProgramSource: "selected",
-        RemainingProgramTime: 1500
-      }
-    ]);
+    recoveryInstance.socketNotificationReceived("MMM-HomeConnect2_EVENT", {
+      identifier: "test-instance",
+      instanceId: "test-instance",
+      action: "DEVICES_UPDATE",
+      data: [
+        {
+          haId: "dryer-1",
+          name: "Dryer",
+          type: "Dryer",
+          PowerState: "On",
+          OperationState: "BSH.Common.EnumType.OperationState.Run",
+          ActiveProgramName: "Synthetics",
+          ActiveProgramSource: "selected",
+          RemainingProgramTime: 1500
+        }
+      ]
+    });
 
     assert.strictEqual(recoveryNotifications.length, 0);
 
-    recoveryInstance.socketNotificationReceived("MMM-HomeConnect_Update", [
-      {
-        haId: "dryer-1",
-        name: "Dryer",
-        type: "Dryer",
-        PowerState: "On",
-        OperationState: "BSH.Common.EnumType.OperationState.Run",
-        ActiveProgramName: "Synthetics",
-        ActiveProgramSource: "selected",
-        RemainingProgramTime: 1400
-      }
-    ]);
+    recoveryInstance.socketNotificationReceived("MMM-HomeConnect2_EVENT", {
+      identifier: "test-instance",
+      instanceId: "test-instance",
+      action: "DEVICES_UPDATE",
+      data: [
+        {
+          haId: "dryer-1",
+          name: "Dryer",
+          type: "Dryer",
+          PowerState: "On",
+          OperationState: "BSH.Common.EnumType.OperationState.Run",
+          ActiveProgramName: "Synthetics",
+          ActiveProgramSource: "selected",
+          RemainingProgramTime: 1400
+        }
+      ]
+    });
 
     assert.strictEqual(
       recoveryNotifications.length,
@@ -288,18 +301,23 @@ function createInstance(overrides = {}) {
       "Expected no frontend-induced recovery request during active program cycle"
     );
 
-    recoveryInstance.socketNotificationReceived("MMM-HomeConnect_Update", [
-      {
-        haId: "dryer-1",
-        name: "Dryer",
-        type: "Dryer",
-        PowerState: "On",
-        OperationState: "BSH.Common.EnumType.OperationState.Run",
-        ActiveProgramName: "Mixed Load",
-        ActiveProgramSource: "selected",
-        RemainingProgramTime: 1200
-      }
-    ]);
+    recoveryInstance.socketNotificationReceived("MMM-HomeConnect2_EVENT", {
+      identifier: "test-instance",
+      instanceId: "test-instance",
+      action: "DEVICES_UPDATE",
+      data: [
+        {
+          haId: "dryer-1",
+          name: "Dryer",
+          type: "Dryer",
+          PowerState: "On",
+          OperationState: "BSH.Common.EnumType.OperationState.Run",
+          ActiveProgramName: "Mixed Load",
+          ActiveProgramSource: "selected",
+          RemainingProgramTime: 1200
+        }
+      ]
+    });
 
     assert.strictEqual(
       recoveryNotifications.length,
@@ -314,18 +332,23 @@ function createInstance(overrides = {}) {
       delayedStartNotifications.push({ notification, payload });
     };
 
-    delayedStartRecoveryInstance.socketNotificationReceived("MMM-HomeConnect_Update", [
-      {
-        haId: "dryer-2",
-        name: "Dryer",
-        type: "Dryer",
-        PowerState: "On",
-        OperationState: "BSH.Common.EnumType.OperationState.DelayedStart",
-        ActiveProgramName: "Synthetics",
-        ActiveProgramSource: "selected",
-        "BSH.Common.Option.StartInRelative": { value: "PT30M" }
-      }
-    ]);
+    delayedStartRecoveryInstance.socketNotificationReceived("MMM-HomeConnect2_EVENT", {
+      identifier: "test-instance",
+      instanceId: "test-instance",
+      action: "DEVICES_UPDATE",
+      data: [
+        {
+          haId: "dryer-2",
+          name: "Dryer",
+          type: "Dryer",
+          PowerState: "On",
+          OperationState: "BSH.Common.EnumType.OperationState.DelayedStart",
+          ActiveProgramName: "Synthetics",
+          ActiveProgramSource: "selected",
+          "BSH.Common.Option.StartInRelative": { value: "PT30M" }
+        }
+      ]
+    });
 
     assert.strictEqual(
       delayedStartNotifications.length,

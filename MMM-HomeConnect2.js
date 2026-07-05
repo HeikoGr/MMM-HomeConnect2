@@ -1,10 +1,6 @@
 /* global Module, Log */ // eslint-disable-line no-redeclare
 
 function generateInstanceId(prefix = "hc") {
-  if (globalThis.MMModuleRuntimeUtils?.generateScopedId) {
-    return globalThis.MMModuleRuntimeUtils.generateScopedId(prefix);
-  }
-
   return `${prefix}_${Date.now().toString(36)}`;
 }
 
@@ -258,6 +254,24 @@ Module.register("MMM-HomeConnect2", {
 
   start() {
     this.instanceId = generateInstanceId();
+    this.shared = globalThis.MMModuleShared;
+    this.sharedContext = this.shared.createModuleContext(
+      "MMM-HomeConnect2",
+      this.identifier,
+      {
+        instanceId: this.instanceId,
+        logLevel: this.config.logLevel || "info",
+        logStructured: true,
+        logRedaction: true
+      }
+    );
+    this.transport = this.shared.createTransport({
+      moduleName: "MMM-HomeConnect2",
+      identifier: this.identifier,
+      instanceId: this.instanceId,
+      sendSocketNotification: this.sendSocketNotification.bind(this)
+    });
+    this.notifications = this.transport.notifications;
     this.ensureProgressRefreshTimer();
   },
 
@@ -294,7 +308,7 @@ Module.register("MMM-HomeConnect2", {
   getScripts() {
     // Use full module-relative path so the MagicMirror loader can find the file
     return [
-      "modules/MMM-HomeConnect2/lib/runtime-utils.js",
+      "modules/MMM-HomeConnect2/lib/mmm-shared.js",
       "modules/MMM-HomeConnect2/lib/device-utils.js"
     ];
   },
@@ -352,26 +366,36 @@ Module.register("MMM-HomeConnect2", {
 
   notificationReceived(notification) {
     if (notification === "ALL_MODULES_STARTED") {
-      // Send config with instanceId
-      this.sendSocketNotification("CONFIG", {
-        ...this.config,
-        instanceId: this.instanceId,
-        apiLanguage: this.getPreferredApiLanguage()
+      this.transport.sendRequest("CONFIGURE", {
+        config: {
+          ...this.config,
+          instanceId: this.instanceId,
+          apiLanguage: this.getPreferredApiLanguage()
+        }
       });
     }
   },
 
   socketNotificationReceived(notification, payload) {
-    // Only respond to messages for this instance (if instanceId present)
+    if (notification !== this.notifications.EVENT) {
+      return;
+    }
+
+    // Only respond to events for this instance
     if (payload && payload.instanceId && payload.instanceId !== this.instanceId) {
       return;
     }
 
-    const safePayload = payload || {};
+    const safePayload = payload?.data ?? {};
+    const action = payload?.action || "";
 
-    switch (notification) {
-      case "MMM-HomeConnect_Update":
-        this.devices = safePayload || [];
+    switch (action) {
+      case "DEVICES_UPDATE":
+        this.devices = Array.isArray(safePayload)
+          ? safePayload
+          : safePayload && typeof safePayload === "object"
+            ? Object.values(safePayload)
+            : [];
         this.updateDom();
         break;
       case "AUTH_INFO":

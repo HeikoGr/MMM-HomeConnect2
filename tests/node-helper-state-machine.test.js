@@ -59,6 +59,10 @@ function resetHelperState() {
     clearTimeout(helper.rateLimitReleaseTimer);
     helper.rateLimitReleaseTimer = null;
   }
+  helper.notifications = {
+    REQUEST: "MMM-HomeConnect2_REQUEST",
+    EVENT: "MMM-HomeConnect2_EVENT"
+  };
 }
 
 (async () => {
@@ -214,11 +218,11 @@ function resetHelperState() {
     },
     getDevices(callback) {
       staleSequence.push("device_refresh_start");
-      callback("MMM-HomeConnect_Update", [{ haId: "ha-1", name: "Washer" }]);
+      callback("DEVICES_UPDATE", [{ haId: "ha-1", name: "Washer" }]);
     }
   };
-  helper.sendSocketNotification = (notification) => {
-    if (notification === "MMM-HomeConnect_Update") {
+  helper.sendSocketNotification = (notification, payload) => {
+    if (notification === "MMM-HomeConnect2_EVENT" && payload?.action === "DEVICES_UPDATE") {
       staleSequence.push("device_update_sent");
     }
   };
@@ -233,7 +237,6 @@ function resetHelperState() {
   assert.deepStrictEqual(staleSequence, [
     "rebuild",
     "device_refresh_start",
-    "device_update_sent",
     "program_fetch:sse_watchdog:true"
   ]);
 
@@ -264,11 +267,11 @@ function resetHelperState() {
     getDevices(callback) {
       immediateGetDevicesCalls += 1;
       initSequence.push("device_refresh_start");
-      callback("MMM-HomeConnect_Update", []);
+      callback("DEVICES_UPDATE", []);
     }
   };
-  helper.sendSocketNotification = (notification) => {
-    if (notification === "MMM-HomeConnect_Update") {
+  helper.sendSocketNotification = (notification, payload) => {
+    if (notification === "MMM-HomeConnect2_EVENT" && payload?.action === "DEVICES_UPDATE") {
       initSequence.push("device_update_sent");
     }
   };
@@ -284,7 +287,6 @@ function resetHelperState() {
   assert.strictEqual(immediateGetDevicesCalls, 1);
   assert.deepStrictEqual(initSequence, [
     "device_refresh_start",
-    "device_update_sent",
     "program_fetch:initial_sync:false"
   ]);
 
