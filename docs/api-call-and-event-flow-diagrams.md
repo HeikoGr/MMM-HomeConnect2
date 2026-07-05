@@ -6,7 +6,7 @@ This document describes the current request and SSE flow of the module.
 
 ```mermaid
 flowchart TD
-  A[Frontend starts module] --> B[sendSocketNotification: CONFIG]
+  A[Frontend starts module] --> B[sendSocketNotification: CONFIGURE]
   B --> C[Node Helper: handleConfigNotification]
 
   C -->|Token available| D[initializeHomeConnect]
@@ -26,7 +26,7 @@ flowchart TD
   F --> G[DeviceService getDevices]
   G --> G1[API: getHomeAppliances]
   G1 --> G2[Per connected or active-looking device: getStatus + getSettings]
-  G2 --> G3[Broadcast MMM-HomeConnect_Update to frontend]
+  G2 --> G3[Broadcast DEVICES_UPDATE to frontend]
   G3 --> G4[Run one active-program snapshot]
 
   G1 --> H[Set up SSE subscriptions]
@@ -52,7 +52,7 @@ flowchart TD
   end
 
   subgraph FE[Frontend behavior]
-    G3 --> I[Frontend receives MMM-HomeConnect_Update]
+    G3 --> I[Frontend receives DEVICES_UPDATE]
     I --> I1[updateDom]
     I2[UI progress timer] -->|every 30s, min 5s| I1
   end
@@ -78,7 +78,7 @@ flowchart TD
     P8 --> P9[500ms delay before next device]
   end
 
-  O2 --> Q[Broadcast ACTIVE_PROGRAMS_DATA and MMM-HomeConnect_Update]
+  O2 --> Q[Broadcast ACTIVE_PROGRAMS_DATA and DEVICES_UPDATE]
   P7 --> R[handleActiveProgramFetchError]
   R --> R1[rateLimitUntil set to now plus backoff]
 ```
@@ -115,7 +115,7 @@ sequenceDiagram
     DS->>HC: getSettings
   end
   DS->>DS: subscribe KEEP-ALIVE/NOTIFY/STATUS/EVENT
-  DS-->>FE: MMM-HomeConnect_Update(devices)
+  DS-->>FE: DEVICES_UPDATE(devices)
   NH->>NH: handleGetActivePrograms(force=false)
 
   loop sequential program snapshot
@@ -133,7 +133,7 @@ sequenceDiagram
       HC-->>PS: rate limit
     end
   end
-  NH-->>FE: MMM-HomeConnect_Update(program-enriched devices)
+  NH-->>FE: DEVICES_UPDATE(program-enriched devices)
 
   loop every 10s
     DS->>DS: heartbeat check
@@ -142,7 +142,7 @@ sequenceDiagram
       DS->>DS: markSseTraffic
       opt payload contains device state
         DS->>DS: applyEventToDevice
-        DS-->>FE: MMM-HomeConnect_Update(devices)
+        DS-->>FE: DEVICES_UPDATE(devices)
       end
     else no SSE traffic for 70s
       DS-->>FE: INIT_STATUS(sse_stale)
