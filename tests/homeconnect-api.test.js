@@ -14,13 +14,14 @@ function setGlobalBuiltin(name, value) {
 
 (() => {
   const hc = new HomeConnect("client", "secret", "refresh");
-  const device = {};
+  const device = { connected: false };
 
   hc.applyEventToDevice(device, {
     key: "BSH.Common.Status.RemainingProgramTime",
     value: { value: "PT1H15M" }
   });
 
+  assert.strictEqual(device.connected, true);
   assert.strictEqual(device.RemainingProgramTime.value, "PT1H15M");
   assert.strictEqual(device._initialRemaining, 4500);
   assert.ok(Number.isFinite(device._remainingObservedAt));

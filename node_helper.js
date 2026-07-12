@@ -23,6 +23,7 @@ const NodeHelper = require("node_helper"),
 const ACTIVE_PROGRAM_RETRY_DELAY_MS = 5000; // 5s
 const ACTIVE_PROGRAM_MAX_RETRIES = 3; // Maximum number of retries for active program requests
 const FORCED_ACTIVE_PROGRAM_DEDUP_WINDOW_MS = 15000;
+const FULL_SNAPSHOT_INTERVAL_MS = 30 * 60 * 1000;
 const NO_ACTIVE_PROGRAM_RETRY_BLOCKED_TYPES = new Set([
   "Washer",
   "Dryer",
@@ -186,6 +187,7 @@ module.exports = NodeHelper.create({
     reason: null
   },
   rateLimitReleaseTimer: null,
+  fullSnapshotTimer: null,
   activeProgramFetchInFlight: false,
   activeProgramFetchSignature: null,
   recentForcedProgramFetch: null,
@@ -560,6 +562,39 @@ module.exports = NodeHelper.create({
     moduleLog("info", `Starting module helper: ${this.name}`);
   },
 
+  schedulePeriodicFullSnapshotRefresh() {
+    if (this.fullSnapshotTimer) {
+      return;
+    }
+
+    this.fullSnapshotTimer = setInterval(() => {
+      if (!this.hc || !this.deviceService || this.isAuthFlowInProgress()) {
+        return;
+      }
+
+      if (
+        this.sessionState !== SESSION_STATES.READY &&
+        this.sessionState !== SESSION_STATES.RATE_LIMITED
+      ) {
+        return;
+      }
+
+      moduleLog("debug", "Running scheduled full device snapshot refresh");
+      this.dispatchDeviceRefreshWithProgramSync({
+        reason: "scheduled_full_snapshot",
+        requester: "scheduled_snapshot",
+        forcePrograms: true
+      });
+    }, FULL_SNAPSHOT_INTERVAL_MS);
+  },
+
+  clearPeriodicFullSnapshotRefresh() {
+    if (this.fullSnapshotTimer) {
+      clearInterval(this.fullSnapshotTimer);
+      this.fullSnapshotTimer = null;
+    }
+  },
+
   stop() {
     moduleLog("info", `Stopping module helper: ${this.name}`);
     if (this.activeProgramManager && typeof this.activeProgramManager.clearAll === "function") {
@@ -569,6 +604,7 @@ module.exports = NodeHelper.create({
       clearTimeout(this.rateLimitReleaseTimer);
       this.rateLimitReleaseTimer = null;
     }
+    this.clearPeriodicFullSnapshotRefresh();
     if (this.deviceService && typeof this.deviceService.shutdown === "function") {
       this.deviceService.shutdown();
     }
@@ -598,6 +634,7 @@ module.exports = NodeHelper.create({
 
   handleSessionAlreadyActive() {
     moduleLog("info", "Session already authenticated - using existing tokens");
+    this.schedulePeriodicFullSnapshotRefresh();
     this.emitInitStatus(
       "session_active",
       {
@@ -1097,6 +1134,8 @@ module.exports = NodeHelper.create({
     this.transitionSessionState(SESSION_EVENTS.AUTH_SUCCESS, {
       reason: "homeconnect_initialized"
     });
+
+    this.schedulePeriodicFullSnapshotRefresh();
 
     this.emitInitStatus("success");
 

@@ -107,6 +107,27 @@ function createDeviceService(overrides = {}) {
     assert.strictEqual(settingsCalls, 0);
   }
 
+  // fetchDeviceStatus: successful status snapshot refreshes stale connected=false
+  {
+    const { service } = createDeviceService();
+    const device = {
+      haId: "ha-status",
+      name: "Washer",
+      connected: false
+    };
+    service.attachClient({
+      getStatus: async () => ({
+        success: true,
+        data: { status: [] }
+      }),
+      applyEventToDevice() { }
+    });
+
+    await service.fetchDeviceStatus(device);
+
+    assert.strictEqual(device.connected, true);
+  }
+
   // handleGetDevicesSuccess: broadcasts the base device list immediately before slow enrichment settles
   {
     const { service, notifications } = createDeviceService();

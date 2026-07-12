@@ -14,6 +14,7 @@ function createProgramService(overrides = {}) {
         haId: "ha-1",
         name: "Washer",
         type: "Washer",
+        connected: false,
         optionsApplied: []
       }
     ]
@@ -56,6 +57,7 @@ function createProgramService(overrides = {}) {
     assert.ok(payload);
     assert.strictEqual(payload.name, "Washer");
     const device = devices.get("ha-1");
+    assert.strictEqual(device.connected, true);
     assert.strictEqual(device.optionsApplied.length, 2);
     assert.strictEqual(device.ActiveProgramKey, "LaundryCare.Washer.Program.EasyCare");
     assert.strictEqual(device.ActiveProgramName, "Easy Care");
@@ -175,7 +177,7 @@ function createProgramService(overrides = {}) {
           }
         };
       },
-      applyEventToDevice() {}
+      applyEventToDevice() { }
     });
 
     const result = await service.fetchActiveProgramForDevice("ha-1", "Washer");
@@ -217,7 +219,7 @@ function createProgramService(overrides = {}) {
           ]
         }
       }),
-      applyEventToDevice() {}
+      applyEventToDevice() { }
     });
 
     const result = await service.fetchActiveProgramForDevice("ha-1", "Washer");
@@ -265,7 +267,7 @@ function createProgramService(overrides = {}) {
           ]
         }
       }),
-      applyEventToDevice() {}
+      applyEventToDevice() { }
     });
 
     const result = await service.fetchActiveProgramForDevice("ha-hood", "Hood");

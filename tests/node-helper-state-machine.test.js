@@ -54,6 +54,10 @@ function resetHelperState() {
   helper.activeProgramFetchInFlight = false;
   helper.activeProgramFetchSignature = null;
   helper.recentForcedProgramFetch = null;
+  if (helper.fullSnapshotTimer) {
+    clearInterval(helper.fullSnapshotTimer);
+    helper.fullSnapshotTimer = null;
+  }
   helper.setRateLimitUntil(0);
   if (helper.rateLimitReleaseTimer) {
     clearTimeout(helper.rateLimitReleaseTimer);
@@ -163,7 +167,7 @@ function resetHelperState() {
   await wait(35);
   assert.strictEqual(helper.sessionState, "rate_limited");
 
-  await wait(70);
+  await wait(120);
   assert.strictEqual(helper.sessionState, "ready");
 
   // SSE debug stats should track real gaps between events.
@@ -291,6 +295,41 @@ function resetHelperState() {
   ]);
 
   helper.handleGetActivePrograms = originalInitHandleGetActivePrograms;
+
+  // Successful init should arm the periodic 30-minute full snapshot refresh.
+  resetHelperState();
+  helper.hc = {};
+  helper.deviceService = {
+    getDevices(callback) {
+      callback("DEVICES_UPDATE", []);
+    }
+  };
+  helper.sessionState = "ready";
+  const originalSetInterval = global.setInterval;
+  const originalClearInterval = global.clearInterval;
+  const originalHandleGetActiveProgramsForScheduler = helper.handleGetActivePrograms;
+  const scheduledIntervals = [];
+  global.setInterval = (callback, delay) => {
+    const timer = { callback, delay };
+    scheduledIntervals.push(timer);
+    return timer;
+  };
+  global.clearInterval = () => { };
+  helper.handleGetActivePrograms = () => { };
+
+  try {
+    helper.handleHomeConnectInitSuccess();
+    helper.handleSessionAlreadyActive();
+
+    assert.strictEqual(scheduledIntervals.length, 1);
+    assert.strictEqual(scheduledIntervals[0].delay, 30 * 60 * 1000);
+    assert.ok(helper.fullSnapshotTimer);
+  } finally {
+    helper.clearPeriodicFullSnapshotRefresh();
+    helper.handleGetActivePrograms = originalHandleGetActiveProgramsForScheduler;
+    global.setInterval = originalSetInterval;
+    global.clearInterval = originalClearInterval;
+  }
 
   // Washers should not enter active-program retry loops when the API reports no active program.
   resetHelperState();
