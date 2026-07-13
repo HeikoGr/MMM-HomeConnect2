@@ -51,6 +51,11 @@ function resetHelperState() {
     apiCounters: {}
   };
   helper.hc = null;
+  helper.instanceId = null;
+  helper.sharedConfigOwnerInstanceId = null;
+  if (helper.clientConfigs && typeof helper.clientConfigs.clear === "function") {
+    helper.clientConfigs.clear();
+  }
   helper.activeProgramFetchInFlight = false;
   helper.activeProgramFetchSignature = null;
   helper.recentForcedProgramFetch = null;
@@ -67,6 +72,8 @@ function resetHelperState() {
     REQUEST: "MMM-HomeConnect2_REQUEST",
     EVENT: "MMM-HomeConnect2_EVENT"
   };
+  helper.config = null;
+  helper.configReceived = false;
 }
 
 (async () => {
@@ -425,6 +432,98 @@ function resetHelperState() {
   });
 
   assert.strictEqual(fetchCalls, 1);
+
+  // Shared backend config must remain stable when additional frontend instances connect.
+  resetHelperState();
+  const authConfigs = [];
+  const deviceConfigs = [];
+  const acceptLanguages = [];
+  const configuredInstances = [];
+  helper.authService = {
+    setConfig(config) {
+      authConfigs.push(config);
+    }
+  };
+  helper.deviceService = {
+    setConfig(config) {
+      deviceConfigs.push(config);
+    }
+  };
+  helper.hc = {
+    setAcceptLanguage(language) {
+      acceptLanguages.push(language);
+    }
+  };
+  helper.handleConfigNotificationFirstTime = (instanceId) => {
+    configuredInstances.push(`first:${instanceId}`);
+    helper.configReceived = true;
+  };
+  helper.handleConfigNotificationSubsequent = (instanceId) => {
+    configuredInstances.push(`next:${instanceId}`);
+  };
+
+  helper.handleConfigNotification({
+    instanceId: "frontend-a",
+    apiLanguage: "de",
+    minActiveProgramIntervalMs: 1111,
+    enableSSEHeartbeat: true
+  });
+  helper.handleConfigNotification({
+    instanceId: "frontend-b",
+    apiLanguage: "en",
+    minActiveProgramIntervalMs: 9999,
+    enableSSEHeartbeat: false
+  });
+
+  assert.strictEqual(helper.instanceId, "frontend-a");
+  assert.strictEqual(helper.sharedConfigOwnerInstanceId, "frontend-a");
+  assert.strictEqual(helper.config.apiLanguage, "de");
+  assert.strictEqual(helper.config.minActiveProgramIntervalMs, 1111);
+  assert.deepStrictEqual(configuredInstances, ["first:frontend-a", "next:frontend-b"]);
+  assert.strictEqual(authConfigs.length, 1);
+  assert.strictEqual(deviceConfigs.length, 2);
+  assert.deepStrictEqual(acceptLanguages, ["de", "de"]);
+
+  // Manual auth retry must preserve all registered frontend instances.
+  resetHelperState();
+  helper.authService = {
+    setConfig() { }
+  };
+  helper.deviceService = {
+    devices: new Map(),
+    setConfig() { },
+    shutdown() { }
+  };
+  helper.activeProgramManager = {
+    clearAll() { }
+  };
+  helper.handleConfigNotificationFirstTime = () => {
+    helper.configReceived = true;
+  };
+  helper.handleConfigNotificationSubsequent = () => { };
+  helper.checkTokenAndInitialize = () => { };
+
+  helper.handleConfigNotification({ instanceId: "frontend-a" });
+  helper.handleConfigNotification({ instanceId: "frontend-b" });
+
+  const retryNotifications = [];
+  helper.sendSocketNotification = (notification, payload) => {
+    retryNotifications.push({ notification, payload });
+  };
+
+  helper.retryAuthentication();
+  helper.broadcastToAllClients("INIT_STATUS", {
+    status: "post_retry"
+  });
+
+  assert.strictEqual(
+    retryNotifications.filter((entry) => entry.payload?.instanceId === "frontend-a").length,
+    1
+  );
+  assert.strictEqual(
+    retryNotifications.filter((entry) => entry.payload?.instanceId === "frontend-b").length,
+    1
+  );
 
   helper.transitionSessionState("RESET", {
     reason: "test_reset"

@@ -176,6 +176,8 @@ module.exports = NodeHelper.create({
   initializationAttempts: 0,
   maxInitAttempts: 3,
   instanceId: null,
+  sharedConfigOwnerInstanceId: null,
+  clientConfigs: new Map(),
   activeProgramManager: null,
   authService: null,
   deviceService: null,
@@ -344,7 +346,7 @@ module.exports = NodeHelper.create({
   },
 
   emitStatus(notification, messageMap, status, payload = {}, options = {}) {
-    const { broadcast = true } = options;
+    const { broadcast = true, targetInstanceId = null } = options;
     const builtPayload = this.buildStatusPayload(messageMap, status, payload);
     const action = this.mapNotificationToAction(notification);
 
@@ -353,7 +355,11 @@ module.exports = NodeHelper.create({
       return;
     }
 
-    this.sendEventToInstance(this.instanceId || "default", action, builtPayload);
+    this.sendEventToInstance(
+      targetInstanceId || builtPayload.instanceId || this.instanceId || "default",
+      action,
+      builtPayload
+    );
   },
 
   mapNotificationToAction(notification) {
@@ -498,6 +504,33 @@ module.exports = NodeHelper.create({
     };
   },
 
+  getSharedConfigConflictKeys(nextConfig = {}) {
+    if (!this.config) {
+      return [];
+    }
+
+    const sharedKeys = [
+      "clientId",
+      "clientSecret",
+      "apiLanguage",
+      "apiRequestTimeoutMs",
+      "minActiveProgramIntervalMs",
+      "enableSSEHeartbeat",
+      "sseHeartbeatCheckIntervalMs",
+      "sseHeartbeatStaleThresholdMs",
+      "sseRecoveryCooldownMs",
+      "logLevel",
+      "loglevel"
+    ];
+
+    return sharedKeys.filter(
+      (key) =>
+        Object.hasOwn(nextConfig, key) &&
+        Object.hasOwn(this.config, key) &&
+        this.config[key] !== nextConfig[key]
+    );
+  },
+
   shouldRetryNoActiveProgram(device) {
     if (!deviceAppearsActive(device)) {
       return false;
@@ -610,70 +643,70 @@ module.exports = NodeHelper.create({
     }
   },
 
-  handleConfigNotificationFirstTime() {
+  handleConfigNotificationFirstTime(instanceId) {
     this.configReceived = true;
 
     if (this.isSessionAuthenticated()) {
-      return this.handleSessionAlreadyActive();
+      return this.handleSessionAlreadyActive(instanceId);
     }
 
     if (this.isAuthFlowInProgress()) {
-      return this.notifyAuthInProgress();
+      return this.notifyAuthInProgress(instanceId);
     }
 
     this.emitInitStatus(
       "initializing",
       {
-        instanceId: this.instanceId
+        instanceId
       },
-      { broadcast: false }
+      { broadcast: false, targetInstanceId: instanceId }
     );
 
-    this.checkTokenAndInitialize();
+    this.checkTokenAndInitialize(instanceId);
   },
 
-  handleSessionAlreadyActive() {
+  handleSessionAlreadyActive(instanceId) {
     moduleLog("info", "Session already authenticated - using existing tokens");
     this.schedulePeriodicFullSnapshotRefresh();
     this.emitInitStatus(
       "session_active",
       {
-        instanceId: this.instanceId
+        instanceId
       },
-      { broadcast: false }
+      { broadcast: false, targetInstanceId: instanceId }
     );
 
     this.dispatchDeviceRefreshWithProgramSync({
       reason: "session_active_refresh",
-      requester: this.instanceId || "session_active",
+      requester: instanceId || "session_active",
       forcePrograms: false
     });
   },
 
-  notifyAuthInProgress() {
+  notifyAuthInProgress(instanceId) {
     moduleLog("info", "Authentication already in progress for another client instance");
     this.emitInitStatus(
       "auth_in_progress",
       {
-        instanceId: this.instanceId
+        instanceId
       },
-      { broadcast: false }
+      { broadcast: false, targetInstanceId: instanceId }
     );
   },
 
-  handleConfigNotificationSubsequent() {
+  handleConfigNotificationSubsequent(instanceId) {
     if (this.isSessionAuthenticated() && this.hc && this.deviceService) {
       this.emitInitStatus(
         "complete",
         {
-          instanceId: this.instanceId
+          instanceId
         },
-        { broadcast: false }
+        { broadcast: false, targetInstanceId: instanceId }
       );
 
       this.deviceService.broadcastDevices(this.broadcastToAllClients.bind(this));
     } else if (this.isAuthFlowInProgress()) {
-      this.notifyAuthInProgress();
+      this.notifyAuthInProgress(instanceId);
     }
   },
 
@@ -682,10 +715,11 @@ module.exports = NodeHelper.create({
       reason: "config_notification"
     });
 
-    this.instanceId = payload.instanceId || "default";
-    globalSession.clientInstances.add(this.instanceId);
+    const instanceId = payload.instanceId || "default";
+    globalSession.clientInstances.add(instanceId);
+    this.clientConfigs.set(instanceId, { ...payload });
 
-    moduleLog("debug", `Processing CONFIG notification for instance: ${this.instanceId}`);
+    moduleLog("debug", `Processing CONFIG notification for instance: ${instanceId}`);
     moduleLog("debug", `Registered clients: ${globalSession.clientInstances.size}`);
 
     // If debug information has already been collected, immediately send a snapshot
@@ -705,6 +739,8 @@ module.exports = NodeHelper.create({
     }
 
     if (!this.configReceived) {
+      this.instanceId = instanceId;
+      this.sharedConfigOwnerInstanceId = instanceId;
       this.config = payload;
       // apply configured log level for module-level logging via auth service
       this.authService.setConfig(this.config);
@@ -715,8 +751,16 @@ module.exports = NodeHelper.create({
       if (this.hc && typeof this.hc.setAcceptLanguage === "function") {
         this.hc.setAcceptLanguage(this.config.apiLanguage);
       }
-      this.handleConfigNotificationFirstTime();
+      this.handleConfigNotificationFirstTime(instanceId);
     } else {
+      const conflictKeys = this.getSharedConfigConflictKeys(payload);
+      if (conflictKeys.length > 0) {
+        moduleLog("warn", "Ignoring conflicting shared config from secondary client instance", {
+          instanceId,
+          sharedConfigOwnerInstanceId: this.sharedConfigOwnerInstanceId || this.instanceId,
+          conflictKeys
+        });
+      }
       this.updateActiveProgramInterval();
       if (this.deviceService && typeof this.deviceService.setConfig === "function") {
         this.deviceService.setConfig(this.config);
@@ -724,7 +768,7 @@ module.exports = NodeHelper.create({
       if (this.hc && typeof this.hc.setAcceptLanguage === "function") {
         this.hc.setAcceptLanguage(this.config.apiLanguage);
       }
-      this.handleConfigNotificationSubsequent();
+      this.handleConfigNotificationSubsequent(instanceId);
     }
   },
 
@@ -744,9 +788,13 @@ module.exports = NodeHelper.create({
 
     if (!this.hc) {
       moduleLog("warn", "HomeConnect not initialized - cannot fetch active programs");
-      this.emitInitStatus("hc_not_ready", {
-        instanceId: requester
-      });
+      this.emitInitStatus(
+        "hc_not_ready",
+        {
+          instanceId: requester
+        },
+        requester ? { broadcast: false, targetInstanceId: requester } : {}
+      );
       return;
     }
 
@@ -756,13 +804,17 @@ module.exports = NodeHelper.create({
     if (!force && rateLimitActive) {
       const remainingSeconds = Math.ceil((globalSession.rateLimitUntil - now) / 1000);
       moduleLog("info", `Rate limited - ${remainingSeconds}s remaining`);
-      this.emitInitStatus("device_error", {
-        message: `Rate limit active - please wait ${remainingSeconds}s`,
-        rateLimitSeconds: remainingSeconds,
-        statusCode: 429,
-        isRateLimit: true,
-        instanceId: requester
-      });
+      this.emitInitStatus(
+        "device_error",
+        {
+          message: `Rate limit active - please wait ${remainingSeconds}s`,
+          rateLimitSeconds: remainingSeconds,
+          statusCode: 429,
+          isRateLimit: true,
+          instanceId: requester
+        },
+        requester ? { broadcast: false, targetInstanceId: requester } : {}
+      );
       return;
     }
 
@@ -1003,7 +1055,7 @@ module.exports = NodeHelper.create({
     return this.authService.readRefreshTokenFromFile();
   },
 
-  checkRateLimit() {
+  checkRateLimit(targetInstanceId = null) {
     const now = Date.now();
     if (now - globalSession.lastAuthAttempt < globalSession.MIN_AUTH_INTERVAL) {
       globalSession.rateLimitUntil =
@@ -1012,7 +1064,15 @@ module.exports = NodeHelper.create({
         reason: "auth_interval_rate_limit"
       });
       moduleLog("warn", "Rate limit: waiting before next auth attempt");
-      this.emitInitStatus("rate_limited");
+      this.emitInitStatus(
+        "rate_limited",
+        targetInstanceId
+          ? {
+            instanceId: targetInstanceId
+          }
+          : {},
+        targetInstanceId ? { broadcast: false, targetInstanceId } : {}
+      );
       this.scheduleRateLimitRelease(globalSession.rateLimitUntil);
       return false;
     }
@@ -1027,7 +1087,7 @@ module.exports = NodeHelper.create({
     }
   },
 
-  checkTokenAndInitialize() {
+  checkTokenAndInitialize(targetInstanceId = null) {
     const token = this.readRefreshTokenFromFile();
 
     if (token) {
@@ -1035,13 +1095,21 @@ module.exports = NodeHelper.create({
       globalSession.refreshToken = token;
       this.refreshToken = token;
 
-      this.emitInitStatus("token_found");
+      this.emitInitStatus(
+        "token_found",
+        targetInstanceId
+          ? {
+            instanceId: targetInstanceId
+          }
+          : {},
+        targetInstanceId ? { broadcast: false, targetInstanceId } : {}
+      );
 
       this.initializeHomeConnect(token);
       return;
     }
 
-    if (!this.checkRateLimit()) {
+    if (!this.checkRateLimit(targetInstanceId)) {
       return;
     }
 
@@ -1278,7 +1346,6 @@ module.exports = NodeHelper.create({
     });
     globalSession.accessToken = null;
     globalSession.refreshToken = null;
-    globalSession.clientInstances.clear();
 
     this.configReceived = false;
     this.initializationAttempts = 0;

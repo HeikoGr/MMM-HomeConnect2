@@ -910,7 +910,7 @@ Module.register("MMM-HomeConnect2", {
       }
     }
     container += `<div class='deviceStatusIcons'>${this.getStatusIconsHtml(device, displayState)}</div>`;
-    container += `<div class='deviceName bright small'>${displayState.deviceName}`;
+    container += `<div class='deviceName bright small'><span class='deviceNameLabel'>${displayState.deviceName}</span>`;
     if (presentation.programMeta) {
       container += `<div class='deviceProgram dimmed xsmall'>${presentation.programMeta}</div>`;
     }

@@ -13,22 +13,22 @@
 
 .deviceContainer {
   display: grid;
-  grid-template-columns: 60px 40px minmax(0, 1fr);
-  column-gap: 8px;
-  row-gap: 2px;
+  grid-template-columns: 60px 32px minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 3px;
   padding: 3px 4px;
   align-items: start;
 }
 
 .deviceContainer.deviceContainerWithoutDeviceIcon {
-  grid-template-columns: 40px minmax(0, 1fr);
+  grid-template-columns: 32px minmax(0, 1fr);
 }
 
 .deviceContainer.deviceOffline {
   opacity: 0.72;
 }
 
-.deviceContainer > img,
+.deviceContainer>img,
 .device_img {
   text-align: center;
   align-self: start;
@@ -36,6 +36,8 @@
   height: 60px;
   grid-column: 1;
   grid-row: 1 / span 4;
+  object-fit: contain;
+  object-position: center;
 }
 
 .deviceIconFallback {
@@ -44,20 +46,24 @@
   justify-content: center;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.85);
+  color: rgba(255, 255, 255, 0.92);
   font-size: 28px;
 }
 
-.deviceContainer > div {
+.deviceContainer>div {
   text-align: left;
   min-width: 0;
 }
 
 .deviceStatusIcons {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
   grid-column: 2;
   grid-row: 1 / span 2;
   align-self: start;
-  padding-top: 2px;
+  min-width: 32px;
 }
 
 .deviceContainerWithoutDeviceIcon .deviceStatusIcons {
@@ -65,9 +71,12 @@
 }
 
 .deviceStatusIcon {
-  text-align: center;
-  align-self: center;
-  line-height: 0.8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 18px;
+  width: 100%;
+  line-height: 1;
   color: #ffffff;
   font-size: 16pt;
 }
@@ -82,10 +91,14 @@
   font-size: 17pt;
   font-weight: bold;
   text-align: left;
-  vertical-align: middle;
   color: #ffffff;
-  line-height: 1.05;
+  line-height: 1;
   align-self: start;
+}
+
+.deviceNameLabel {
+  display: block;
+  line-height: 1;
 }
 
 .deviceContainerWithoutDeviceIcon .deviceName,
@@ -164,12 +177,10 @@ progress {
 /* Indeterminate styling: keep native progress but add subtle animation fallback */
 progress[max]:not([value]) {
   /* browsers show indeterminate natively; ensure visibility */
-  background: linear-gradient(
-    90deg,
-    rgba(255, 255, 255, 0.1) 0%,
-    rgba(255, 255, 255, 0.25) 50%,
-    rgba(255, 255, 255, 0.1) 100%
-  );
+  background: linear-gradient(90deg,
+      rgba(255, 255, 255, 0.1) 0%,
+      rgba(255, 255, 255, 0.25) 50%,
+      rgba(255, 255, 255, 0.1) 100%);
 }
 
 .hc-debug-panel {
@@ -212,7 +223,7 @@ progress[max]:not([value]) {
   gap: 12px;
 }
 
-.hc-debug-row + .hc-debug-row {
+.hc-debug-row+.hc-debug-row {
   margin-top: 4px;
 }
 
@@ -296,12 +307,13 @@ progress[max]:not([value]) {
 }
 
 .auth-qr {
-  margin-top: 6px;
+  margin: 6px auto 0;
   max-width: 220px;
 }
 
 .auth-qr svg {
   display: block;
+  margin: 0 auto;
   width: 100%;
   height: auto;
   background: #ffffff;
