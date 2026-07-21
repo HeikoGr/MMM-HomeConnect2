@@ -308,7 +308,7 @@ Module.register("MMM-HomeConnect2", {
   getScripts() {
     // Use full module-relative path so the MagicMirror loader can find the file
     return [
-      "modules/MMM-HomeConnect2/lib/mmm-shared.js",
+      "modules/MMM-HomeConnect2/lib/mmm-shared/mmm-shared.js",
       "modules/MMM-HomeConnect2/lib/device-utils.js"
     ];
   },

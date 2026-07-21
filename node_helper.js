@@ -7,7 +7,7 @@ const DeviceService = require("./lib/device-service");
 const { refreshTokenPath } = require("./lib/module-paths");
 const ProgramService = require("./lib/program-service");
 const { deviceAppearsActive, getDeviceTypeMeta, isDeviceConnected } = require("./lib/device-utils");
-const shared = require("./lib/mmm-shared");
+const shared = require("./lib/mmm-shared/mmm-shared");
 const NodeHelper = require("node_helper"),
   globalSession = {
     accessToken: null, // Access token for API requests
