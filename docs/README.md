@@ -1,6 +1,10 @@
 # MMM-HomeConnect2 Documentation
 
-The main entry point for installation, configuration, and usage is [../README.md](../README.md). This directory contains additional documentation that does not belong in the root README.
+User-facing setup, configuration, authentication, and troubleshooting documentation now lives in the project wiki.
+
+- Wiki: <https://github.com/HeikoGr/MMM-HomeConnect2/wiki>
+
+This directory contains additional technical and development documentation.
 
 ## Contents
 
