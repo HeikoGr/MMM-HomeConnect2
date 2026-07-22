@@ -8,10 +8,18 @@ MagicMirror module for Home Connect appliances using the OAuth2 device flow.
 cd ~/MagicMirror/modules
 git clone https://github.com/HeikoGr/MMM-HomeConnect2
 cd MMM-HomeConnect2
-npm install
+npm ci --omit=dev
 ```
 
-## Minimal Example
+## Update
+
+```bash
+cd ~/MagicMirror/modules/MMM-HomeConnect2
+git pull
+npm ci --omit=dev
+```
+
+## Configuration
 
 ```js
 {
@@ -23,7 +31,7 @@ npm install
         showDeviceIcon: true,
         showDeviceIfInfoIsAvailable: true,
     },
-}
+},
 ```
 
 ## Documentation

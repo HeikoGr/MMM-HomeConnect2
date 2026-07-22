@@ -1,6 +1,6 @@
 {
   "name": "mmm-homeconnect2",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "description": "MagicMirror² Module for Home Connect",
   "main": "MMM-HomeConnect2.js",
   "author": "HeikoGr",
@@ -30,8 +30,9 @@
     "lint:fix": "biome check --write .",
     "test": "node tests/run-all.js",
     "test:spelling": "cspell .",
+    "check": "node --run mmcheck",
     "mmcheck": "node scripts/magicmirror-check.mjs --devcontainer-only --current",
-    "deps:update": "ncu -u && npm install && biome migrate --write"
+    "deps:update": "npx --yes npm-check-updates -u && npm install && npx @biomejs/biome migrate --write"
   },
   "lint-staged": {
     "*.{js,json,css,html}": [
