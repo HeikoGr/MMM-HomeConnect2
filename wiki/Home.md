@@ -2,6 +2,10 @@
 
 MMM-HomeConnect2 connects Home Connect appliances to MagicMirror without requiring a local browser on the mirror device.
 
+## Screenshot
+
+![MMM-HomeConnect2](../img/screenshot.png)
+
 Use this wiki if you want to:
 
 - install the module cleanly

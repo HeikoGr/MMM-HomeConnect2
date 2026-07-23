@@ -2,6 +2,10 @@
 
 MagicMirror module for Home Connect appliances using the OAuth2 device flow.
 
+## Screenshot
+
+![MMM-HomeConnect2](img/screenshot.png)
+
 ## Installation
 
 ```bash
@@ -33,6 +37,10 @@ npm ci --omit=dev
     },
 },
 ```
+
+Authentication QR example:
+
+![Device flow authentication](img/pic01_auth.png)
 
 ## Documentation
 
