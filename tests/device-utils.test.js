@@ -140,8 +140,8 @@ const {
         showDeviceIfInfoIsAvailable: true
       }
     ),
-    false,
-    "Power-on devices with only a selected program should stay hidden"
+    true,
+    "Power-on devices with selected program metadata should stay visible"
   );
 
   assert.deepStrictEqual(

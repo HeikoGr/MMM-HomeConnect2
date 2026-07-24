@@ -190,7 +190,7 @@ function createProgramService(overrides = {}) {
     assert.strictEqual(availableProgramCalls, 1);
   }
 
-  // fetchActiveProgramForDevice: does not fall back to available programs for washers
+  // fetchActiveProgramForDevice: falls back to available programs when active/selected are missing
   {
     const { service } = createProgramService();
     service.attachClient({
@@ -223,8 +223,9 @@ function createProgramService(overrides = {}) {
     });
 
     const result = await service.fetchActiveProgramForDevice("ha-1", "Washer");
-    assert.strictEqual(result.success, false);
-    assert.strictEqual(result.error, "No active program");
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.source, "available");
+    assert.strictEqual(result.data.programs.length, 2);
   }
 
   // fetchActiveProgramForDevice: still falls back to available programs for non-blocked types

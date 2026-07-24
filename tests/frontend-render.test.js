@@ -131,7 +131,7 @@ function createInstance(overrides = {}) {
       ]
     });
     const runningDom = runningInstance.getDom();
-    assert.ok(runningDom.innerHTML.includes("Eco 40-60"));
+    assert.ok(runningDom.innerHTML.includes("ACTIVE_PROGRAM: Eco 40-60"));
     assert.ok(runningDom.innerHTML.includes("Silent • varioSpeed"));
     assert.ok(runningDom.innerHTML.includes("35%"));
     assert.ok(runningDom.innerHTML.includes("deviceProgressBar"));
@@ -146,7 +146,10 @@ function createInstance(overrides = {}) {
     assert.ok(runningDisplayState.runtime);
     assert.ok(runningDisplayState.presentation);
     assert.strictEqual(runningDisplayState.runtime.percent, 35);
-    assert.strictEqual(runningDisplayState.presentation.programMeta, "Eco 40-60");
+    assert.strictEqual(
+      runningDisplayState.presentation.programMeta,
+      "ACTIVE_PROGRAM: Eco 40-60"
+    );
 
     const configuredLanguageInstance = createInstance({
       config: {
@@ -209,9 +212,8 @@ function createInstance(overrides = {}) {
     });
     const selectedDom = selectedProgramInstance.getDom();
     assert.ok(selectedDom.innerHTML.includes("Dryer"));
-    assert.ok(!selectedDom.innerHTML.includes("Synthetics"));
-    assert.ok(!selectedDom.innerHTML.includes("SELECTED_PROGRAM"));
-    assert.ok(!selectedDom.innerHTML.includes("Cupboard Dry Plus • Low Heat"));
+    assert.ok(selectedDom.innerHTML.includes("SELECTED_PROGRAM: Synthetics"));
+    assert.ok(selectedDom.innerHTML.includes("Cupboard Dry Plus • Low Heat"));
 
     const runningSelectedProgramInstance = createInstance({
       devices: [
@@ -230,8 +232,32 @@ function createInstance(overrides = {}) {
     });
     const runningSelectedDom = runningSelectedProgramInstance.getDom();
     assert.ok(runningSelectedDom.innerHTML.includes("Dryer"));
-    assert.ok(!runningSelectedDom.innerHTML.includes("Synthetics"));
+    assert.ok(runningSelectedDom.innerHTML.includes("SELECTED_PROGRAM: Synthetics"));
     assert.ok(!runningSelectedDom.innerHTML.includes("fa-play"));
+
+    const selectedDishwasherInstance = createInstance({
+      config: {
+        showDeviceIcon: false,
+        showDeviceIfInfoIsAvailable: true,
+        showDeviceIfDoorIsOpen: false,
+        showDeviceIfFailure: false
+      },
+      devices: [
+        {
+          name: "Dishwasher",
+          type: "Dishwasher",
+          PowerState: "Off",
+          ActiveProgramName: "Eco 50°",
+          ActiveProgramSource: "selected",
+          ActiveProgramDetails: ["varioSpeed Plus"]
+        }
+      ]
+    });
+    const selectedDishwasherDom = selectedDishwasherInstance.getDom();
+    assert.ok(selectedDishwasherDom.innerHTML.includes("Dishwasher"));
+    assert.ok(selectedDishwasherDom.innerHTML.includes("SELECTED_PROGRAM"));
+    assert.ok(selectedDishwasherDom.innerHTML.includes("Eco 50°"));
+    assert.ok(selectedDishwasherDom.innerHTML.includes("varioSpeed Plus"));
 
     const secondCycleDryerInstance = createInstance({
       devices: [
@@ -374,7 +400,7 @@ function createInstance(overrides = {}) {
     const selectedDoorOpenDom = selectedDoorOpenInstance.getDom();
     assert.ok(selectedDoorOpenDom.innerHTML.includes("Dryer"));
     assert.ok(selectedDoorOpenDom.innerHTML.includes("fa-door-open"));
-    assert.ok(!selectedDoorOpenDom.innerHTML.includes("Synthetics"));
+    assert.ok(selectedDoorOpenDom.innerHTML.includes("SELECTED_PROGRAM: Synthetics"));
     assert.ok(!selectedDoorOpenDom.innerHTML.includes("1h 16m"));
 
     const finishedProgramInstance = createInstance({
@@ -608,6 +634,22 @@ function createInstance(overrides = {}) {
     const rateLimitDom = rateLimitInstance.getDom();
     assert.ok(rateLimitDom.innerHTML.includes("HTTP 429"));
     assert.ok(rateLimitDom.innerHTML.includes("Rate limit active - please wait 120s"));
+
+    const configMismatchInstance = createInstance({
+      lastInitStatus: {
+        status: "device_error",
+        message: "Konfigurationskonflikt: Dieses Display nutzt eine andere Konfiguration.",
+        isConfigMismatch: true
+      }
+    });
+    const configMismatchDom = configMismatchInstance.getDom();
+    assert.ok(configMismatchDom.innerHTML.includes("CONFIG_MISMATCH_TITLE"));
+    assert.ok(
+      configMismatchDom.innerHTML.includes(
+        "Konfigurationskonflikt: Dieses Display nutzt eine andere Konfiguration."
+      )
+    );
+    assert.ok(configMismatchDom.innerHTML.includes("LOADING_APPLIANCES"));
 
     const debugSessionInstance = createInstance({
       config: {

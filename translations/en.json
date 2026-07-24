@@ -25,7 +25,10 @@
   "IN_PROGRESS": "In progress",
   "WRINKLE_PROTECTION_ACTIVE": "Wrinkle protection active",
   "APPROX_PREFIX": "approx.",
+  "ACTIVE_PROGRAM": "Active program",
   "SELECTED_PROGRAM": "Selected program",
+  "CONFIG_MISMATCH_TITLE": "Configuration mismatch",
+  "CONFIG_MISMATCH": "This display uses a different MMM-HomeConnect2 configuration than the running server instance.",
   "AVAILABLE_PROGRAMS": "Programs",
   "AVAILABLE_OPTIONS": "Options",
   "ACTIVE_ALERTS": "Alerts"

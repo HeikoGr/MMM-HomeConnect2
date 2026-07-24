@@ -208,16 +208,17 @@ function createDeviceService(overrides = {}) {
     assert.ok(errEvent.p.message.includes("HTTP 429"));
   }
 
-  // SSE global subscription establishes immediately and is idempotent
+  // SSE per-device subscription establishes immediately and is idempotent
   {
     const { service: sseService } = createDeviceService();
     const subscribeCalls = [];
     const hcMock = {
-      subscribe: (type) => subscribeCalls.push(type),
+      subscribeDevice: (haId, type) => subscribeCalls.push(`${haId}:${type}`),
       refreshTokens: () => Promise.resolve(),
       closeEventSources: () => { }
     };
     sseService.attachClient(hcMock);
+    sseService.devices.set("ha-1", { haId: "ha-1", name: "Washer" });
     sseService.setConfig({ enableSSEHeartbeat: false });
 
     const handler = () => { };
@@ -226,8 +227,8 @@ function createDeviceService(overrides = {}) {
     await wait(0);
     assert.strictEqual(
       JSON.stringify(subscribeCalls),
-      JSON.stringify(["KEEP-ALIVE", "NOTIFY", "STATUS", "EVENT"]),
-      "Expected a single immediate subscription for KEEP-ALIVE/NOTIFY/STATUS/EVENT"
+      JSON.stringify(["ha-1:KEEP-ALIVE", "ha-1:NOTIFY", "ha-1:STATUS", "ha-1:EVENT"]),
+      "Expected one device channel subscription for KEEP-ALIVE/NOTIFY/STATUS/EVENT"
     );
 
     // Calling subscribeToDeviceEvents again with the same handler should not
@@ -236,7 +237,7 @@ function createDeviceService(overrides = {}) {
     await wait(0);
     assert.strictEqual(
       JSON.stringify(subscribeCalls),
-      JSON.stringify(["KEEP-ALIVE", "NOTIFY", "STATUS", "EVENT"]),
+      JSON.stringify(["ha-1:KEEP-ALIVE", "ha-1:NOTIFY", "ha-1:STATUS", "ha-1:EVENT"]),
       "Expected no additional subscriptions when reusing same handler"
     );
   }
@@ -293,7 +294,7 @@ function createDeviceService(overrides = {}) {
     });
     const subscribeCalls = [];
     const hcMock = {
-      subscribe: (type) => subscribeCalls.push(type),
+      subscribeDevice: (haId, type) => subscribeCalls.push(`${haId}:${type}`),
       refreshTokens: () => Promise.resolve(),
       closeEventSources: () => { }
     };
@@ -317,7 +318,7 @@ function createDeviceService(overrides = {}) {
     assert.strictEqual(staleRecoveries, 0);
     assert.strictEqual(
       JSON.stringify(subscribeCalls),
-      JSON.stringify(["KEEP-ALIVE", "NOTIFY", "STATUS", "EVENT"])
+      JSON.stringify(["ha-1:KEEP-ALIVE", "ha-1:NOTIFY", "ha-1:STATUS", "ha-1:EVENT"])
     );
 
     service.shutdown();

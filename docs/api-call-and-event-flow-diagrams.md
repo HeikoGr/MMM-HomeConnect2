@@ -1,86 +1,72 @@
 # API Call And Event Flow Diagrams
 
-This document describes the current request and SSE flow of the module.
+This document describes the current request, admission, and SSE flow of the module.
 
-## Diagram 1: Overall Flow as Flowchart
+## Diagram 1: Overall Flow
 
 ```mermaid
 flowchart TD
   A[Frontend starts module] --> B[sendSocketNotification: CONFIGURE]
   B --> C[Node Helper: handleConfigNotification]
 
-  C -->|Token available| D[initializeHomeConnect]
-  C -->|No token| E[Headless Device Flow Auth]
+  C --> C0{Config hash matches shared session?}
+  C0 -->|no| C1[Reject instance and send INIT_STATUS isConfigMismatch]
+  C0 -->|yes| D[Continue initialization]
+
+  D -->|Token available| E[initializeHomeConnect]
+  D -->|No token| F[Headless Device Flow Auth]
 
   subgraph AUTH[Auth / Token]
-    E --> E1[POST /security/oauth/device_authorization]
-    E1 --> E2[pollForToken: POST /security/oauth/token]
-    E2 -->|success| D
-    D --> D1[refresh token to access token]
-    D1 --> D2[Set token refresh timer]
-    D2 -->|at 90 percent of expires_in| D3[refreshTokens]
-    D3 --> D2
+    F --> F1[POST device_authorization]
+    F1 --> F2[poll token endpoint]
+    F2 -->|success| E
+    E --> E1[refresh token to access token]
+    E1 --> E2[set token refresh timer]
   end
 
-  D --> F[Initial full snapshot]
-  F --> G[DeviceService getDevices]
-  G --> G1[API: getHomeAppliances]
-  G1 --> G2[Per connected or active-looking device: getStatus + getSettings]
-  G2 --> G3[Broadcast DEVICES_UPDATE to frontend]
-  G3 --> G4[Run one active-program snapshot]
+  E --> G[Initial full snapshot]
+  G --> G1[getHomeAppliances]
+  G1 --> G2[per connected or active-looking device: getStatus + getSettings]
+  G2 --> G3[broadcast DEVICES_UPDATE]
+  G3 --> G4[run active-program snapshot]
 
-  G1 --> H[Set up SSE subscriptions]
-  H --> H0[Optional token refresh before subscribe]
-  H0 --> H1[subscribe KEEP-ALIVE + NOTIFY + STATUS + EVENT]
-  H1 --> H2[Start SSE heartbeat monitor]
+  G1 --> H[Establish SSE subscriptions]
+  H --> H0{Per-device channels supported?}
+  H0 -->|yes| H1[subscribe KEEP-ALIVE + per-device EVENTS]
+  H0 -->|no or failed| H2[fallback to global EVENTS subscription]
+  H1 --> H3[start heartbeat monitor]
+  H2 --> H3
 
-  subgraph SSE[SSE Runtime Behavior]
-    H2 --> H3[Heartbeat check every 10s]
-    H3 -->|KEEP-ALIVE or device event received| H4[markSseTraffic]
-    H4 --> H5[applyEventToDevice + broadcastDevices if payload changes state]
-    H5 --> H6[INIT_STATUS sse_recovered if previously stale]
+  subgraph SSE[SSE Runtime]
+    H3 --> I1[heartbeat check]
+    I1 -->|traffic received| I2[mark traffic + apply device event]
+    I2 --> I3[broadcast DEVICES_UPDATE if state changed]
+    I3 --> I4[send INIT_STATUS sse_recovered when applicable]
 
-    H3 -->|no SSE traffic for 70s| H7[INIT_STATUS sse_stale]
-    H7 --> H8[Rebuild SSE subscriptions]
-    H8 --> H9[Run one full API resync for devices + programs]
+    I1 -->|stale traffic| I5[send INIT_STATUS sse_stale]
+    I5 --> I6[rebuild subscriptions]
+    I6 --> I7[one full API resync: devices + programs]
 
-    H1 --> H10[EventSource Error]
-    H10 -->|HTTP 401/403 or 429-like| H11[Recreate EventSources in 30s]
-    H10 -->|other transport errors| H12[Recreate EventSources in 5s]
-    H11 --> H1
-    H12 --> H1
+    H --> I8[EventSource error]
+    I8 -->|401/403/429-like| I9[recreate streams with longer backoff]
+    I8 -->|other transport errors| I10[recreate streams with short backoff]
   end
 
-  subgraph FE[Frontend behavior]
-    G3 --> I[Frontend receives DEVICES_UPDATE]
-    I --> I1[updateDom]
-    I2[UI progress timer] -->|every 30s, min 5s| I1
+  subgraph PROGRAMS[Program snapshot per device]
+    G4 --> P0{dedupe or in-flight?}
+    P0 -->|yes| P1[skip]
+    P0 -->|no| P2[fetchActiveProgramsForDevices]
+
+    P2 --> P3{connected OR appearsActive?}
+    P3 -->|no| P4[skip]
+    P3 -->|yes| P5[getActiveProgram]
+    P5 -->|200| P6[apply ACTIVE_PROGRAM]
+    P5 -->|404| P7[getSelectedProgram]
+    P7 -->|200| P8[apply SELECTED_PROGRAM]
+    P7 -->|no data| P9[getAvailablePrograms and getAvailableProgram]
+    P9 --> P10[apply AVAILABLE_PROGRAMS]
+    P5 -->|429| P11[set rateLimitUntil from Retry-After]
   end
-
-  G4 --> O[handleGetActivePrograms]
-  H9 --> O
-
-  O --> O0{Program fetch already in flight or deduped?}
-  O0 -->|yes| O1[skip]
-  O0 -->|no| O2[fetchActiveProgramsForDevices]
-
-  subgraph PROGRAMS[Program API calls per device]
-    O2 --> P1{Device connected OR appearsActive?}
-    P1 -->|no| P2[skip]
-    P1 -->|yes| P3[getActiveProgram]
-    P3 -->|200| P4[optional getAvailableProgram for constraints]
-    P3 -->|404| P5[getSelectedProgram]
-    P5 -->|if allowed and useful| P6[getAvailablePrograms and getAvailableProgram]
-    P3 -->|429| P7[RateLimit Error]
-    P4 --> P8[applyProgramResult]
-    P5 --> P8
-    P6 --> P8
-    P8 --> P9[500ms delay before next device]
-  end
-
-  O2 --> Q[Broadcast ACTIVE_PROGRAMS_DATA and DEVICES_UPDATE]
-  P7 --> R[handleActiveProgramFetchError]
-  R --> R1[rateLimitUntil set to now plus backoff]
 ```
 
 ## Diagram 2: Sequence Diagram
@@ -94,65 +80,75 @@ sequenceDiagram
   participant PS as ProgramService
   participant APM as ActiveProgramManager
   participant HC as HomeConnect API
-  participant SSE as HomeConnect SSE Stream
 
-  FE->>NH: CONFIG(instanceId, config)
+  FE->>NH: CONFIGURE(instanceId, config)
+  NH->>NH: buildConfigHash(config)
 
-  alt Refresh token available
-    NH->>HC: init(refresh_token)
-  else No token
-    NH->>HC: device flow auth
-  end
-
-  NH->>DS: attachClient(hc)
-  NH->>PS: attachClient(hc)
-  NH->>DS: getDevices() for initial snapshot
-
-  DS->>HC: getHomeAppliances
-  HC-->>DS: device list
-  loop per connected or active-looking device
-    DS->>HC: getStatus
-    DS->>HC: getSettings
-  end
-  DS->>DS: subscribe KEEP-ALIVE/NOTIFY/STATUS/EVENT
-  DS-->>FE: DEVICES_UPDATE(devices)
-  NH->>NH: handleGetActivePrograms(force=false)
-
-  loop sequential program snapshot
-    NH->>PS: fetchActiveProgramForDevice(haId)
-    PS->>HC: getActiveProgram
-    alt 200 OK
-      HC-->>PS: active program
-    else 404
-      HC-->>PS: not found
-      PS->>HC: getSelectedProgram
-      opt allowed fallback types only
-        PS->>HC: getAvailablePrograms / getAvailableProgram
-      end
-    else 429
-      HC-->>PS: rate limit
+  alt shared hash exists and differs
+    NH-->>FE: INIT_STATUS(device_error, isConfigMismatch=true)
+  else hash accepted
+    alt refresh token available
+      NH->>HC: init(refresh_token)
+    else no token
+      NH->>HC: device flow auth
     end
-  end
-  NH-->>FE: DEVICES_UPDATE(program-enriched devices)
 
-  loop every 10s
-    DS->>DS: heartbeat check
-    alt SSE traffic seen within 70s
-      SSE-->>DS: KEEP-ALIVE or NOTIFY/STATUS/EVENT
-      DS->>DS: markSseTraffic
-      opt payload contains device state
-        DS->>DS: applyEventToDevice
-        DS-->>FE: DEVICES_UPDATE(devices)
+    NH->>DS: attachClient(hc)
+    NH->>PS: attachClient(hc)
+    NH->>DS: getDevices() initial snapshot
+
+    DS->>HC: getHomeAppliances
+    HC-->>DS: device list
+    loop per connected or active-looking device
+      DS->>HC: getStatus
+      DS->>HC: getSettings
+    end
+
+    alt per-device events subscription succeeds
+      DS->>HC: subscribe KEEP-ALIVE + /homeappliances/{haId}/events
+    else fallback path
+      DS->>HC: subscribe KEEP-ALIVE + /homeappliances/events
+    end
+
+    DS-->>FE: DEVICES_UPDATE(devices)
+    NH->>APM: request active-program sync
+
+    loop sequential program fetch
+      APM->>PS: fetchActiveProgramForDevice(haId)
+      PS->>HC: getActiveProgram
+      alt 200
+        HC-->>PS: active program
+      else 404
+        HC-->>PS: not found
+        PS->>HC: getSelectedProgram
+        opt still no usable program
+          PS->>HC: getAvailablePrograms + getAvailableProgram
+        end
+      else 429
+        HC-->>PS: rate limit + Retry-After
+        PS->>NH: setRateLimitUntil(now + Retry-After)
       end
-    else no SSE traffic for 70s
+    end
+
+    NH-->>FE: DEVICES_UPDATE(program-enriched devices)
+  end
+
+  loop heartbeat interval
+    DS->>DS: check stale threshold
+    alt traffic observed
+      DS->>DS: mark healthy stream
+    else stale
       DS-->>FE: INIT_STATUS(sse_stale)
-      DS->>NH: handleSseStale()
-      NH->>DS: reconnectEventSubscriptions()
-      NH->>DS: getDevices() for full resync
-      NH->>NH: handleGetActivePrograms(force=true)
+      DS->>NH: onSseStale()
+      NH->>DS: reconnect subscriptions
+      NH->>DS: refresh devices
+      NH->>APM: force active-program sync
     end
   end
-
-  Note over FE: Frontend no longer triggers API refreshes on its own.
-  Note over NH,DS: API polling is used for the initial snapshot and explicit SSE resync only.
 ```
+
+## Notes
+
+- The frontend only renders backend-provided state; it does not trigger standalone API refresh loops.
+- Program label semantics are explicit: ACTIVE_PROGRAM, SELECTED_PROGRAM, and AVAILABLE_PROGRAMS.
+- Rate-limit handling uses server metadata (`Retry-After`) when available.

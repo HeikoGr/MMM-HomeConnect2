@@ -279,6 +279,95 @@ function setGlobalBuiltin(name, value) {
   }
 
   setGlobalBuiltin("Headers", TestHeaders);
+  setGlobalBuiltin("fetch", async (url) => {
+    if (String(url).includes("security/oauth/token")) {
+      return {
+        ok: true,
+        json: async () => ({
+          access_token: "token-429",
+          refresh_token: "refresh-429",
+          expires_in: 3600
+        }),
+        text: async () => ""
+      };
+    }
+
+    return {
+      ok: false,
+      status: 429,
+      statusText: "Too Many Requests",
+      headers: new TestHeaders({ "retry-after": "52" }),
+      text: async () => JSON.stringify({ error: { key: "429", description: "rate limited" } })
+    };
+  });
+
+  delete require.cache[modulePath];
+  const HomeConnectWithRateLimitStub = require(modulePath);
+  let hc = null;
+
+  try {
+    hc = new HomeConnectWithRateLimitStub("client", "secret", "refresh", {
+      acceptLanguage: "en",
+      requestTimeoutMs: 100
+    });
+    await hc.init({ isSimulated: false });
+
+    const result = await hc.getStatus("ha-rate-limit");
+    assert.strictEqual(result.success, false);
+    assert.strictEqual(result.statusCode, 429);
+    assert.strictEqual(result.retryAfterSeconds, 52);
+  } finally {
+    if (hc) {
+      if (hc.tokenRefreshTimeout) {
+        clearTimeout(hc.tokenRefreshTimeout);
+        hc.tokenRefreshTimeout = null;
+      }
+      if (typeof hc.closeEventSources === "function") {
+        hc.closeEventSources({ devices: true, global: true });
+      }
+    }
+    setGlobalBuiltin("fetch", originalFetch);
+    setGlobalBuiltin("Headers", originalHeaders);
+    delete require.cache[modulePath];
+  }
+})();
+
+(async () => {
+  const originalFetch = getGlobalBuiltin("fetch");
+  const originalHeaders = getGlobalBuiltin("Headers");
+
+  class TestHeaders {
+    constructor(init) {
+      this.map = new Map();
+      if (init instanceof TestHeaders) {
+        for (const [key, value] of init.entries()) {
+          this.set(key, value);
+        }
+      } else if (init && typeof init === "object") {
+        for (const [key, value] of Object.entries(init)) {
+          this.set(key, value);
+        }
+      }
+    }
+
+    set(key, value) {
+      this.map.set(String(key).toLowerCase(), String(value));
+    }
+
+    has(key) {
+      return this.map.has(String(key).toLowerCase());
+    }
+
+    get(key) {
+      return this.map.get(String(key).toLowerCase()) || null;
+    }
+
+    entries() {
+      return this.map.entries();
+    }
+  }
+
+  setGlobalBuiltin("Headers", TestHeaders);
   setGlobalBuiltin("fetch", (url, options = {}) => {
     if (String(url).includes("security/oauth/token")) {
       return Promise.resolve({

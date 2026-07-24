@@ -157,15 +157,29 @@ function computeProgramDisplayState({
       : "";
   const visiblePlannedDurationLabel = suppressSelectedProgramRuntime ? "" : plannedDurationLabel;
   const showPlannedDurationInTitle = !(visibleRemainingSeconds > 0);
-  const selectedProgramVisible =
-    device.ActiveProgramSource !== "selected" || operationStateDelayedStart;
-  const programName = selectedProgramVisible ? device.ActiveProgramName || "" : "";
+  const rawProgramName = typeof device.ActiveProgramName === "string" ? device.ActiveProgramName : "";
+  const source = device.ActiveProgramSource || (rawProgramName ? "active" : "");
+  let programName;
+  if (source === "active" && rawProgramName) {
+    programName = `${translate("ACTIVE_PROGRAM")}: ${rawProgramName}`;
+  } else if (source === "selected" && rawProgramName) {
+    programName = `${translate("SELECTED_PROGRAM")}: ${rawProgramName}`;
+  } else if (
+    source === "available" &&
+    Array.isArray(device.AvailablePrograms) &&
+    device.AvailablePrograms.length
+  ) {
+    programName = `${translate("AVAILABLE_PROGRAMS")}: ${device.AvailablePrograms.join(", ")}`;
+  } else {
+    programName = rawProgramName;
+  }
+  const showProgramDetails = source === "active" || source === "selected";
   const programPhase =
-    selectedProgramVisible && typeof device.ActiveProgramPhase === "string"
+    showProgramDetails && typeof device.ActiveProgramPhase === "string"
       ? device.ActiveProgramPhase
       : "";
   const programDetails =
-    selectedProgramVisible && Array.isArray(device.ActiveProgramDetails)
+    showProgramDetails && Array.isArray(device.ActiveProgramDetails)
       ? device.ActiveProgramDetails.filter((value) => typeof value === "string" && value)
       : [];
   const programSupplementParts = [];
@@ -843,6 +857,25 @@ Module.register("MMM-HomeConnect2", {
     ].join("");
   },
 
+  getConfigMismatchNoticeHtml() {
+    const status = this.lastInitStatus;
+    if (!status || typeof status !== "object" || status.isConfigMismatch !== true) {
+      return "";
+    }
+
+    const message =
+      typeof status.message === "string" && status.message.trim()
+        ? status.message.trim()
+        : this.translate("CONFIG_MISMATCH");
+
+    return [
+      "<div class='hc-status-banner hc-status-banner-warning'>",
+      `<div class='hc-status-banner-title'>${this.translate("CONFIG_MISMATCH_TITLE")}</div>`,
+      `<div class='hc-status-banner-message'>${message}</div>`,
+      "</div>"
+    ].join("");
+  },
+
   getStatusIconsHtml(device, displayState) {
     const { runtime } = displayState;
     let programIcon = "";
@@ -939,6 +972,7 @@ Module.register("MMM-HomeConnect2", {
     const runtimeHints = this.deviceRuntimeHints || (this.deviceRuntimeHints = {});
     const deviceUtils = this.getDeviceUtils();
     const rateLimitNoticeHtml = this.getRateLimitNoticeHtml();
+    const configMismatchNoticeHtml = this.getConfigMismatchNoticeHtml();
 
     // Show authentication info if available
     if (this.authInfo && this.authInfo.status === "waiting") {
@@ -965,7 +999,7 @@ Module.register("MMM-HomeConnect2", {
         `<i class='fa fa-cog fa-spin'></i> ${this.translate("SESSION_BASED_AUTH")}<br>` +
         `<span class='dimmed'>${this.translate("LOADING_APPLIANCES")}...</span>` +
         "</div>";
-      div.innerHTML = `${rateLimitNoticeHtml}${loadingHtml}`;
+      div.innerHTML = `${rateLimitNoticeHtml}${configMismatchNoticeHtml}${loadingHtml}`;
       return div;
     }
 
@@ -975,12 +1009,12 @@ Module.register("MMM-HomeConnect2", {
       .join("");
 
     if (wrapper === "") {
-      div.innerHTML = `${rateLimitNoticeHtml}<div class='dimmed small'>${this.translate("NO_ACTIVE_APPLIANCES")}</div>${this.getDebugPanel()}`;
+      div.innerHTML = `${rateLimitNoticeHtml}${configMismatchNoticeHtml}<div class='dimmed small'>${this.translate("NO_ACTIVE_APPLIANCES")}</div>${this.getDebugPanel()}`;
       return div;
     }
 
     const debugPanel = this.getDebugPanel();
-    div.innerHTML = `${rateLimitNoticeHtml}${wrapper}${debugPanel}`;
+    div.innerHTML = `${rateLimitNoticeHtml}${configMismatchNoticeHtml}${wrapper}${debugPanel}`;
     return div;
   },
 

@@ -1,4 +1,5 @@
 let HomeConnect = null;
+const crypto = require("crypto");
 const fs = require("fs");
 const util = require("util");
 const ActiveProgramManager = require("./lib/active-program-manager");
@@ -6,7 +7,7 @@ const AuthService = require("./lib/auth-service");
 const DeviceService = require("./lib/device-service");
 const { refreshTokenPath } = require("./lib/module-paths");
 const ProgramService = require("./lib/program-service");
-const { deviceAppearsActive, getDeviceTypeMeta, isDeviceConnected } = require("./lib/device-utils");
+const { deviceAppearsActive, isDeviceConnected } = require("./lib/device-utils");
 const shared = require("./lib/mmm-shared/mmm-shared");
 const NodeHelper = require("node_helper"),
   globalSession = {
@@ -24,16 +25,6 @@ const ACTIVE_PROGRAM_RETRY_DELAY_MS = 5000; // 5s
 const ACTIVE_PROGRAM_MAX_RETRIES = 3; // Maximum number of retries for active program requests
 const FORCED_ACTIVE_PROGRAM_DEDUP_WINDOW_MS = 15000;
 const FULL_SNAPSHOT_INTERVAL_MS = 30 * 60 * 1000;
-const NO_ACTIVE_PROGRAM_RETRY_BLOCKED_TYPES = new Set([
-  "Washer",
-  "Dryer",
-  "WasherDryer",
-  "Dishwasher",
-  "CoffeeMaker",
-  "Hood",
-  "Oven"
-]);
-
 const SESSION_STATES = Object.freeze({
   BOOT: "boot",
   AUTHENTICATING: "authenticating",
@@ -169,6 +160,47 @@ const AUTH_STATUS_MESSAGES = Object.freeze({
 
 const { moduleLog, setModuleLogLevel } = require("./lib/logger");
 
+function stableStringify(value) {
+  if (value === null) {
+    return "null";
+  }
+
+  const valueType = typeof value;
+  if (valueType === "number" || valueType === "boolean") {
+    return JSON.stringify(value);
+  }
+  if (valueType === "string") {
+    return JSON.stringify(value);
+  }
+  if (valueType === "undefined" || valueType === "function") {
+    return "null";
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+
+  const keys = Object.keys(value)
+    .filter((key) => typeof value[key] !== "undefined" && typeof value[key] !== "function")
+    .sort();
+  const serialized = keys.map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`);
+  return `{${serialized.join(",")}}`;
+}
+
+function normalizeClientConfigForHash(config = {}) {
+  const ignoredKeys = new Set(["instanceId", "identifier"]);
+  const normalized = {};
+
+  Object.keys(config).forEach((key) => {
+    if (ignoredKeys.has(key)) {
+      return;
+    }
+    normalized[key] = config[key];
+  });
+
+  return normalized;
+}
+
 module.exports = NodeHelper.create({
   refreshToken: null,
   hc: null,
@@ -190,6 +222,7 @@ module.exports = NodeHelper.create({
   },
   rateLimitReleaseTimer: null,
   fullSnapshotTimer: null,
+  sharedConfigHash: null,
   activeProgramFetchInFlight: false,
   activeProgramFetchSignature: null,
   recentForcedProgramFetch: null,
@@ -504,40 +537,40 @@ module.exports = NodeHelper.create({
     };
   },
 
-  getSharedConfigConflictKeys(nextConfig = {}) {
-    if (!this.config) {
-      return [];
-    }
+  buildConfigHash(config = {}) {
+    const normalized = normalizeClientConfigForHash(config);
+    const hashPayload = stableStringify(normalized);
+    return crypto.createHash("sha256").update(hashPayload).digest("hex");
+  },
 
-    const sharedKeys = [
-      "clientId",
-      "clientSecret",
-      "apiLanguage",
-      "apiRequestTimeoutMs",
-      "minActiveProgramIntervalMs",
-      "enableSSEHeartbeat",
-      "sseHeartbeatCheckIntervalMs",
-      "sseHeartbeatStaleThresholdMs",
-      "sseRecoveryCooldownMs",
-      "logLevel",
-      "loglevel"
-    ];
+  rejectConfigMismatch(instanceId, expectedHash, receivedHash) {
+    const mismatchMessage =
+      "Konfigurationskonflikt: Dieses Display nutzt eine andere MMM-HomeConnect2-Konfiguration als der laufende Server. Bitte angleichen und neu laden.";
 
-    return sharedKeys.filter(
-      (key) =>
-        Object.hasOwn(nextConfig, key) &&
-        Object.hasOwn(this.config, key) &&
-        this.config[key] !== nextConfig[key]
+    moduleLog("warn", "Rejecting client instance due to config hash mismatch", {
+      instanceId,
+      expectedHash,
+      receivedHash
+    });
+
+    globalSession.clientInstances.delete(instanceId);
+    this.clientConfigs.delete(instanceId);
+
+    this.emitInitStatus(
+      "device_error",
+      {
+        instanceId,
+        message: mismatchMessage,
+        isConfigMismatch: true,
+        expectedConfigHash: expectedHash,
+        receivedConfigHash: receivedHash
+      },
+      { broadcast: false, targetInstanceId: instanceId }
     );
   },
 
   shouldRetryNoActiveProgram(device) {
-    if (!deviceAppearsActive(device)) {
-      return false;
-    }
-
-    const canonicalType = getDeviceTypeMeta(device?.type).canonicalType;
-    return !NO_ACTIVE_PROGRAM_RETRY_BLOCKED_TYPES.has(canonicalType);
+    return deviceAppearsActive(device);
   },
 
   init() {
@@ -716,8 +749,19 @@ module.exports = NodeHelper.create({
     });
 
     const instanceId = payload.instanceId || "default";
+    const configHash = this.buildConfigHash(payload);
+
+    if (this.sharedConfigHash && configHash !== this.sharedConfigHash) {
+      this.rejectConfigMismatch(instanceId, this.sharedConfigHash, configHash);
+      return;
+    }
+
+    if (!this.sharedConfigHash) {
+      this.sharedConfigHash = configHash;
+    }
+
     globalSession.clientInstances.add(instanceId);
-    this.clientConfigs.set(instanceId, { ...payload });
+    this.clientConfigs.set(instanceId, { ...payload, _configHash: configHash });
 
     moduleLog("debug", `Processing CONFIG notification for instance: ${instanceId}`);
     moduleLog("debug", `Registered clients: ${globalSession.clientInstances.size}`);
@@ -753,14 +797,6 @@ module.exports = NodeHelper.create({
       }
       this.handleConfigNotificationFirstTime(instanceId);
     } else {
-      const conflictKeys = this.getSharedConfigConflictKeys(payload);
-      if (conflictKeys.length > 0) {
-        moduleLog("warn", "Ignoring conflicting shared config from secondary client instance", {
-          instanceId,
-          sharedConfigOwnerInstanceId: this.sharedConfigOwnerInstanceId || this.instanceId,
-          conflictKeys
-        });
-      }
       this.updateActiveProgramInterval();
       if (this.deviceService && typeof this.deviceService.setConfig === "function") {
         this.deviceService.setConfig(this.config);

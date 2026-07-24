@@ -53,6 +53,7 @@ function resetHelperState() {
   helper.hc = null;
   helper.instanceId = null;
   helper.sharedConfigOwnerInstanceId = null;
+  helper.sharedConfigHash = null;
   if (helper.clientConfigs && typeof helper.clientConfigs.clear === "function") {
     helper.clientConfigs.clear();
   }
@@ -338,7 +339,8 @@ function resetHelperState() {
     global.clearInterval = originalClearInterval;
   }
 
-  // Washers should not enter active-program retry loops when the API reports no active program.
+  // Active-looking devices should enter limited active-program retry loops
+  // when the API momentarily reports no active program.
   resetHelperState();
   helper.hc = {};
   helper.sessionState = "ready";
@@ -374,7 +376,7 @@ function resetHelperState() {
 
   await helper.fetchActiveProgramsForDevices([washerDevice], "frontend-a");
 
-  assert.strictEqual(scheduledRetries.length, 0);
+  assert.strictEqual(scheduledRetries.length, 1);
 
   // Overlapping forced active-program requests should be deduplicated while one fetch is in flight.
   resetHelperState();
@@ -433,12 +435,18 @@ function resetHelperState() {
 
   assert.strictEqual(fetchCalls, 1);
 
-  // Shared backend config must remain stable when additional frontend instances connect.
+  // Shared backend config hash must gate additional frontend instances.
   resetHelperState();
   const authConfigs = [];
   const deviceConfigs = [];
   const acceptLanguages = [];
   const configuredInstances = [];
+  const configMismatchStatuses = [];
+  helper.emitInitStatus = (status, payload = {}) => {
+    if (payload.instanceId === "frontend-b") {
+      configMismatchStatuses.push({ status, payload });
+    }
+  };
   helper.authService = {
     setConfig(config) {
       authConfigs.push(config);
@@ -468,6 +476,7 @@ function resetHelperState() {
     minActiveProgramIntervalMs: 1111,
     enableSSEHeartbeat: true
   });
+
   helper.handleConfigNotification({
     instanceId: "frontend-b",
     apiLanguage: "en",
@@ -475,14 +484,26 @@ function resetHelperState() {
     enableSSEHeartbeat: false
   });
 
+  helper.handleConfigNotification({
+    instanceId: "frontend-c",
+    apiLanguage: "de",
+    minActiveProgramIntervalMs: 1111,
+    enableSSEHeartbeat: true
+  });
+
   assert.strictEqual(helper.instanceId, "frontend-a");
   assert.strictEqual(helper.sharedConfigOwnerInstanceId, "frontend-a");
   assert.strictEqual(helper.config.apiLanguage, "de");
   assert.strictEqual(helper.config.minActiveProgramIntervalMs, 1111);
-  assert.deepStrictEqual(configuredInstances, ["first:frontend-a", "next:frontend-b"]);
+  assert.ok(typeof helper.sharedConfigHash === "string" && helper.sharedConfigHash.length > 0);
+  assert.deepStrictEqual(configuredInstances, ["first:frontend-a", "next:frontend-c"]);
   assert.strictEqual(authConfigs.length, 1);
   assert.strictEqual(deviceConfigs.length, 2);
   assert.deepStrictEqual(acceptLanguages, ["de", "de"]);
+
+  assert.strictEqual(configMismatchStatuses.length, 1);
+  assert.strictEqual(configMismatchStatuses[0].status, "device_error");
+  assert.strictEqual(configMismatchStatuses[0].payload.isConfigMismatch, true);
 
   // Manual auth retry must preserve all registered frontend instances.
   resetHelperState();
