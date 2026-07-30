@@ -233,7 +233,8 @@ function createInstance(overrides = {}) {
     const runningSelectedDom = runningSelectedProgramInstance.getDom();
     assert.ok(runningSelectedDom.innerHTML.includes("Dryer"));
     assert.ok(runningSelectedDom.innerHTML.includes("SELECTED_PROGRAM: Synthetics"));
-    assert.ok(!runningSelectedDom.innerHTML.includes("fa-play"));
+    assert.ok(runningSelectedDom.innerHTML.includes("fa-play"));
+    assert.ok(runningSelectedDom.innerHTML.includes("15%"));
 
     const selectedDishwasherInstance = createInstance({
       config: {

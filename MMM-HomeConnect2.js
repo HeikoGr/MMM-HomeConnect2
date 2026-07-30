@@ -677,8 +677,14 @@ Module.register("MMM-HomeConnect2", {
     const hint = this.getDeviceRuntimeHint(runtimeHints, device);
     const progressNumeric = normalizeProgressValue(progressValue);
     const operationState = getOperationStateInfo(device);
+    const hasRuntimeSignalsForSelectedProgram =
+      operationState.isActive ||
+      (Number.isFinite(remainingSeconds) && remainingSeconds > 0 && !hasEstimatedDuration) ||
+      (progressNumeric !== undefined && progressNumeric > 0 && progressNumeric < 100);
     const suppressSelectedProgramRuntime =
-      device.ActiveProgramSource === "selected" && !operationState.isDelayedStart;
+      device.ActiveProgramSource === "selected" &&
+      !operationState.isDelayedStart &&
+      !hasRuntimeSignalsForSelectedProgram;
     const effectiveOperationStateActive = suppressSelectedProgramRuntime
       ? false
       : operationState.isActive;
