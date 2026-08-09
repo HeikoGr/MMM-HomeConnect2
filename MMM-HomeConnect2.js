@@ -849,8 +849,51 @@ Module.register("MMM-HomeConnect2", {
     };
   },
 
+  getHomeConnectErrorNotice() {
+    const status = this.lastInitStatus || this.authStatus;
+    if (!status || typeof status !== "object") {
+      return null;
+    }
+
+    const message = typeof status.message === "string" ? status.message.trim() : "";
+    if (!message) {
+      return null;
+    }
+
+    const homeConnectErrorPatterns = [
+      /RemoteControlNotActive/i,
+      /RemoteStartNotActive/i,
+      /WrongOperationState/i,
+      /BSH\.Common\.Error/i
+    ];
+
+    const isHomeConnectError = homeConnectErrorPatterns.some((pattern) => pattern.test(message));
+    if (!isHomeConnectError) {
+      return null;
+    }
+
+    return {
+      title: "Home Connect",
+      message: message.replace(/\s+/g, " ").trim()
+    };
+  },
+
   getRateLimitNoticeHtml() {
     const notice = this.getRateLimitNotice();
+    if (!notice) {
+      return "";
+    }
+
+    return [
+      "<div class='hc-status-banner hc-status-banner-warning'>",
+      `<div class='hc-status-banner-title'>${notice.title}</div>`,
+      `<div class='hc-status-banner-message'>${notice.message}</div>`,
+      "</div>"
+    ].join("");
+  },
+
+  getHomeConnectErrorNoticeHtml() {
+    const notice = this.getHomeConnectErrorNotice();
     if (!notice) {
       return "";
     }
@@ -978,6 +1021,7 @@ Module.register("MMM-HomeConnect2", {
     const runtimeHints = this.deviceRuntimeHints || (this.deviceRuntimeHints = {});
     const deviceUtils = this.getDeviceUtils();
     const rateLimitNoticeHtml = this.getRateLimitNoticeHtml();
+    const homeConnectErrorNoticeHtml = this.getHomeConnectErrorNoticeHtml();
     const configMismatchNoticeHtml = this.getConfigMismatchNoticeHtml();
 
     // Show authentication info if available
@@ -1005,7 +1049,7 @@ Module.register("MMM-HomeConnect2", {
         `<i class='fa fa-cog fa-spin'></i> ${this.translate("SESSION_BASED_AUTH")}<br>` +
         `<span class='dimmed'>${this.translate("LOADING_APPLIANCES")}...</span>` +
         "</div>";
-      div.innerHTML = `${rateLimitNoticeHtml}${configMismatchNoticeHtml}${loadingHtml}`;
+      div.innerHTML = `${rateLimitNoticeHtml}${homeConnectErrorNoticeHtml}${configMismatchNoticeHtml}${loadingHtml}`;
       return div;
     }
 
@@ -1015,12 +1059,12 @@ Module.register("MMM-HomeConnect2", {
       .join("");
 
     if (wrapper === "") {
-      div.innerHTML = `${rateLimitNoticeHtml}${configMismatchNoticeHtml}<div class='dimmed small'>${this.translate("NO_ACTIVE_APPLIANCES")}</div>${this.getDebugPanel()}`;
+      div.innerHTML = `${rateLimitNoticeHtml}${homeConnectErrorNoticeHtml}${configMismatchNoticeHtml}<div class='dimmed small'>${this.translate("NO_ACTIVE_APPLIANCES")}</div>${this.getDebugPanel()}`;
       return div;
     }
 
     const debugPanel = this.getDebugPanel();
-    div.innerHTML = `${rateLimitNoticeHtml}${configMismatchNoticeHtml}${wrapper}${debugPanel}`;
+    div.innerHTML = `${rateLimitNoticeHtml}${homeConnectErrorNoticeHtml}${configMismatchNoticeHtml}${wrapper}${debugPanel}`;
     return div;
   },
 

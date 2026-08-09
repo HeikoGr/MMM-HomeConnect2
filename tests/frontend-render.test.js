@@ -614,6 +614,25 @@ function createInstance(overrides = {}) {
     assert.ok(authDom.innerHTML.includes("ABCD-EFGH"));
     assert.ok(authDom.innerHTML.includes("auth-container"));
 
+    const homeConnectErrorInstance = createInstance({
+      devices: [
+        {
+          name: "Washer",
+          type: "Washer",
+          PowerState: "On",
+          ActiveProgramName: "Eco 40-60",
+          ActiveProgramSource: "active"
+        }
+      ],
+      lastInitStatus: {
+        status: "device_error",
+        message: "BSH.Common.Error.RemoteControlNotActive: Remote control is not enabled"
+      }
+    });
+    const homeConnectErrorDom = homeConnectErrorInstance.getDom();
+    assert.ok(homeConnectErrorDom.innerHTML.includes("Home Connect"));
+    assert.ok(homeConnectErrorDom.innerHTML.includes("Remote control"));
+
     const rateLimitInstance = createInstance({
       devices: [
         {
