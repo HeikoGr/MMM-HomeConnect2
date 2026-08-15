@@ -41,7 +41,7 @@
     ]
   },
   "dependencies": {
-    "eventsource": "^4.1.1",
+    "eventsource": "^5.0.0",
     "qrcode": "^1.5.4"
   },
   "devDependencies": {
