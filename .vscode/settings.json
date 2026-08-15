@@ -1,3 +1,58 @@
 {
-  "workbench.browser.enableChatTools": true
+  "workbench.browser.enableChatTools": true,
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.biome": "explicit",
+    "source.organizeImports.biome": "explicit"
+  },
+  "editor.rulers": [100],
+  "editor.trimAutoWhitespace": true,
+  "editor.insertSpaces": true,
+  "editor.tabSize": 2,
+  "editor.defaultFormatter": "biomejs.biome",
+  "files.exclude": {
+    "**/node_modules": true
+  },
+  "search.exclude": {
+    "**/debug_dumps": true,
+    "**/coverage": true
+  },
+  "files.watcherExclude": {
+    "**/node_modules": true,
+    "**/.git": true
+  },
+  "debug.console.fontSize": 13,
+  "debug.console.wordWrap": true,
+  "terminal.integrated.scrollback": 5000,
+  "git.autofetch": true,
+  "[javascript]": {
+    "editor.defaultFormatter": "vscode.typescript-language-features",
+    "editor.formatOnSave": true
+  },
+  "[json]": {
+    "editor.defaultFormatter": "biomejs.biome",
+    "editor.formatOnSave": true
+  },
+  "[jsonc]": {
+    "editor.defaultFormatter": "biomejs.biome"
+  },
+  "chat.mcp.serverSampling": {
+    "MMM-HomeConnect2/.vscode/mcp.json: microsoft/playwright-mcp": {
+      "allowedModels": []
+    }
+  },
+  "markdown.validate.enabled": true,
+  // Guided commit form matching commitlint.config.js.
+  "conventionalCommits.showEditor": true,
+  "conventionalCommits.promptScopes": true,
+  "conventionalCommits.promptBody": true,
+  "conventionalCommits.promptFooter": true,
+  "conventionalCommits.scopes": ["auth", "device", "program", "api", "config", "i18n", "deps", "devcontainer"],
+  // Copilot does not read .github/copilot-instructions.md when generating commit messages,
+  // so the commit conventions are pointed at explicitly here.
+  "github.copilot.chat.commitMessageGeneration.instructions": [
+    {
+      "file": ".github/commit-instructions.md"
+    }
+  ]
 }
