@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.17](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.0.16...v1.0.17) (2026-08-16)
+
+
+### 🧱 Refactoring
+
+* remove spelling test and related dependencies ([8c1fbf8](https://github.com/HeikoGr/MMM-HomeConnect2/commit/8c1fbf835576d17f15cb54bd1a5d02ca73d926ae))
+
 ## [1.0.16](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.0.15...v1.0.16) (2026-08-15)
 
 
