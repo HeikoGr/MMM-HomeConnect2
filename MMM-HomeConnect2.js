@@ -1,4 +1,3 @@
-/* global Module, Log */ // eslint-disable-line no-redeclare
 
 function generateInstanceId(prefix = "hc") {
   return `${prefix}_${Date.now().toString(36)}`;

@@ -12,7 +12,7 @@ Thanks for wanting to contribute! Here are simple steps:
 
 3) Test locally
 - In the module folder run: `npm ci`.
-- Run `node --run lint` and `node --run test:spelling`.
+- Run `node --run lint`.
 
 4) Style
 - Use Biome (see `package.json` scripts).

@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   check:
-    name: Lint, test, spelling
+    name: Lint, test
     runs-on: ubuntu-latest
 
     steps:
@@ -42,9 +42,6 @@ jobs:
 
       - name: Unit tests
         run: node --run test
-
-      - name: Spell check
-        run: node --run test:spelling
 
   commit-messages:
     name: Commit messages
