@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.0](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.0.17...v1.1.0) (2026-08-17)
+
+
+### 🔌 Features
+
+* **deps:** add support for git submodule updates in Dependabot ([2e1b3b0](https://github.com/HeikoGr/MMM-HomeConnect2/commit/2e1b3b0ff5597c71bcabe8060bc8573197b4fab6))
+* **devcontainer:** add postStart.sh for managing host credentials and SSH keys ([415e4cf](https://github.com/HeikoGr/MMM-HomeConnect2/commit/415e4cfce2d0530d61a1917e62470a48d400668c))
+
 ## [1.0.17](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.0.16...v1.0.17) (2026-08-16)
 
 
