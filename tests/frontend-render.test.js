@@ -2,6 +2,7 @@
 
 const assert = require("assert");
 const deviceUtils = require("../lib/device-utils");
+const shared = require("../lib/mmm-shared/mmm-shared");
 
 const modulePath = require.resolve("../MMM-HomeConnect2.js");
 
@@ -89,7 +90,7 @@ function loadModuleDefinition() {
 
 function createInstance(overrides = {}) {
   const definition = loadModuleDefinition();
-  return {
+  const instance = {
     ...definition,
     name: "MMM-HomeConnect2",
     defaults: { ...definition.defaults },
@@ -110,6 +111,10 @@ function createInstance(overrides = {}) {
     updateDom() { },
     sendSocketNotification() { }
   };
+
+  // The module renders through the shared lifecycle, which start() would set up.
+  instance.lifecycle = shared.createLifecycle({ module: instance, updateInterval: 0 });
+  return instance;
 }
 
 (() => {

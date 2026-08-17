@@ -242,7 +242,7 @@ Module.register("MMM-HomeConnect2", {
   deviceRuntimeHints: {},
   lastActiveProgramRequestTs: 0,
   debugStats: null,
-  progressRefreshTimer: null,
+  lifecycle: null,
 
   defaults: {
     header: "Home Connect Appliances",
@@ -285,33 +285,31 @@ Module.register("MMM-HomeConnect2", {
       sendSocketNotification: this.sendSocketNotification.bind(this)
     });
     this.notifications = this.transport.notifications;
-    this.ensureProgressRefreshTimer();
-  },
 
-  ensureProgressRefreshTimer() {
-    if (this.progressRefreshTimer) {
-      return;
-    }
-
-    const refreshIntervalMs =
-      typeof this.config?.progressRefreshIntervalMs === "number"
-        ? Math.max(5000, this.config.progressRefreshIntervalMs)
-        : this.defaults.progressRefreshIntervalMs;
-
-    this.progressRefreshTimer = setInterval(() => {
-      if (this.suspended || !Array.isArray(this.devices) || this.devices.length === 0) {
-        return;
+    // The backend owns the data cadence here (SSE + snapshot timer), so the
+    // lifecycle has no onFetch: it only keeps visual work and DOM updates from
+    // running against a hidden module.
+    this.lifecycle = this.shared.createLifecycle({
+      module: this,
+      logger: this.shared.createLogger({
+        moduleName: "MMM-HomeConnect2",
+        identifier: this.identifier,
+        getLevel: () => this.config.logLevel || "info",
+        structured: false,
+        redact: true
+      }),
+      updateInterval: 0,
+      visibleTickInterval:
+        typeof this.config?.progressRefreshIntervalMs === "number"
+          ? Math.max(5000, this.config.progressRefreshIntervalMs)
+          : this.defaults.progressRefreshIntervalMs,
+      onVisibleTick: () => {
+        if (Array.isArray(this.devices) && this.devices.length > 0) {
+          this.updateDom(0);
+        }
       }
-
-      this.updateDom(0);
-    }, refreshIntervalMs);
-  },
-
-  clearProgressRefreshTimer() {
-    if (this.progressRefreshTimer) {
-      clearInterval(this.progressRefreshTimer);
-      this.progressRefreshTimer = null;
-    }
+    });
+    this.lifecycle.start();
   },
 
   loaded(callback) {
@@ -409,15 +407,15 @@ Module.register("MMM-HomeConnect2", {
           : safePayload && typeof safePayload === "object"
             ? Object.values(safePayload)
             : [];
-        this.updateDom();
+        this.lifecycle.render();
         break;
       case "AUTH_INFO":
         this.authInfo = safePayload;
-        this.updateDom();
+        this.lifecycle.render();
         break;
       case "AUTH_STATUS":
         this.authStatus = safePayload;
-        this.updateDom();
+        this.lifecycle.render();
         break;
       case "INIT_STATUS": {
         Log.log(`${this.name} Init Status: ${safePayload.status} - ${safePayload.message}`);
@@ -434,12 +432,12 @@ Module.register("MMM-HomeConnect2", {
             message: safePayload.message
           };
         }
-        this.updateDom();
+        this.lifecycle.render();
         break;
       }
       case "DEBUG_STATS":
         this.debugStats = safePayload || {};
-        this.updateDom();
+        this.lifecycle.render();
         break;
       default:
         break;
@@ -447,16 +445,11 @@ Module.register("MMM-HomeConnect2", {
   },
 
   suspend() {
-    this.suspended = true;
+    this.lifecycle.suspend();
   },
 
   resume() {
-    this.suspended = false;
-    this.updateDom();
-  },
-
-  stop() {
-    this.clearProgressRefreshTimer();
+    this.lifecycle.resume();
   },
 
   getDeviceUtils() {
