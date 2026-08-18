@@ -1,6 +1,33 @@
 
 function generateInstanceId(prefix = "hc") {
-  return `${prefix}_${Date.now().toString(36)}`;
+  return `${prefix}_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e6).toString(36)}`;
+}
+
+// The helper tracks clients by instance id and has no disconnect hook, so a fresh
+// id per page load would grow that registry forever. Persisting it per browser
+// keeps the set bounded by the number of displays and lets a reload rejoin as the
+// same client.
+function resolveInstanceId(identifier) {
+  const storageKey = `MMM-HomeConnect2.instanceId.${identifier || "default"}`;
+
+  try {
+    const storage = globalThis.localStorage;
+    if (!storage) {
+      return generateInstanceId();
+    }
+
+    const stored = storage.getItem(storageKey);
+    if (typeof stored === "string" && stored.trim()) {
+      return stored.trim();
+    }
+
+    const created = generateInstanceId();
+    storage.setItem(storageKey, created);
+    return created;
+  } catch {
+    // Private mode or blocked storage - a volatile id still works.
+    return generateInstanceId();
+  }
 }
 
 function computeProgressDisplayState({
@@ -110,22 +137,18 @@ function normalizeProgressValue(progressValue) {
   return Math.max(0, Math.min(100, Math.round(parsed)));
 }
 
-function getOperationStateInfo(device) {
-  const operationStateRaw = device.OperationState || device.operationState || null;
-  const operationStateString =
-    typeof operationStateRaw === "string"
-      ? operationStateRaw
-      : operationStateRaw && typeof operationStateRaw.value === "string"
-        ? operationStateRaw.value
-        : null;
-  const label = operationStateString ? operationStateString.split(".").pop() : "";
+// Thin adapter over the shared state parser. `isActive` deliberately means "Run"
+// and nothing else: delayed start and pause carry their own icons, and an
+// unrecognised state must never be interpreted as running.
+function getOperationStateInfo(device, deviceUtils) {
+  const state = deviceUtils.parseOperationState(device);
 
   return {
-    label,
-    isFinished: /Finished/i.test(label || ""),
-    isActive: /(Run|Active|DelayedStart|InProgress)/i.test(label || ""),
-    isDelayedStart: /DelayedStart/i.test(label || ""),
-    isPaused: /Pause/i.test(label || "")
+    known: state.known,
+    isFinished: state.isFinished,
+    isActive: state.isRun,
+    isDelayedStart: state.isDelayedStart,
+    isPaused: state.isPaused
   };
 }
 
@@ -138,6 +161,7 @@ function isWrinkleProtectionLabel(value) {
 function computeProgramDisplayState({
   device,
   operationStateDelayedStart,
+  programRunning,
   suppressSelectedProgramRuntime,
   visibleRemainingSeconds,
   estimatedTotalSeconds,
@@ -158,11 +182,15 @@ function computeProgramDisplayState({
   const showPlannedDurationInTitle = !(visibleRemainingSeconds > 0);
   const rawProgramName = typeof device.ActiveProgramName === "string" ? device.ActiveProgramName : "";
   const source = device.ActiveProgramSource || (rawProgramName ? "active" : "");
+  // A merely selected program says nothing about what the appliance is doing - the
+  // dial can sit on "Synthetics" for days. It is only worth showing once that
+  // program is actually running or scheduled to start.
+  const showSelectedProgram = programRunning || operationStateDelayedStart;
   let programName;
   if (source === "active" && rawProgramName) {
     programName = `${translate("ACTIVE_PROGRAM")}: ${rawProgramName}`;
   } else if (source === "selected" && rawProgramName) {
-    programName = `${translate("SELECTED_PROGRAM")}: ${rawProgramName}`;
+    programName = showSelectedProgram ? `${translate("SELECTED_PROGRAM")}: ${rawProgramName}` : "";
   } else if (
     source === "available" &&
     Array.isArray(device.AvailablePrograms) &&
@@ -172,7 +200,8 @@ function computeProgramDisplayState({
   } else {
     programName = rawProgramName;
   }
-  const showProgramDetails = source === "active" || source === "selected";
+  const showProgramDetails =
+    source === "active" || (source === "selected" && showSelectedProgram);
   const programPhase =
     showProgramDetails && typeof device.ActiveProgramPhase === "string"
       ? device.ActiveProgramPhase
@@ -239,6 +268,8 @@ Module.register("MMM-HomeConnect2", {
   authInfo: null,
   authStatus: null,
   instanceId: null,
+  sessionConfig: null,
+  configDrift: null,
   deviceRuntimeHints: {},
   lastActiveProgramRequestTs: 0,
   debugStats: null,
@@ -266,7 +297,7 @@ Module.register("MMM-HomeConnect2", {
   },
 
   start() {
-    this.instanceId = generateInstanceId();
+    this.instanceId = resolveInstanceId(this.identifier);
     this.shared = globalThis.MMModuleShared;
     this.sharedContext = this.shared.createModuleContext(
       "MMM-HomeConnect2",
@@ -381,7 +412,9 @@ Module.register("MMM-HomeConnect2", {
         config: {
           ...this.config,
           instanceId: this.instanceId,
-          apiLanguage: this.getPreferredApiLanguage()
+          // Sent as a hint only: browser-derived values must never take part in
+          // the session comparison, otherwise every device reports a conflict.
+          preferredApiLanguage: this.getPreferredApiLanguage()
         }
       });
     }
@@ -431,6 +464,20 @@ Module.register("MMM-HomeConnect2", {
             status: "polling",
             message: safePayload.message
           };
+        }
+        this.lifecycle.render();
+        break;
+      }
+      case "SESSION_CONFIG": {
+        // The helper is the source of truth for everything that shapes the shared
+        // API session; display options stay local to this browser.
+        this.sessionConfig = safePayload.sessionConfig || null;
+        this.configDrift =
+          safePayload.drift && Array.isArray(safePayload.drift.keys) && safePayload.drift.keys.length
+            ? safePayload.drift
+            : null;
+        if (this.sessionConfig && typeof this.sessionConfig.apiLanguage === "string") {
+          this.config.apiLanguage = this.sessionConfig.apiLanguage;
         }
         this.lifecycle.render();
         break;
@@ -487,14 +534,6 @@ Module.register("MMM-HomeConnect2", {
         typeof browserUtils.getDeviceTypeMeta === "function"
           ? browserUtils.getDeviceTypeMeta
           : (type) => ({ iconName: type ? `${type}.png` : null, fallbackIconClass: "fa-plug" }),
-      deviceAppearsActive:
-        typeof browserUtils.deviceAppearsActive === "function"
-          ? browserUtils.deviceAppearsActive
-          : () => false,
-      isDeviceConnected:
-        typeof browserUtils.isDeviceConnected === "function"
-          ? browserUtils.isDeviceConnected
-          : () => false,
       isDeviceExplicitlyDisconnected:
         typeof browserUtils.isDeviceExplicitlyDisconnected === "function"
           ? browserUtils.isDeviceExplicitlyDisconnected
@@ -502,7 +541,18 @@ Module.register("MMM-HomeConnect2", {
       shouldDisplayDevice:
         typeof browserUtils.shouldDisplayDevice === "function"
           ? browserUtils.shouldDisplayDevice
-          : () => false
+          : () => false,
+      parseOperationState:
+        typeof browserUtils.parseOperationState === "function"
+          ? browserUtils.parseOperationState
+          : () => ({
+            known: false,
+            isRun: false,
+            isPaused: false,
+            isDelayedStart: false,
+            isFinished: false,
+            hasProgramInProgress: false
+          })
     };
   },
 
@@ -651,8 +701,6 @@ Module.register("MMM-HomeConnect2", {
 
   buildDeviceDisplayState(device, runtimeHints, deviceUtils) {
     const explicitlyDisconnected = deviceUtils.isDeviceExplicitlyDisconnected(device);
-    const isConnected = explicitlyDisconnected ? false : deviceUtils.isDeviceConnected(device);
-    const appearsActive = deviceUtils.deviceAppearsActive(device);
     const remainingSeconds = deviceUtils.parseRemainingSeconds(device);
     const effectiveRemainingSeconds = this.getEffectiveRemainingSeconds(device, remainingSeconds);
     const estimatedTotalSeconds = deviceUtils.parseEstimatedTotalSeconds(device);
@@ -668,7 +716,7 @@ Module.register("MMM-HomeConnect2", {
         : null;
     const hint = this.getDeviceRuntimeHint(runtimeHints, device);
     const progressNumeric = normalizeProgressValue(progressValue);
-    const operationState = getOperationStateInfo(device);
+    const operationState = getOperationStateInfo(device, deviceUtils);
     const hasRuntimeSignalsForSelectedProgram =
       operationState.isActive ||
       (Number.isFinite(remainingSeconds) && remainingSeconds > 0 && !hasEstimatedDuration) ||
@@ -680,7 +728,6 @@ Module.register("MMM-HomeConnect2", {
     const effectiveOperationStateActive = suppressSelectedProgramRuntime
       ? false
       : operationState.isActive;
-    const effectiveAppearsActive = suppressSelectedProgramRuntime ? false : appearsActive;
     const finishedViaZero = this.updateRuntimeHintState({
       hint,
       powerState: device.PowerState,
@@ -690,6 +737,11 @@ Module.register("MMM-HomeConnect2", {
       suppressSelectedProgramRuntime
     });
     const isFinished = operationState.isFinished || progressNumeric === 100 || finishedViaZero;
+    // The play icon and the selected-program line are factual claims about the
+    // appliance, so they need proof: an operation state we understand that says
+    // "Run". Remaining times and progress values routinely survive a finished or
+    // merely selected program and must not be used to infer that something runs.
+    const programRunning = operationState.known && effectiveOperationStateActive && !isFinished;
     if (isFinished) {
       hint.hadActive = false;
     }
@@ -716,6 +768,7 @@ Module.register("MMM-HomeConnect2", {
     const programState = computeProgramDisplayState({
       device,
       operationStateDelayedStart: operationState.isDelayedStart,
+      programRunning,
       suppressSelectedProgramRuntime,
       visibleRemainingSeconds,
       estimatedTotalSeconds,
@@ -770,14 +823,9 @@ Module.register("MMM-HomeConnect2", {
       fallbackIconClass: typeMeta.fallbackIconClass,
       runtime: {
         explicitlyDisconnected,
-        isConnected,
-        appearsActive: effectiveAppearsActive,
-        operationStateActive: effectiveOperationStateActive,
         operationStateDelayedStart: operationState.isDelayedStart,
-        operationStateFinished: operationState.isFinished,
         operationStatePaused: operationState.isPaused,
-        effectiveRemainingSeconds: visibleRemainingSeconds,
-        hasEstimatedDuration,
+        programRunning,
         isFinished,
         isIndeterminate,
         wrinkleProtectionActive,
@@ -904,15 +952,38 @@ Module.register("MMM-HomeConnect2", {
       return "";
     }
 
+    const mismatchKeys = Array.isArray(status.mismatchKeys) ? status.mismatchKeys : [];
+    const isCredentialMismatch = mismatchKeys.some(
+      (key) => key === "clientId" || key === "clientSecret"
+    );
+    const fallbackMessage = isCredentialMismatch
+      ? this.translate("CONFIG_MISMATCH_CREDENTIALS")
+      : this.translate("CONFIG_MISMATCH");
+
     const message =
       typeof status.message === "string" && status.message.trim()
         ? status.message.trim()
-        : this.translate("CONFIG_MISMATCH");
+        : fallbackMessage;
 
     return [
       "<div class='hc-status-banner hc-status-banner-warning'>",
       `<div class='hc-status-banner-title'>${this.translate("CONFIG_MISMATCH_TITLE")}</div>`,
       `<div class='hc-status-banner-message'>${message}</div>`,
+      "</div>"
+    ].join("");
+  },
+
+  // Soft counterpart to the mismatch banner: this display stays fully connected,
+  // it just runs against session settings that were established by another client.
+  getConfigDriftNoticeHtml() {
+    const drift = this.configDrift;
+    if (!drift || !Array.isArray(drift.keys) || drift.keys.length === 0) {
+      return "";
+    }
+
+    return [
+      "<div class='hc-status-note dimmed'>",
+      `${this.translate("CONFIG_DRIFT")} ${drift.keys.join(", ")}`,
       "</div>"
     ].join("");
   },
@@ -927,12 +998,7 @@ Module.register("MMM-HomeConnect2", {
       programIcon = "<i class='fa fa-clock-o deviceStatusIcon' title='Delayed start'></i>";
     } else if (device.PowerState !== "Off" && runtime.operationStatePaused) {
       programIcon = "<i class='fa fa-pause deviceStatusIcon' title='Program paused'></i>";
-    } else if (
-      device.PowerState !== "Off" &&
-      (runtime.operationStateActive || runtime.appearsActive) &&
-      !runtime.isFinished &&
-      !runtime.operationStateFinished
-    ) {
+    } else if (device.PowerState !== "Off" && runtime.programRunning) {
       programIcon = "<i class='fa fa-play deviceStatusIcon' title='Program running'></i>";
     }
 
@@ -1015,6 +1081,7 @@ Module.register("MMM-HomeConnect2", {
     const rateLimitNoticeHtml = this.getRateLimitNoticeHtml();
     const homeConnectErrorNoticeHtml = this.getHomeConnectErrorNoticeHtml();
     const configMismatchNoticeHtml = this.getConfigMismatchNoticeHtml();
+    const configDriftNoticeHtml = this.getConfigDriftNoticeHtml();
 
     // Show authentication info if available
     if (this.authInfo && this.authInfo.status === "waiting") {
@@ -1041,7 +1108,7 @@ Module.register("MMM-HomeConnect2", {
         `<i class='fa fa-cog fa-spin'></i> ${this.translate("SESSION_BASED_AUTH")}<br>` +
         `<span class='dimmed'>${this.translate("LOADING_APPLIANCES")}...</span>` +
         "</div>";
-      div.innerHTML = `${rateLimitNoticeHtml}${homeConnectErrorNoticeHtml}${configMismatchNoticeHtml}${loadingHtml}`;
+      div.innerHTML = `${rateLimitNoticeHtml}${homeConnectErrorNoticeHtml}${configMismatchNoticeHtml}${configDriftNoticeHtml}${loadingHtml}`;
       return div;
     }
 
@@ -1051,12 +1118,12 @@ Module.register("MMM-HomeConnect2", {
       .join("");
 
     if (wrapper === "") {
-      div.innerHTML = `${rateLimitNoticeHtml}${homeConnectErrorNoticeHtml}${configMismatchNoticeHtml}<div class='dimmed small'>${this.translate("NO_ACTIVE_APPLIANCES")}</div>${this.getDebugPanel()}`;
+      div.innerHTML = `${rateLimitNoticeHtml}${homeConnectErrorNoticeHtml}${configMismatchNoticeHtml}${configDriftNoticeHtml}<div class='dimmed small'>${this.translate("NO_ACTIVE_APPLIANCES")}</div>${this.getDebugPanel()}`;
       return div;
     }
 
     const debugPanel = this.getDebugPanel();
-    div.innerHTML = `${rateLimitNoticeHtml}${homeConnectErrorNoticeHtml}${configMismatchNoticeHtml}${wrapper}${debugPanel}`;
+    div.innerHTML = `${rateLimitNoticeHtml}${homeConnectErrorNoticeHtml}${configMismatchNoticeHtml}${configDriftNoticeHtml}${wrapper}${debugPanel}`;
     return div;
   },
 

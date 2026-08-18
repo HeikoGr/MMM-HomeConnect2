@@ -2,8 +2,24 @@
 
 const assert = require("assert");
 const Module = require("module");
+const os = require("os");
+const path = require("path");
+
+// retryAuthentication() deletes the refresh token file. Redirect that path into a
+// temp directory so running the tests never touches a real Home Connect session.
+const testRefreshTokenPath = path.join(os.tmpdir(), "mmm-homeconnect2-test-refresh-token.json");
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Timer assertions must not race the event loop under load: poll for the expected
+// state instead of sleeping for a fixed margin and hoping the timer already fired.
+async function waitForSessionState(expected, timeoutMs = 2000) {
+  const deadline = Date.now() + timeoutMs;
+  while (helper.sessionState !== expected && Date.now() < deadline) {
+    await wait(10);
+  }
+  return helper.sessionState;
+}
 
 const originalLoad = Module._load;
 Module._load = function patchedLoad(request, parent, isMain) {
@@ -13,6 +29,10 @@ Module._load = function patchedLoad(request, parent, isMain) {
         return definition;
       }
     };
+  }
+  if (request.endsWith("module-paths")) {
+    const actual = originalLoad.call(this, request, parent, isMain);
+    return { ...actual, refreshTokenPath: testRefreshTokenPath };
   }
   return originalLoad.call(this, request, parent, isMain);
 };
@@ -54,9 +74,7 @@ function resetHelperState() {
   helper.instanceId = null;
   helper.sharedConfigOwnerInstanceId = null;
   helper.sharedConfigHash = null;
-  if (helper.clientConfigs && typeof helper.clientConfigs.clear === "function") {
-    helper.clientConfigs.clear();
-  }
+  helper.sharedSessionConfig = null;
   helper.activeProgramFetchInFlight = false;
   helper.activeProgramFetchSignature = null;
   helper.recentForcedProgramFetch = null;
@@ -75,6 +93,19 @@ function resetHelperState() {
   };
   helper.config = null;
   helper.configReceived = false;
+}
+
+// globalSession lives in the helper's module scope, so the registered clients are
+// read back through the only path that enumerates them: a broadcast.
+function registeredInstances() {
+  const ids = [];
+  const originalSendEventToInstance = helper.sendEventToInstance;
+  helper.sendEventToInstance = (instanceId) => {
+    ids.push(instanceId);
+  };
+  helper.broadcastToAllClients("DEBUG_STATS", {});
+  helper.sendEventToInstance = originalSendEventToInstance;
+  return ids;
 }
 
 (async () => {
@@ -160,8 +191,11 @@ function resetHelperState() {
   assert.strictEqual(active, true);
   assert.strictEqual(helper.sessionState, "rate_limited");
 
-  await wait(100);
-  assert.strictEqual(helper.sessionState, "ready");
+  assert.strictEqual(
+    await waitForSessionState("ready"),
+    "ready",
+    "A release timer firing early must re-arm instead of stranding the session"
+  );
 
   // Race path: extending rate limit before timer fires must keep state rate_limited.
   helper.setRateLimitUntil(Date.now() + 25);
@@ -175,8 +209,7 @@ function resetHelperState() {
   await wait(35);
   assert.strictEqual(helper.sessionState, "rate_limited");
 
-  await wait(120);
-  assert.strictEqual(helper.sessionState, "ready");
+  assert.strictEqual(await waitForSessionState("ready"), "ready");
 
   // SSE debug stats should track real gaps between events.
   resetHelperState();
@@ -435,16 +468,25 @@ function resetHelperState() {
 
   assert.strictEqual(fetchCalls, 1);
 
-  // Shared backend config hash must gate additional frontend instances.
+  // Only session-relevant config takes part in the hash. Display-local drift keeps
+  // the client connected, foreign credentials are rejected.
   resetHelperState();
   const authConfigs = [];
   const deviceConfigs = [];
   const acceptLanguages = [];
   const configuredInstances = [];
   const configMismatchStatuses = [];
+  const sessionConfigEvents = [];
+  const originalEmitInitStatus = helper.emitInitStatus;
+  const originalSendEventToInstance = helper.sendEventToInstance;
   helper.emitInitStatus = (status, payload = {}) => {
-    if (payload.instanceId === "frontend-b") {
+    if (payload.isConfigMismatch) {
       configMismatchStatuses.push({ status, payload });
+    }
+  };
+  helper.sendEventToInstance = (instanceId, action, data) => {
+    if (action === "SESSION_CONFIG") {
+      sessionConfigEvents.push({ instanceId, data });
     }
   };
   helper.authService = {
@@ -472,20 +514,38 @@ function resetHelperState() {
 
   helper.handleConfigNotification({
     instanceId: "frontend-a",
+    clientId: "client-1",
     apiLanguage: "de",
     minActiveProgramIntervalMs: 1111,
-    enableSSEHeartbeat: true
+    enableSSEHeartbeat: true,
+    showDeviceIcon: true
   });
 
+  // Display-only options must not register as drift at all.
   helper.handleConfigNotification({
     instanceId: "frontend-b",
-    apiLanguage: "en",
+    clientId: "client-1",
+    apiLanguage: "de",
+    minActiveProgramIntervalMs: 1111,
+    enableSSEHeartbeat: true,
+    showDeviceIcon: false,
+    showAlwaysAllDevices: true,
+    header: "Another header"
+  });
+
+  // Session-relevant drift: client stays registered but is told what applies.
+  helper.handleConfigNotification({
+    instanceId: "frontend-c",
+    clientId: "client-1",
+    apiLanguage: "de",
     minActiveProgramIntervalMs: 9999,
     enableSSEHeartbeat: false
   });
 
+  // Foreign credentials cannot be served by this session.
   helper.handleConfigNotification({
-    instanceId: "frontend-c",
+    instanceId: "frontend-d",
+    clientId: "client-2",
     apiLanguage: "de",
     minActiveProgramIntervalMs: 1111,
     enableSSEHeartbeat: true
@@ -496,14 +556,108 @@ function resetHelperState() {
   assert.strictEqual(helper.config.apiLanguage, "de");
   assert.strictEqual(helper.config.minActiveProgramIntervalMs, 1111);
   assert.ok(typeof helper.sharedConfigHash === "string" && helper.sharedConfigHash.length > 0);
-  assert.deepStrictEqual(configuredInstances, ["first:frontend-a", "next:frontend-c"]);
+  assert.deepStrictEqual(configuredInstances, [
+    "first:frontend-a",
+    "next:frontend-b",
+    "next:frontend-c"
+  ]);
   assert.strictEqual(authConfigs.length, 1);
-  assert.strictEqual(deviceConfigs.length, 2);
-  assert.deepStrictEqual(acceptLanguages, ["de", "de"]);
+  assert.strictEqual(deviceConfigs.length, 3);
+  assert.deepStrictEqual(acceptLanguages, ["de", "de", "de"]);
+  const registeredAfterDrift = registeredInstances();
+  ["frontend-a", "frontend-b", "frontend-c"].forEach((instanceId) => {
+    assert.ok(registeredAfterDrift.includes(instanceId), `${instanceId} must stay registered`);
+  });
+  assert.ok(
+    !registeredAfterDrift.includes("frontend-d"),
+    "The rejected client must not receive broadcasts"
+  );
 
+  // Exactly one hard rejection, and only for the credential mismatch.
   assert.strictEqual(configMismatchStatuses.length, 1);
   assert.strictEqual(configMismatchStatuses[0].status, "device_error");
-  assert.strictEqual(configMismatchStatuses[0].payload.isConfigMismatch, true);
+  assert.strictEqual(configMismatchStatuses[0].payload.instanceId, "frontend-d");
+  assert.deepStrictEqual(configMismatchStatuses[0].payload.mismatchKeys, ["clientId"]);
+  assert.strictEqual(
+    typeof configMismatchStatuses[0].payload.message === "string" &&
+    configMismatchStatuses[0].payload.message.length > 0,
+    false
+  );
+
+  // Every accepted client learns the effective session config, credentials excluded.
+  assert.deepStrictEqual(
+    sessionConfigEvents.map((event) => event.instanceId),
+    ["frontend-a", "frontend-b", "frontend-c"]
+  );
+  assert.strictEqual(sessionConfigEvents[0].data.drift, null);
+  assert.strictEqual(sessionConfigEvents[1].data.drift, null);
+  assert.deepStrictEqual(sessionConfigEvents[2].data.drift.keys.sort(), [
+    "enableSSEHeartbeat",
+    "minActiveProgramIntervalMs"
+  ]);
+  assert.strictEqual(sessionConfigEvents[2].data.ownerInstanceId, "frontend-a");
+  assert.strictEqual(sessionConfigEvents[2].data.sessionConfig.apiLanguage, "de");
+  assert.strictEqual(sessionConfigEvents[2].data.sessionConfig.minActiveProgramIntervalMs, 1111);
+  assert.strictEqual(
+    Object.hasOwn(sessionConfigEvents[2].data.sessionConfig, "clientId"),
+    false
+  );
+  assert.strictEqual(
+    Object.hasOwn(sessionConfigEvents[2].data.sessionConfig, "clientSecret"),
+    false
+  );
+
+  // A browser-derived language only fills the gap when nothing is configured.
+  resetHelperState();
+  helper.emitInitStatus = () => { };
+  helper.sendEventToInstance = () => { };
+  helper.authService = { setConfig() { } };
+  helper.deviceService = { setConfig() { } };
+  helper.hc = null;
+  helper.handleConfigNotificationFirstTime = () => {
+    helper.configReceived = true;
+  };
+  helper.handleConfigNotificationSubsequent = () => { };
+
+  helper.handleConfigNotification({
+    instanceId: "kiosk",
+    clientId: "client-1",
+    apiLanguage: "",
+    preferredApiLanguage: "de-DE"
+  });
+  helper.handleConfigNotification({
+    instanceId: "phone",
+    clientId: "client-1",
+    apiLanguage: "",
+    preferredApiLanguage: "en-GB"
+  });
+
+  assert.strictEqual(helper.config.apiLanguage, "de-DE");
+  assert.strictEqual(helper.sharedSessionConfig.apiLanguage, "de-DE");
+  const registeredAfterLanguage = registeredInstances();
+  assert.ok(registeredAfterLanguage.includes("kiosk"));
+  assert.ok(registeredAfterLanguage.includes("phone"));
+
+  // A client whose browser hint resolves to the session language must not be
+  // reported as drift, even when another session key differs.
+  const languageDriftEvents = [];
+  helper.sendEventToInstance = (instanceId, action, data) => {
+    if (action === "SESSION_CONFIG") {
+      languageDriftEvents.push({ instanceId, data });
+    }
+  };
+  helper.handleConfigNotification({
+    instanceId: "tablet",
+    clientId: "client-1",
+    apiLanguage: "",
+    preferredApiLanguage: "de-DE",
+    enableSSEHeartbeat: false
+  });
+
+  assert.deepStrictEqual(languageDriftEvents[0].data.drift.keys, ["enableSSEHeartbeat"]);
+
+  helper.emitInitStatus = originalEmitInitStatus;
+  helper.sendEventToInstance = originalSendEventToInstance;
 
   // Manual auth retry must preserve all registered frontend instances.
   resetHelperState();

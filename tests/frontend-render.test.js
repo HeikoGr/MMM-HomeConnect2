@@ -35,7 +35,8 @@ function installFrontendGlobals() {
       deviceAppearsActive: deviceUtils.deviceAppearsActive,
       isDeviceConnected: deviceUtils.isDeviceConnected,
       isDeviceExplicitlyDisconnected: deviceUtils.isDeviceExplicitlyDisconnected,
-      shouldDisplayDevice: deviceUtils.shouldDisplayDevice
+      shouldDisplayDevice: deviceUtils.shouldDisplayDevice,
+      parseOperationState: deviceUtils.parseOperationState
     }
   };
   globalThis.document = {
@@ -100,6 +101,8 @@ function createInstance(overrides = {}) {
     authStatus: overrides.authStatus || null,
     debugStats: overrides.debugStats || null,
     lastInitStatus: overrides.lastInitStatus || null,
+    sessionConfig: overrides.sessionConfig || null,
+    configDrift: overrides.configDrift || null,
     deviceRuntimeHints: overrides.deviceRuntimeHints || {},
     instanceId: "test-instance",
     notifications: {
@@ -194,8 +197,105 @@ function createInstance(overrides = {}) {
         }
       ]
     });
+    // No usable OperationState means we cannot know whether a program runs. The
+    // remaining time still renders, but no play icon claims something we cannot prove.
     const fallbackRunningDom = fallbackRunningInstance.getDom();
-    assert.ok(fallbackRunningDom.innerHTML.includes("fa-play"));
+    assert.ok(!fallbackRunningDom.innerHTML.includes("fa-play"));
+    assert.ok(fallbackRunningDom.innerHTML.includes("fa-toggle-on"));
+    assert.ok(fallbackRunningDom.innerHTML.includes("ACTIVE_PROGRAM: Cotton"));
+    assert.ok(fallbackRunningDom.innerHTML.includes("DONE_IN"));
+
+    // The play icon must follow the reported operation state, never a guess. An
+    // idle washing machine is the case that used to show a phantom play icon,
+    // because "Inactive" matched a substring test for "Active".
+    const iconMatrix = [
+      ["Inactive", "fa-toggle-on", "fa-play"],
+      ["Ready", "fa-toggle-on", "fa-play"],
+      ["Run", "fa-play", "fa-toggle-on"],
+      ["Pause", "fa-pause", "fa-play"],
+      ["DelayedStart", "fa-clock-o", "fa-play"],
+      ["Finished", "fa-toggle-on", "fa-play"],
+      ["ActionRequired", "fa-toggle-on", "fa-play"],
+      ["Aborting", "fa-toggle-on", "fa-play"],
+      ["SomeFutureState", "fa-toggle-on", "fa-play"]
+    ];
+
+    iconMatrix.forEach(([label, expectedIcon, forbiddenIcon]) => {
+      const instance = createInstance({
+        config: { showAlwaysAllDevices: true },
+        devices: [
+          {
+            name: "Washer",
+            type: "Washer",
+            PowerState: "On",
+            OperationState: `BSH.Common.EnumType.OperationState.${label}`,
+            ActiveProgramName: "Eco 40-60",
+            RemainingProgramTime: 1800,
+            ProgramProgress: 35
+          }
+        ]
+      });
+      const html = instance.getDom().innerHTML;
+      assert.ok(html.includes(expectedIcon), `${label} should render ${expectedIcon}`);
+      assert.ok(!html.includes(forbiddenIcon), `${label} must not render ${forbiddenIcon}`);
+    });
+
+    // Powered off appliances never get a program icon, whatever the state says.
+    const poweredOffInstance = createInstance({
+      config: { showAlwaysAllDevices: true },
+      devices: [
+        {
+          name: "Washer",
+          type: "Washer",
+          PowerState: "Off",
+          OperationState: "BSH.Common.EnumType.OperationState.Run"
+        }
+      ]
+    });
+    const poweredOffHtml = poweredOffInstance.getDom().innerHTML;
+    assert.ok(!poweredOffHtml.includes("fa-play"));
+    assert.ok(poweredOffHtml.includes("fa-toggle-off"));
+
+    // The selected-program line follows the same evidence rule as the play icon,
+    // with delayed start as the one exception: that program is genuinely scheduled.
+    const selectedProgramStates = [
+      ["Inactive", false],
+      ["Ready", false],
+      ["Finished", false],
+      ["Pause", false],
+      ["Run", true],
+      ["DelayedStart", true]
+    ];
+
+    selectedProgramStates.forEach(([label, shouldShow]) => {
+      const instance = createInstance({
+        config: { showAlwaysAllDevices: true },
+        devices: [
+          {
+            name: "Dryer",
+            type: "Dryer",
+            PowerState: "On",
+            OperationState: `BSH.Common.EnumType.OperationState.${label}`,
+            ActiveProgramName: "Synthetics",
+            ActiveProgramSource: "selected",
+            ActiveProgramDetails: ["Low Heat"],
+            StartInRelative: label === "DelayedStart" ? 3600 : undefined
+          }
+        ]
+      });
+      const html = instance.getDom().innerHTML;
+      assert.strictEqual(
+        html.includes("SELECTED_PROGRAM: Synthetics"),
+        shouldShow,
+        `${label}: selected program shown should be ${shouldShow}`
+      );
+      assert.strictEqual(
+        html.includes("Low Heat"),
+        shouldShow,
+        `${label}: program details shown should be ${shouldShow}`
+      );
+      assert.ok(!html.includes(">Synthetics<"), `${label}: no bare program name leaks through`);
+    });
 
     const selectedProgramInstance = createInstance({
       config: {
@@ -215,10 +315,13 @@ function createInstance(overrides = {}) {
         }
       ]
     });
+    // A selected program is just the dial position - it says nothing about what the
+    // appliance is doing, so it stays hidden until the program actually runs.
     const selectedDom = selectedProgramInstance.getDom();
     assert.ok(selectedDom.innerHTML.includes("Dryer"));
-    assert.ok(selectedDom.innerHTML.includes("SELECTED_PROGRAM: Synthetics"));
-    assert.ok(selectedDom.innerHTML.includes("Cupboard Dry Plus • Low Heat"));
+    assert.ok(!selectedDom.innerHTML.includes("SELECTED_PROGRAM"));
+    assert.ok(!selectedDom.innerHTML.includes("Synthetics"));
+    assert.ok(!selectedDom.innerHTML.includes("Cupboard Dry Plus"));
 
     const runningSelectedProgramInstance = createInstance({
       devices: [
@@ -261,9 +364,9 @@ function createInstance(overrides = {}) {
     });
     const selectedDishwasherDom = selectedDishwasherInstance.getDom();
     assert.ok(selectedDishwasherDom.innerHTML.includes("Dishwasher"));
-    assert.ok(selectedDishwasherDom.innerHTML.includes("SELECTED_PROGRAM"));
-    assert.ok(selectedDishwasherDom.innerHTML.includes("Eco 50°"));
-    assert.ok(selectedDishwasherDom.innerHTML.includes("varioSpeed Plus"));
+    assert.ok(!selectedDishwasherDom.innerHTML.includes("SELECTED_PROGRAM"));
+    assert.ok(!selectedDishwasherDom.innerHTML.includes("Eco 50°"));
+    assert.ok(!selectedDishwasherDom.innerHTML.includes("varioSpeed Plus"));
 
     const secondCycleDryerInstance = createInstance({
       devices: [
@@ -406,7 +509,7 @@ function createInstance(overrides = {}) {
     const selectedDoorOpenDom = selectedDoorOpenInstance.getDom();
     assert.ok(selectedDoorOpenDom.innerHTML.includes("Dryer"));
     assert.ok(selectedDoorOpenDom.innerHTML.includes("fa-door-open"));
-    assert.ok(selectedDoorOpenDom.innerHTML.includes("SELECTED_PROGRAM: Synthetics"));
+    assert.ok(!selectedDoorOpenDom.innerHTML.includes("SELECTED_PROGRAM"));
     assert.ok(!selectedDoorOpenDom.innerHTML.includes("1h 16m"));
 
     const finishedProgramInstance = createInstance({
@@ -675,6 +778,76 @@ function createInstance(overrides = {}) {
       )
     );
     assert.ok(configMismatchDom.innerHTML.includes("LOADING_APPLIANCES"));
+
+    // Without an explicit message the banner falls back to a translated text, and
+    // credential conflicts get their own wording.
+    const credentialMismatchInstance = createInstance({
+      lastInitStatus: {
+        status: "device_error",
+        isConfigMismatch: true,
+        mismatchKeys: ["clientId"]
+      }
+    });
+    const credentialMismatchDom = credentialMismatchInstance.getDom();
+    assert.ok(credentialMismatchDom.innerHTML.includes("CONFIG_MISMATCH_CREDENTIALS"));
+    assert.ok(!credentialMismatchDom.innerHTML.includes("CONFIG_DRIFT"));
+
+    // Soft drift keeps the display working and only names the affected keys.
+    const driftInstance = createInstance({
+      devices: [
+        {
+          name: "Washer",
+          type: "Washer",
+          PowerState: "On",
+          ActiveProgramName: "Eco 40-60",
+          ActiveProgramSource: "active"
+        }
+      ],
+      configDrift: { keys: ["minActiveProgramIntervalMs", "enableSSEHeartbeat"] }
+    });
+    const driftDom = driftInstance.getDom();
+    assert.ok(driftDom.innerHTML.includes("CONFIG_DRIFT"));
+    assert.ok(driftDom.innerHTML.includes("minActiveProgramIntervalMs, enableSSEHeartbeat"));
+    assert.ok(driftDom.innerHTML.includes("Eco 40-60"));
+    assert.ok(!driftDom.innerHTML.includes("CONFIG_MISMATCH_TITLE"));
+
+    // A client without drift renders no notice at all.
+    const noDriftInstance = createInstance({
+      configDrift: { keys: [] }
+    });
+    assert.ok(!noDriftInstance.getDom().innerHTML.includes("CONFIG_DRIFT"));
+
+    // SESSION_CONFIG makes the helper the source of truth for session settings.
+    const sessionConfigInstance = createInstance({ config: { apiLanguage: "" } });
+    sessionConfigInstance.socketNotificationReceived("MMM-HomeConnect2_EVENT", {
+      identifier: "test-instance",
+      instanceId: "test-instance",
+      action: "SESSION_CONFIG",
+      data: {
+        ownerInstanceId: "kiosk",
+        sessionConfig: { apiLanguage: "de-DE", minActiveProgramIntervalMs: 1111 },
+        drift: { keys: ["minActiveProgramIntervalMs"] }
+      }
+    });
+
+    assert.strictEqual(sessionConfigInstance.config.apiLanguage, "de-DE");
+    assert.strictEqual(sessionConfigInstance.sessionConfig.minActiveProgramIntervalMs, 1111);
+    assert.deepStrictEqual(sessionConfigInstance.configDrift.keys, ["minActiveProgramIntervalMs"]);
+    assert.ok(sessionConfigInstance.getDom().innerHTML.includes("CONFIG_DRIFT"));
+
+    sessionConfigInstance.socketNotificationReceived("MMM-HomeConnect2_EVENT", {
+      identifier: "test-instance",
+      instanceId: "test-instance",
+      action: "SESSION_CONFIG",
+      data: {
+        ownerInstanceId: "kiosk",
+        sessionConfig: { apiLanguage: "de-DE" },
+        drift: null
+      }
+    });
+
+    assert.strictEqual(sessionConfigInstance.configDrift, null);
+    assert.ok(!sessionConfigInstance.getDom().innerHTML.includes("CONFIG_DRIFT"));
 
     const debugSessionInstance = createInstance({
       config: {

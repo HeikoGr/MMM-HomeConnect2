@@ -15,7 +15,8 @@ const {
   shouldDisplayDevice,
   summarizeAvailablePrograms,
   summarizeProgramConstraints,
-  deviceAppearsActive
+  deviceAppearsActive,
+  parseOperationState
 } = require("../lib/device-utils");
 
 (() => {
@@ -111,6 +112,63 @@ const {
     deviceAppearsActive({ RemainingProgramTime: { value: "PT20M" } }),
     true,
     "Duration objects should mark device as active"
+  );
+
+  // Operation states are matched exactly - "Inactive" contains "Active", so any
+  // substring test would report every idle appliance as running.
+  const stateMatrix = [
+    ["Inactive", { known: true, isRun: false, hasProgramInProgress: false }, false],
+    ["Ready", { known: true, isRun: false, hasProgramInProgress: false }, false],
+    ["DelayedStart", { known: true, isRun: false, isDelayedStart: true }, true],
+    ["Run", { known: true, isRun: true }, true],
+    ["Pause", { known: true, isRun: false, isPaused: true }, true],
+    ["ActionRequired", { known: true, isRun: false, hasProgramInProgress: true }, true],
+    ["Aborting", { known: true, isRun: false, hasProgramInProgress: true }, true],
+    ["Finished", { known: true, isRun: false, isFinished: true }, false],
+    ["Error", { known: true, isRun: false, hasProgramInProgress: false }, false],
+    ["SomeFutureState", { known: false, isRun: false }, false]
+  ];
+
+  stateMatrix.forEach(([label, expected, expectedActive]) => {
+    const device = {
+      PowerState: "On",
+      OperationState: `BSH.Common.EnumType.OperationState.${label}`
+    };
+    const parsed = parseOperationState(device);
+
+    Object.entries(expected).forEach(([key, value]) => {
+      assert.strictEqual(parsed[key], value, `${label}: ${key} should be ${value}`);
+    });
+    assert.strictEqual(
+      deviceAppearsActive(device),
+      expectedActive,
+      `${label}: deviceAppearsActive should be ${expectedActive}`
+    );
+  });
+
+  assert.strictEqual(
+    parseOperationState({}).known,
+    false,
+    "A missing operation state must stay unknown instead of defaulting to a value"
+  );
+
+  assert.strictEqual(
+    parseOperationState({
+      OperationState: { value: "BSH.Common.EnumType.OperationState.Run" }
+    }).isRun,
+    true,
+    "Wrapped operation state objects must be unwrapped"
+  );
+
+  assert.strictEqual(
+    deviceAppearsActive({
+      PowerState: "On",
+      OperationState: "BSH.Common.EnumType.OperationState.Inactive",
+      RemainingProgramTime: { value: "PT20M" },
+      ProgramProgress: 40
+    }),
+    false,
+    "A known idle state must win over stale remaining time and progress values"
   );
 
   assert.strictEqual(

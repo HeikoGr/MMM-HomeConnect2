@@ -187,18 +187,64 @@ function stableStringify(value) {
   return `{${serialized.join(",")}}`;
 }
 
-function normalizeClientConfigForHash(config = {}) {
-  const ignoredKeys = new Set(["instanceId", "identifier"]);
-  const normalized = {};
+// Config keys that shape the shared HomeConnect session. All displays are served
+// by one API session and one SSE stream, so these settings can only exist once.
+// Everything else (showDeviceIcon, showDeviceIf*, header, progressRefreshIntervalMs,
+// ...) is evaluated in the browser and may legitimately differ per display.
+const SESSION_CONFIG_KEYS = Object.freeze([
+  "apiLanguage",
+  "apiRequestTimeoutMs",
+  "clientId",
+  "clientSecret",
+  "enableSSEHeartbeat",
+  "logLevel",
+  "minActiveProgramIntervalMs",
+  "ssePreSubscribeRefreshMs",
+  "sseRecoveryCooldownMs",
+  "sseHeartbeatCheckIntervalMs",
+  "sseHeartbeatStaleThresholdMs"
+]);
 
-  Object.keys(config).forEach((key) => {
-    if (ignoredKeys.has(key)) {
-      return;
+// Different credentials mean a different HomeConnect account - the shared session
+// cannot serve such a client at all. Every other difference is only a warning.
+const CRITICAL_CONFIG_KEYS = new Set(["clientId", "clientSecret"]);
+
+// Credentials are never echoed back to browsers, even though the first client
+// supplied them: a late client must not learn another account's identifiers.
+const SESSION_CONFIG_ECHO_KEYS = Object.freeze(
+  SESSION_CONFIG_KEYS.filter((key) => !CRITICAL_CONFIG_KEYS.has(key))
+);
+
+function pickSessionConfig(config = {}) {
+  const picked = {};
+
+  SESSION_CONFIG_KEYS.forEach((key) => {
+    if (typeof config[key] !== "undefined") {
+      picked[key] = config[key];
     }
-    normalized[key] = config[key];
   });
 
-  return normalized;
+  return picked;
+}
+
+function diffSessionConfigKeys(expected = {}, received = {}) {
+  return SESSION_CONFIG_KEYS.filter(
+    (key) => stableStringify(expected[key] ?? null) !== stableStringify(received[key] ?? null)
+  );
+}
+
+// The API language is baked into the shared device data (Accept-Language), so it
+// can only be resolved once - by the client that opens the session. An explicitly
+// configured value always wins over the browser-derived hint.
+function resolveSessionLanguage(config = {}) {
+  const configured = typeof config.apiLanguage === "string" ? config.apiLanguage.trim() : "";
+  if (configured) {
+    return configured;
+  }
+
+  const preferred =
+    typeof config.preferredApiLanguage === "string" ? config.preferredApiLanguage.trim() : "";
+  return preferred;
 }
 
 module.exports = NodeHelper.create({
@@ -209,7 +255,6 @@ module.exports = NodeHelper.create({
   maxInitAttempts: 3,
   instanceId: null,
   sharedConfigOwnerInstanceId: null,
-  clientConfigs: new Map(),
   activeProgramManager: null,
   authService: null,
   deviceService: null,
@@ -223,6 +268,7 @@ module.exports = NodeHelper.create({
   rateLimitReleaseTimer: null,
   fullSnapshotTimer: null,
   sharedConfigHash: null,
+  sharedSessionConfig: null,
   activeProgramFetchInFlight: false,
   activeProgramFetchSignature: null,
   recentForcedProgramFetch: null,
@@ -331,11 +377,19 @@ module.exports = NodeHelper.create({
 
     this.rateLimitReleaseTimer = setTimeout(() => {
       this.rateLimitReleaseTimer = null;
-      if (Date.now() >= globalSession.rateLimitUntil) {
-        this.transitionSessionState(SESSION_EVENTS.RATE_LIMIT_CLEARED, {
-          reason: "rate_limit_elapsed"
-        });
+
+      // Node schedules timers on the monotonic loop clock while the deadline is a
+      // Date.now() wall-clock stamp, so the callback can arrive a hair early. Re-arm
+      // in that case - simply skipping the release would strand the session in
+      // rate_limited until some unrelated request happens to re-evaluate it.
+      if (Date.now() < globalSession.rateLimitUntil) {
+        this.scheduleRateLimitRelease(globalSession.rateLimitUntil);
+        return;
       }
+
+      this.transitionSessionState(SESSION_EVENTS.RATE_LIMIT_CLEARED, {
+        reason: "rate_limit_elapsed"
+      });
     }, waitMs);
   },
 
@@ -381,7 +435,6 @@ module.exports = NodeHelper.create({
   emitStatus(notification, messageMap, status, payload = {}, options = {}) {
     const { broadcast = true, targetInstanceId = null } = options;
     const builtPayload = this.buildStatusPayload(messageMap, status, payload);
-    const action = this.mapNotificationToAction(notification);
 
     if (broadcast) {
       this.broadcastToAllClients(notification, builtPayload);
@@ -390,21 +443,9 @@ module.exports = NodeHelper.create({
 
     this.sendEventToInstance(
       targetInstanceId || builtPayload.instanceId || this.instanceId || "default",
-      action,
+      notification,
       builtPayload
     );
-  },
-
-  mapNotificationToAction(notification) {
-    const mapping = {
-      DEVICES_UPDATE: "DEVICES_UPDATE",
-      AUTH_INFO: "AUTH_INFO",
-      AUTH_STATUS: "AUTH_STATUS",
-      INIT_STATUS: "INIT_STATUS",
-      DEBUG_STATS: "DEBUG_STATS"
-    };
-
-    return mapping[notification] || notification;
   },
 
   sendEventToInstance(instanceId, action, data) {
@@ -422,16 +463,8 @@ module.exports = NodeHelper.create({
     );
   },
 
-  buildInitStatusPayload(status, payload = {}) {
-    return this.buildStatusPayload(INIT_STATUS_MESSAGES, status, payload);
-  },
-
   emitInitStatus(status, payload = {}, options = {}) {
     this.emitStatus("INIT_STATUS", INIT_STATUS_MESSAGES, status, payload, options);
-  },
-
-  buildAuthStatusPayload(status, payload = {}) {
-    return this.buildStatusPayload(AUTH_STATUS_MESSAGES, status, payload);
   },
 
   emitAuthStatus(status, payload = {}, options = {}) {
@@ -538,32 +571,67 @@ module.exports = NodeHelper.create({
   },
 
   buildConfigHash(config = {}) {
-    const normalized = normalizeClientConfigForHash(config);
-    const hashPayload = stableStringify(normalized);
+    const hashPayload = stableStringify(pickSessionConfig(config));
     return crypto.createHash("sha256").update(hashPayload).digest("hex");
   },
 
-  rejectConfigMismatch(instanceId, expectedHash, receivedHash) {
-    const mismatchMessage =
-      "Konfigurationskonflikt: Dieses Display nutzt eine andere MMM-HomeConnect2-Konfiguration als der laufende Server. Bitte angleichen und neu laden.";
+  buildSessionConfigEcho() {
+    const sessionConfig = this.sharedSessionConfig || {};
+    const echo = {};
 
-    moduleLog("warn", "Rejecting client instance due to config hash mismatch", {
+    SESSION_CONFIG_ECHO_KEYS.forEach((key) => {
+      if (typeof sessionConfig[key] !== "undefined") {
+        echo[key] = sessionConfig[key];
+      }
+    });
+
+    return echo;
+  },
+
+  // Tells a client which session settings actually apply. This makes the
+  // "first client wins" rule visible instead of silently overriding the display.
+  emitSessionConfig(instanceId, driftKeys = []) {
+    this.sendEventToInstance(instanceId, "SESSION_CONFIG", {
+      ownerInstanceId: this.sharedConfigOwnerInstanceId,
+      sessionConfig: this.buildSessionConfigEcho(),
+      drift: driftKeys.length > 0 ? { keys: [...driftKeys] } : null
+    });
+  },
+
+  logConfigDrift(instanceId, driftKeys, clientSessionConfig) {
+    const differences = {};
+    driftKeys.forEach((key) => {
+      differences[key] = {
+        session: (this.sharedSessionConfig || {})[key] ?? null,
+        client: clientSessionConfig[key] ?? null
+      };
+    });
+
+    moduleLog(
+      "warn",
+      "Client config differs from the running session - session settings keep precedence",
+      {
+        instanceId,
+        keys: driftKeys,
+        differences
+      }
+    );
+  },
+
+  rejectConfigMismatch(instanceId, mismatchKeys = []) {
+    moduleLog("warn", "Rejecting client instance: credentials differ from the running session", {
       instanceId,
-      expectedHash,
-      receivedHash
+      mismatchKeys
     });
 
     globalSession.clientInstances.delete(instanceId);
-    this.clientConfigs.delete(instanceId);
 
     this.emitInitStatus(
       "device_error",
       {
         instanceId,
-        message: mismatchMessage,
         isConfigMismatch: true,
-        expectedConfigHash: expectedHash,
-        receivedConfigHash: receivedHash
+        mismatchKeys: [...mismatchKeys]
       },
       { broadcast: false, targetInstanceId: instanceId }
     );
@@ -749,19 +817,43 @@ module.exports = NodeHelper.create({
     });
 
     const instanceId = payload.instanceId || "default";
+    const clientSessionConfig = pickSessionConfig(payload);
     const configHash = this.buildConfigHash(payload);
+    let driftKeys = [];
 
     if (this.sharedConfigHash && configHash !== this.sharedConfigHash) {
-      this.rejectConfigMismatch(instanceId, this.sharedConfigHash, configHash);
-      return;
+      // Compare resolved languages: a client that leaves apiLanguage empty and lands
+      // on the session language through its browser hint is not a real difference.
+      const differingKeys = diffSessionConfigKeys(this.sharedSessionConfig, {
+        ...clientSessionConfig,
+        apiLanguage: resolveSessionLanguage(payload)
+      });
+      const criticalKeys = differingKeys.filter((key) => CRITICAL_CONFIG_KEYS.has(key));
+
+      // A different account cannot be served by this session at all.
+      if (criticalKeys.length > 0) {
+        this.rejectConfigMismatch(instanceId, criticalKeys);
+        return;
+      }
+
+      // Everything else is soft drift: the display stays connected, keeps its own
+      // rendering options and is told which session settings are in effect.
+      driftKeys = differingKeys;
     }
 
     if (!this.sharedConfigHash) {
       this.sharedConfigHash = configHash;
+      this.sharedSessionConfig = {
+        ...clientSessionConfig,
+        apiLanguage: resolveSessionLanguage(payload)
+      };
     }
 
     globalSession.clientInstances.add(instanceId);
-    this.clientConfigs.set(instanceId, { ...payload, _configHash: configHash });
+
+    if (driftKeys.length > 0) {
+      this.logConfigDrift(instanceId, driftKeys, clientSessionConfig);
+    }
 
     moduleLog("debug", `Processing CONFIG notification for instance: ${instanceId}`);
     moduleLog("debug", `Registered clients: ${globalSession.clientInstances.size}`);
@@ -785,7 +877,7 @@ module.exports = NodeHelper.create({
     if (!this.configReceived) {
       this.instanceId = instanceId;
       this.sharedConfigOwnerInstanceId = instanceId;
-      this.config = payload;
+      this.config = { ...payload, apiLanguage: this.sharedSessionConfig.apiLanguage };
       // apply configured log level for module-level logging via auth service
       this.authService.setConfig(this.config);
       this.updateActiveProgramInterval();
@@ -806,6 +898,9 @@ module.exports = NodeHelper.create({
       }
       this.handleConfigNotificationSubsequent(instanceId);
     }
+
+    // Sent last so it survives the INIT_STATUS emitted by the handlers above.
+    this.emitSessionConfig(instanceId, driftKeys);
   },
 
   handleRetryAuth() {
@@ -962,7 +1057,7 @@ module.exports = NodeHelper.create({
   broadcastToAllClients(notification, payload) {
     globalSession.clientInstances.forEach((instanceId) => {
       // Keep payload shape intact (arrays must remain arrays for DEVICES_UPDATE).
-      this.sendEventToInstance(instanceId, this.mapNotificationToAction(notification), payload);
+      this.sendEventToInstance(instanceId, notification, payload);
     });
   },
 

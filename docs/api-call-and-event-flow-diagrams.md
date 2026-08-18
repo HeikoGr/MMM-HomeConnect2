@@ -9,9 +9,11 @@ flowchart TD
   A[Frontend starts module] --> B[sendSocketNotification: CONFIGURE]
   B --> C[Node Helper: handleConfigNotification]
 
-  C --> C0{Config hash matches shared session?}
-  C0 -->|no| C1[Reject instance and send INIT_STATUS isConfigMismatch]
-  C0 -->|yes| D[Continue initialization]
+  C --> C0{Session config hash matches shared session?}
+  C0 -->|"differs in clientId/clientSecret"| C1[Reject instance and send INIT_STATUS isConfigMismatch]
+  C0 -->|"differs in other session keys"| C2[Register instance and send SESSION_CONFIG with drift keys]
+  C0 -->|matches| D[Continue initialization]
+  C2 --> D
 
   D -->|Token available| E[initializeHomeConnect]
   D -->|No token| F[Headless Device Flow Auth]
@@ -81,12 +83,13 @@ sequenceDiagram
   participant APM as ActiveProgramManager
   participant HC as HomeConnect API
 
-  FE->>NH: CONFIGURE(instanceId, config)
-  NH->>NH: buildConfigHash(config)
+  FE->>NH: CONFIGURE(instanceId, config, preferredApiLanguage)
+  NH->>NH: buildConfigHash(pickSessionConfig(config))
 
-  alt shared hash exists and differs
-    NH-->>FE: INIT_STATUS(device_error, isConfigMismatch=true)
-  else hash accepted
+  alt credentials differ from shared session
+    NH-->>FE: INIT_STATUS(device_error, isConfigMismatch=true, mismatchKeys)
+  else hash accepted or soft drift
+    NH-->>FE: SESSION_CONFIG(sessionConfig, drift)
     alt refresh token available
       NH->>HC: init(refresh_token)
     else no token

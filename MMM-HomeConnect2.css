@@ -334,3 +334,9 @@ progress[max]:not([value]) {
   border-radius: inherit;
   background: linear-gradient(90deg, #9ad7ff, #ffffff);
 }
+
+.hc-status-note {
+  margin: 0 0 8px;
+  font-size: 11px;
+  line-height: 1.35;
+}
