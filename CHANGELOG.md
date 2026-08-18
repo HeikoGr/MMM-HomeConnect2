@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.1.0...v1.2.0) (2026-08-18)
+
+
+### 🔌 Features
+
+* **device:** enhance device operation state handling in tests ([a042bb6](https://github.com/HeikoGr/MMM-HomeConnect2/commit/a042bb6ea61a706e0f8da239a532d6e912b21bd0))
+
 ## [1.1.0](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.0.17...v1.1.0) (2026-08-17)
 
 
