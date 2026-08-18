@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.2.0...v1.3.0) (2026-08-18)
+
+
+### 🔌 Features
+
+* **device:** handle active program detection from SSE events ([359ef42](https://github.com/HeikoGr/MMM-HomeConnect2/commit/359ef427e670e8a3c4428f29789d25ad0c449a21))
+
 ## [1.2.0](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.1.0...v1.2.0) (2026-08-18)
 
 
