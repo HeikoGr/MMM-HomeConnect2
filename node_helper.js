@@ -25,6 +25,10 @@ const ACTIVE_PROGRAM_RETRY_DELAY_MS = 5000; // 5s
 const ACTIVE_PROGRAM_MAX_RETRIES = 3; // Maximum number of retries for active program requests
 const FORCED_ACTIVE_PROGRAM_DEDUP_WINDOW_MS = 15000;
 const FULL_SNAPSHOT_INTERVAL_MS = 30 * 60 * 1000;
+// Transient init errors (e.g. network/DNS not ready yet right after a device reboot)
+// must not strand the session forever - retry with capped exponential backoff.
+const HC_INIT_RETRY_BASE_DELAY_MS = 5000; // 5s
+const HC_INIT_RETRY_MAX_DELAY_MS = 5 * 60 * 1000; // 5min cap
 const SESSION_STATES = Object.freeze({
   BOOT: "boot",
   AUTHENTICATING: "authenticating",
@@ -267,6 +271,8 @@ module.exports = NodeHelper.create({
   },
   rateLimitReleaseTimer: null,
   fullSnapshotTimer: null,
+  hcInitRetryTimer: null,
+  hcInitRetryAttempts: 0,
   sharedConfigHash: null,
   sharedSessionConfig: null,
   activeProgramFetchInFlight: false,
@@ -659,6 +665,7 @@ module.exports = NodeHelper.create({
       broadcastToAllClients: this.broadcastToAllClients.bind(this),
       globalSession,
       onSseStale: this.handleSseStale.bind(this),
+      onActiveProgramNeeded: this.handleActiveProgramNeededFromSse.bind(this),
       debugHooks: {
         recordApiCall: this.recordApiCall.bind(this),
         recordSseEvent: this.recordSseEvent.bind(this),
@@ -738,6 +745,7 @@ module.exports = NodeHelper.create({
       clearTimeout(this.rateLimitReleaseTimer);
       this.rateLimitReleaseTimer = null;
     }
+    this.clearHomeConnectInitRetry();
     this.clearPeriodicFullSnapshotRefresh();
     if (this.deviceService && typeof this.deviceService.shutdown === "function") {
       this.deviceService.shutdown();
@@ -1182,6 +1190,26 @@ module.exports = NodeHelper.create({
     });
   },
 
+  // A device just started reporting a program in progress (via SSE) but we don't
+  // know which program it is yet - fetch it now instead of waiting for the next
+  // scheduled full snapshot (up to 30 minutes later). Runs through the normal
+  // GET_ACTIVE_PROGRAMS path so existing throttling/dedup/retry logic still applies.
+  handleActiveProgramNeededFromSse(haId) {
+    if (!haId || !this.hc || this.isAuthFlowInProgress()) {
+      return;
+    }
+
+    moduleLog("debug", "SSE indicates a device is active without known program - fetching it", {
+      haId
+    });
+
+    this.handleGetActivePrograms({
+      instanceId: "sse_program_detected",
+      haIds: [haId],
+      force: true
+    });
+  },
+
   readRefreshTokenFromFile() {
     return this.authService.readRefreshTokenFromFile();
   },
@@ -1330,6 +1358,8 @@ module.exports = NodeHelper.create({
   handleHomeConnectInitSuccess() {
     moduleLog("info", "HomeConnect initialized successfully");
 
+    this.clearHomeConnectInitRetry();
+
     this.transitionSessionState(SESSION_EVENTS.AUTH_SUCCESS, {
       reason: "homeconnect_initialized"
     });
@@ -1384,6 +1414,7 @@ module.exports = NodeHelper.create({
 
       // Reset attempts so a fresh authentication cycle can proceed without hitting attempt limits.
       this.initializationAttempts = 0;
+      this.clearHomeConnectInitRetry();
       globalSession.lastAuthAttempt = 0;
       this.setRateLimitUntil(0);
       this.transitionSessionState(SESSION_EVENTS.RESET, {
@@ -1403,6 +1434,54 @@ module.exports = NodeHelper.create({
     this.emitInitStatus("hc_error", {
       message: `HomeConnect error: ${error.message}`
     });
+
+    // Not an invalid_grant - most likely a transient failure (e.g. network/DNS not
+    // ready yet right after a device reboot). The refresh token itself is probably
+    // still fine, so retry the same init with backoff instead of stranding the
+    // session in ERROR forever.
+    this.scheduleHomeConnectInitRetry();
+  },
+
+  scheduleHomeConnectInitRetry() {
+    const token = globalSession.refreshToken || this.refreshToken;
+    if (!token) {
+      moduleLog("debug", "No refresh token available - skipping automatic HomeConnect init retry");
+      return;
+    }
+
+    if (this.hcInitRetryTimer) {
+      return;
+    }
+
+    const attempt = this.hcInitRetryAttempts;
+    const delay = Math.min(HC_INIT_RETRY_BASE_DELAY_MS * 2 ** attempt, HC_INIT_RETRY_MAX_DELAY_MS);
+    this.hcInitRetryAttempts = attempt + 1;
+
+    moduleLog(
+      "info",
+      `Scheduling HomeConnect init retry in ${Math.round(delay / 1000)}s (attempt ${this.hcInitRetryAttempts}) after transient error`
+    );
+
+    this.hcInitRetryTimer = setTimeout(() => {
+      this.hcInitRetryTimer = null;
+
+      if (this.isSessionAuthenticated()) {
+        return;
+      }
+
+      this.initializeHomeConnect(token).catch(() => {
+        // Failure is already handled inside initializeHomeConnect via
+        // handleHomeConnectInitError, which schedules the next retry.
+      });
+    }, delay);
+  },
+
+  clearHomeConnectInitRetry() {
+    if (this.hcInitRetryTimer) {
+      clearTimeout(this.hcInitRetryTimer);
+      this.hcInitRetryTimer = null;
+    }
+    this.hcInitRetryAttempts = 0;
   },
 
   setupHomeConnectRefreshToken() {
@@ -1472,6 +1551,7 @@ module.exports = NodeHelper.create({
 
   retryAuthentication() {
     moduleLog("info", "Manual authentication retry");
+    this.clearHomeConnectInitRetry();
     this.transitionSessionState(SESSION_EVENTS.RESET, {
       reason: "manual_retry_auth"
     });
