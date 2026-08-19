@@ -318,6 +318,11 @@ module.exports = NodeHelper.create({
   sharedSessionConfig: null,
   activeProgramFetchInFlight: false,
   activeProgramFetchSignature: null,
+  // Devices whose "active program" request was dropped only because it
+  // collided with another fetch already in flight - not a real failure, so
+  // they're picked up again as soon as that fetch finishes instead of waiting
+  // for another SSE delta to re-trigger them (see handleGetActivePrograms).
+  pendingActiveProgramHaIds: new Set(),
   recentForcedProgramFetch: null,
   debugStats: {
     lastApiCallTs: null,
@@ -811,6 +816,7 @@ module.exports = NodeHelper.create({
     }
     this.clearHomeConnectInitRetry();
     this.clearPeriodicFullSnapshotRefresh();
+    this.pendingActiveProgramHaIds.clear();
     if (this.deviceService && typeof this.deviceService.shutdown === "function") {
       this.deviceService.shutdown();
     }
@@ -1082,6 +1088,11 @@ module.exports = NodeHelper.create({
         force,
         activeFetchSignature: this.activeProgramFetchSignature
       });
+      // Not a failure, just bad timing (e.g. an SSE-triggered single-device
+      // fetch colliding with the full-snapshot batch) - queue it so it's
+      // picked up immediately once the in-flight fetch finishes, instead of
+      // being lost until another SSE delta happens to re-trigger it.
+      targetDevices.forEach((device) => this.pendingActiveProgramHaIds.add(device.haId));
       return;
     }
 
@@ -1782,6 +1793,16 @@ module.exports = NodeHelper.create({
       this.activeProgramFetchInFlight = false;
       this.activeProgramFetchSignature = null;
       this.endProgramFetch("active_program_cycle_finished");
+
+      if (this.pendingActiveProgramHaIds.size > 0) {
+        const pendingHaIds = [...this.pendingActiveProgramHaIds];
+        this.pendingActiveProgramHaIds.clear();
+        this.handleGetActivePrograms({
+          instanceId: "active_program_overlap_followup",
+          haIds: pendingHaIds,
+          force: true
+        });
+      }
     }
   },
 

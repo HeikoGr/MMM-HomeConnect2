@@ -40,6 +40,8 @@ Module._load = function patchedLoad(request, parent, isMain) {
 const helper = require("../node_helper");
 Module._load = originalLoad;
 
+const originalFetchActiveProgramsForDevices = helper.fetchActiveProgramsForDevices;
+
 function resetHelperState() {
   helper.sessionState = "boot";
   helper.sessionStateMeta = {
@@ -436,6 +438,75 @@ function registeredInstances() {
 
   assert.strictEqual(fetchCalls, 1);
   assert.strictEqual(helper.activeProgramFetchInFlight, true);
+
+  // A request for a *different* device arriving while another fetch is in
+  // flight is dropped for timing reasons only, not because anything failed -
+  // it must be retried automatically as soon as the in-flight fetch finishes,
+  // instead of relying on another SSE delta to re-trigger it.
+  resetHelperState();
+  helper.hc = {};
+  helper.sessionState = "ready";
+  helper.fetchActiveProgramsForDevices = originalFetchActiveProgramsForDevices;
+  helper.deviceService = {
+    devices: new Map([
+      ["ha-1", { haId: "ha-1", name: "Washer", connected: true }],
+      ["ha-2", { haId: "ha-2", name: "Dryer", connected: true }]
+    ])
+  };
+  helper.programService = { applyProgramResult: () => null };
+  helper.activeProgramManager = {
+    clear() { },
+    schedule() { }
+  };
+  helper.broadcastProgramData = () => { };
+
+  const overlapFetchOrder = [];
+  let releaseWasherFetch;
+  helper.fetchActiveProgramForDevice = async (haId) => {
+    overlapFetchOrder.push(haId);
+    if (haId === "ha-1") {
+      await new Promise((resolve) => {
+        releaseWasherFetch = resolve;
+      });
+    }
+    return { haId, success: false, error: "No active program" };
+  };
+
+  helper.handleGetActivePrograms({
+    instanceId: "resume-followup",
+    haIds: ["ha-1"],
+    force: true
+  });
+  await wait(10); // let the ha-1 fetch start and block on releaseWasherFetch
+
+  helper.handleGetActivePrograms({
+    instanceId: "sse_program_detected",
+    haIds: ["ha-2"],
+    force: true
+  });
+  await wait(10);
+
+  assert.deepStrictEqual(
+    overlapFetchOrder,
+    ["ha-1"],
+    "ha-2 must not be fetched while ha-1's fetch is in flight"
+  );
+  assert.strictEqual(helper.pendingActiveProgramHaIds.has("ha-2"), true);
+
+  releaseWasherFetch();
+  // fetchActiveProgramsForDevices waits 500ms between devices to avoid
+  // hammering the API before its finally block (which drains the pending
+  // queue) runs.
+  await wait(600);
+
+  assert.deepStrictEqual(
+    overlapFetchOrder,
+    ["ha-1", "ha-2"],
+    "ha-2 must be retried automatically once ha-1's fetch finishes"
+  );
+  assert.strictEqual(helper.pendingActiveProgramHaIds.size, 0);
+
+  helper.fetchActiveProgramsForDevices = () => { };
 
   // Recently completed forced requests for the same devices should be deduplicated
   // across different frontend instances for a short window.
