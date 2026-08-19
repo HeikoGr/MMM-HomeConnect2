@@ -80,7 +80,8 @@ function createDeviceService(overrides = {}) {
     assert.strictEqual(updated.connected, false);
   }
 
-  // processDevice: initial settings fetch is skipped for standard devices like washers
+  // processDevice: settings are seeded once per appliance, for every type. They
+  // carry BSH.Common.Setting.PowerState, which /status never returns.
   {
     const { service } = createDeviceService();
     let statusCalls = 0;
@@ -88,23 +89,41 @@ function createDeviceService(overrides = {}) {
     service.fetchDeviceStatus = async () => {
       statusCalls += 1;
     };
-    service.fetchDeviceSettings = async () => {
+    service.fetchDeviceSettings = async (device) => {
       settingsCalls += 1;
+      service.settingsFetchedHaIds.add(device.haId);
     };
 
-    await service.processDevice(
-      {
-        haId: "ha-washer",
-        name: "Washer",
-        type: "Washer",
-        connected: true,
-        PowerState: "On"
-      },
-      0
-    );
+    const dishwasher = {
+      haId: "ha-dishwasher",
+      name: "Dishwasher",
+      type: "Dishwasher",
+      connected: true
+    };
 
+    await service.processDevice(dishwasher, 0);
     assert.strictEqual(statusCalls, 1);
-    assert.strictEqual(settingsCalls, 0);
+    assert.strictEqual(settingsCalls, 1);
+
+    // A later refresh must not spend another call on the same appliance.
+    await service.processDevice(dishwasher, 0);
+    assert.strictEqual(statusCalls, 2);
+    assert.strictEqual(settingsCalls, 1);
+  }
+
+  // fetchDeviceSettings: a failed fetch stays retryable on the next refresh.
+  {
+    const { service } = createDeviceService();
+    service.attachClient({
+      getSettings: async () => ({ success: false, error: "boom" })
+    });
+
+    await service.fetchDeviceSettings({ haId: "ha-oven", name: "Oven" });
+    assert.strictEqual(
+      service.shouldFetchInitialSettings({ haId: "ha-oven" }),
+      true,
+      "A failed settings fetch must not mark the appliance as seeded"
+    );
   }
 
   // fetchDeviceStatus: successful status snapshot refreshes stale connected=false

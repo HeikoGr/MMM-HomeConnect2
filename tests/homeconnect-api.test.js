@@ -34,6 +34,38 @@ function setGlobalBuiltin(name, value) {
     value: { value: "PT2H" }
   });
   assert.strictEqual(deviceUtils.parseStartInRelativeSeconds(device), 7200);
+
+  // PowerState arrives as a bare enum over SSE and object-wrapped from /settings.
+  hc.applyEventToDevice(device, {
+    key: "BSH.Common.Setting.PowerState",
+    value: "BSH.Common.EnumType.PowerState.On"
+  });
+  assert.strictEqual(device.PowerState, "On");
+
+  hc.applyEventToDevice(device, {
+    key: "BSH.Common.Setting.PowerState",
+    value: { value: "BSH.Common.EnumType.PowerState.Standby" }
+  });
+  assert.strictEqual(device.PowerState, "Standby");
+
+  // An enum value outside the three known ones must not erase the power state.
+  hc.applyEventToDevice(device, {
+    key: "BSH.Common.Setting.PowerState",
+    value: "BSH.Common.EnumType.PowerState.MainsOff"
+  });
+  assert.strictEqual(device.PowerState, "MainsOff");
+
+  hc.applyEventToDevice(device, {
+    key: "BSH.Common.Setting.PowerState",
+    value: null
+  });
+  assert.strictEqual(device.PowerState, "MainsOff");
+
+  hc.applyEventToDevice(device, {
+    key: "BSH.Common.Setting.PowerState",
+    value: "BSH.Common.EnumType.PowerState.Off"
+  });
+  assert.strictEqual(device.PowerState, "Off");
   assert.strictEqual(device._initialRemaining, 4500);
   assert.ok(Number.isFinite(device._remainingObservedAt));
 
