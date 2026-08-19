@@ -292,6 +292,7 @@ Module.register("MMM-HomeConnect2", {
     enableSSEHeartbeat: true, // Enable SSE heartbeat checks by default
     sseHeartbeatCheckIntervalMs: 10 * 1000, // 10 seconds
     sseHeartbeatStaleThresholdMs: 70 * 1000, // 70 seconds
+    sseRecoveryCooldownMs: 70 * 1000, // minimum time between SSE stale-recovery attempts
     apiRequestTimeoutMs: 15 * 1000,
     progressRefreshIntervalMs: 30 * 1000,
     minActiveProgramIntervalMs: 10 * 60 * 1000, // 10 minutes between active program fetches (backend throttle)
