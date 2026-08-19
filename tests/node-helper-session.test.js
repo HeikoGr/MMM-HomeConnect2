@@ -41,25 +41,9 @@ function resetHelperState() {
     lastApiCallTs: null,
     lastSseEventTs: null,
     lastSseTrafficTs: null,
-    sse: {
-      sampleCount: 0,
-      lastGapMs: null,
-      minGapMs: null,
-      maxGapMs: null,
-      avgGapMs: null,
-      totalGapMs: 0
-    },
-    keepAlive: {
-      sampleCount: 0,
-      lastGapMs: null,
-      minGapMs: null,
-      maxGapMs: null,
-      avgGapMs: null,
-      totalGapMs: 0,
-      lastTs: null
-    },
     apiCounters: {}
   };
+  helper.lastDebugStatsBroadcastTs = 0;
   helper.hc = null;
   helper.instanceId = null;
   helper.sharedConfigOwnerInstanceId = null;
@@ -118,45 +102,47 @@ function registeredInstances() {
   helper.setRateLimitUntil(0);
   assert.strictEqual(helper.isRateLimited(), false);
 
-  // SSE debug stats should track real gaps between events.
+  // Debug stats record the latest traffic timestamps and API counts.
   resetHelperState();
   const originalDateNow = Date.now;
-  const fakeTimes = [1000, 1600, 2200];
+  const originalBroadcastDebugStats = helper.broadcastDebugStats;
+  const fakeTimes = [1000, 1600, 2200, 2300];
   Date.now = () => fakeTimes.shift();
   helper.broadcastDebugStats = () => { };
 
   helper.recordSseEvent();
-  helper.recordSseEvent();
-  helper.recordSseEvent();
+  helper.recordSseKeepAlive();
+  helper.recordApiCall("homeappliances");
+  helper.recordApiCall("homeappliances");
 
   Date.now = originalDateNow;
 
-  assert.strictEqual(helper.debugStats.lastSseEventTs, 2200);
-  assert.strictEqual(helper.debugStats.lastSseTrafficTs, 2200);
-  assert.strictEqual(helper.debugStats.sse.sampleCount, 2);
-  assert.strictEqual(helper.debugStats.sse.lastGapMs, 600);
-  assert.strictEqual(helper.debugStats.sse.minGapMs, 600);
-  assert.strictEqual(helper.debugStats.sse.maxGapMs, 600);
-  assert.strictEqual(helper.debugStats.sse.avgGapMs, 600);
+  assert.strictEqual(helper.debugStats.lastSseEventTs, 1000);
+  assert.strictEqual(helper.debugStats.lastSseTrafficTs, 1600);
+  assert.strictEqual(helper.debugStats.lastApiCallTs, 2300);
+  assert.deepStrictEqual(helper.debugStats.apiCounters, { homeappliances: 2 });
 
-  // KEEP-ALIVE debug stats should track transport traffic even without domain events.
+  // Broadcasts are throttled so a busy SSE stream cannot re-render every client
+  // per event - but a forced call (a client that just connected) always goes out.
   resetHelperState();
-  const originalKeepAliveDateNow = Date.now;
-  const keepAliveTimes = [5000, 10500, 16000];
-  Date.now = () => keepAliveTimes.shift();
-  helper.broadcastDebugStats = () => { };
+  helper.broadcastDebugStats = originalBroadcastDebugStats;
+  let debugBroadcasts = 0;
+  const originalBroadcastToAllClients = helper.broadcastToAllClients;
+  helper.broadcastToAllClients = (notification) => {
+    if (notification === "DEBUG_STATS") {
+      debugBroadcasts += 1;
+    }
+  };
 
-  helper.recordSseKeepAlive();
-  helper.recordSseKeepAlive();
-  helper.recordSseKeepAlive();
+  helper.recordSseEvent();
+  helper.recordSseEvent();
+  helper.recordSseEvent();
+  assert.strictEqual(debugBroadcasts, 1, "Bursts of events must collapse into one broadcast");
 
-  Date.now = originalKeepAliveDateNow;
+  helper.broadcastDebugStats(true);
+  assert.strictEqual(debugBroadcasts, 2, "A forced broadcast must ignore the throttle");
 
-  assert.strictEqual(helper.debugStats.lastSseTrafficTs, 16000);
-  assert.strictEqual(helper.debugStats.keepAlive.lastTs, 16000);
-  assert.strictEqual(helper.debugStats.keepAlive.sampleCount, 2);
-  assert.strictEqual(helper.debugStats.keepAlive.lastGapMs, 5500);
-  assert.strictEqual(helper.debugStats.keepAlive.avgGapMs, 5500);
+  helper.broadcastToAllClients = originalBroadcastToAllClients;
 
   // SSE stale should rebuild subscriptions and then perform one full resync.
   resetHelperState();

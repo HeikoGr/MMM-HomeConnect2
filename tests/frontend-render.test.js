@@ -965,23 +965,6 @@ function createInstance(overrides = {}) {
         lastApiCallTs: Date.now(),
         lastSseEventTs: null,
         lastSseTrafficTs: Date.now(),
-        sse: {
-          sampleCount: 4,
-          lastGapMs: 90000,
-          minGapMs: 15000,
-          maxGapMs: 180000,
-          avgGapMs: 60000,
-          totalGapMs: 240000
-        },
-        keepAlive: {
-          sampleCount: 3,
-          lastGapMs: 55000,
-          minGapMs: 55000,
-          maxGapMs: 55001,
-          avgGapMs: 55000,
-          totalGapMs: 110001,
-          lastTs: Date.now()
-        },
         apiCounters: { homeappliances: 3 },
         session: {
           authenticated: true,
@@ -996,15 +979,12 @@ function createInstance(overrides = {}) {
     assert.ok(debugSessionDom.innerHTML.includes("SSE traffic:"));
     assert.ok(debugSessionDom.innerHTML.includes("SSE event:"));
     assert.ok(debugSessionDom.innerHTML.includes("n/a"));
-    assert.ok(debugSessionDom.innerHTML.includes("KEEP-ALIVE last:"));
-    assert.ok(debugSessionDom.innerHTML.includes("55s"));
+    assert.ok(debugSessionDom.innerHTML.includes("API:"));
     assert.ok(debugSessionDom.innerHTML.includes("session:"));
     assert.ok(debugSessionDom.innerHTML.includes("authenticated, program fetch"));
     assert.ok(debugSessionDom.innerHTML.includes("rate limit remaining:"));
-    assert.ok(debugSessionDom.innerHTML.includes("SSE gap last:"));
-    assert.ok(debugSessionDom.innerHTML.includes("1m 30s"));
-    assert.ok(debugSessionDom.innerHTML.includes("SSE gap max:"));
-    assert.ok(debugSessionDom.innerHTML.includes("3m"));
+    assert.ok(debugSessionDom.innerHTML.includes("API counts"));
+    assert.ok(debugSessionDom.innerHTML.includes("homeappliances"));
 
 
     console.log("frontend-render.test.js OK");

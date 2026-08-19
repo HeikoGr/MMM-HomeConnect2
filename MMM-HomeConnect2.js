@@ -1198,21 +1198,6 @@ Module.register("MMM-HomeConnect2", {
       return "";
     }
     const formatTime = (ts) => (ts ? new Date(ts).toLocaleTimeString() : "n/a");
-    const formatGap = (ms) => {
-      if (!Number.isFinite(ms) || ms < 0) {
-        return "n/a";
-      }
-      if (ms < 1000) {
-        return `${ms}ms`;
-      }
-      const seconds = Math.round(ms / 1000);
-      if (seconds < 60) {
-        return `${seconds}s`;
-      }
-      const minutes = Math.floor(seconds / 60);
-      const remainingSeconds = seconds % 60;
-      return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
-    };
     const escapeHtml = (str) =>
       String(str)
         .replace(/&/g, "&amp;")
@@ -1245,50 +1230,6 @@ Module.register("MMM-HomeConnect2", {
         this.debugStats.lastApiCallTs
       )}</div>`
     );
-
-    const sseStats = this.debugStats.sse || null;
-    if (sseStats && Number.isFinite(sseStats.sampleCount) && sseStats.sampleCount > 0) {
-      rows.push(
-        `<div class='hc-debug-row'><span class='hc-debug-label'>SSE gap last:</span> ${formatGap(
-          sseStats.lastGapMs
-        )}</div>`
-      );
-      rows.push(
-        `<div class='hc-debug-row'><span class='hc-debug-label'>SSE gap avg:</span> ${formatGap(
-          sseStats.avgGapMs
-        )}</div>`
-      );
-      rows.push(
-        `<div class='hc-debug-row'><span class='hc-debug-label'>SSE gap max:</span> ${formatGap(
-          sseStats.maxGapMs
-        )}</div>`
-      );
-      rows.push(
-        `<div class='hc-debug-row'><span class='hc-debug-label'>SSE gap samples:</span> ${sseStats.sampleCount}</div>`
-      );
-    }
-
-    const keepAliveStats = this.debugStats.keepAlive || null;
-    if (keepAliveStats && Number.isFinite(keepAliveStats.sampleCount) && keepAliveStats.sampleCount > 0) {
-      rows.push(
-        `<div class='hc-debug-row'><span class='hc-debug-label'>KEEP-ALIVE last:</span> ${formatGap(
-          keepAliveStats.lastGapMs
-        )}</div>`
-      );
-      rows.push(
-        `<div class='hc-debug-row'><span class='hc-debug-label'>KEEP-ALIVE avg:</span> ${formatGap(
-          keepAliveStats.avgGapMs
-        )}</div>`
-      );
-      rows.push(
-        `<div class='hc-debug-row'><span class='hc-debug-label'>KEEP-ALIVE max:</span> ${formatGap(
-          keepAliveStats.maxGapMs
-        )}</div>`
-      );
-      rows.push(
-        `<div class='hc-debug-row'><span class='hc-debug-label'>KEEP-ALIVE samples:</span> ${keepAliveStats.sampleCount}</div>`
-      );
-    }
 
     const session = this.debugStats.session || null;
     if (session && typeof session === "object") {

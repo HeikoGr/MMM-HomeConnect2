@@ -34,6 +34,10 @@ const STALE_CLIENT_INSTANCE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 // must not strand the session forever - retry with capped exponential backoff.
 const HC_INIT_RETRY_BASE_DELAY_MS = 5000; // 5s
 const HC_INIT_RETRY_MAX_DELAY_MS = 5 * 60 * 1000; // 5min cap
+// Debug stats reach every client as a broadcast, and every client re-renders on
+// arrival. A busy SSE stream would otherwise mean a full re-render per event, so
+// the panel settles for being at most this stale.
+const DEBUG_STATS_BROADCAST_INTERVAL_MS = 5000;
 const INIT_STATUS_MESSAGES = Object.freeze({
   initializing: "Initialization started",
   session_active: "Session active - using existing authentication",
@@ -166,25 +170,9 @@ module.exports = NodeHelper.create({
     lastApiCallTs: null,
     lastSseEventTs: null,
     lastSseTrafficTs: null,
-    sse: {
-      sampleCount: 0,
-      lastGapMs: null,
-      minGapMs: null,
-      maxGapMs: null,
-      avgGapMs: null,
-      totalGapMs: 0
-    },
-    keepAlive: {
-      sampleCount: 0,
-      lastGapMs: null,
-      minGapMs: null,
-      maxGapMs: null,
-      avgGapMs: null,
-      totalGapMs: 0,
-      lastTs: null
-    },
     apiCounters: {}
   },
+  lastDebugStatsBroadcastTs: 0,
 
   isRateLimited() {
     return Date.now() < this.getRateLimitUntil();
@@ -610,7 +598,7 @@ module.exports = NodeHelper.create({
           this.debugStats.lastSseEventTs ||
           this.debugStats.lastSseTrafficTs)
       ) {
-        this.broadcastDebugStats();
+        this.broadcastDebugStats(true);
       }
     } catch (e) {
       moduleLog("warn", "Failed to broadcast initial debug stats", e);
@@ -805,13 +793,17 @@ module.exports = NodeHelper.create({
     });
   },
 
-  broadcastDebugStats() {
+  broadcastDebugStats(force = false) {
+    const now = Date.now();
+    if (!force && now - this.lastDebugStatsBroadcastTs < DEBUG_STATS_BROADCAST_INTERVAL_MS) {
+      return;
+    }
+    this.lastDebugStatsBroadcastTs = now;
+
     this.broadcastToAllClients("DEBUG_STATS", {
       lastApiCallTs: this.debugStats.lastApiCallTs,
       lastSseEventTs: this.debugStats.lastSseEventTs,
       lastSseTrafficTs: this.debugStats.lastSseTrafficTs,
-      sse: { ...(this.debugStats.sse || {}) },
-      keepAlive: { ...(this.debugStats.keepAlive || {}) },
       apiCounters: { ...this.debugStats.apiCounters },
       session: {
         authenticated: this.sessionAuthenticated,
@@ -826,78 +818,20 @@ module.exports = NodeHelper.create({
 
   recordApiCall(apiName) {
     if (!apiName) return;
-    const now = Date.now();
-    this.debugStats.lastApiCallTs = now;
-    const counters = this.debugStats.apiCounters || {};
-    counters[apiName] = (counters[apiName] || 0) + 1;
-    this.debugStats.apiCounters = counters;
+    this.debugStats.lastApiCallTs = Date.now();
+    this.debugStats.apiCounters[apiName] = (this.debugStats.apiCounters[apiName] || 0) + 1;
     this.broadcastDebugStats();
   },
 
   recordSseEvent() {
     const now = Date.now();
-    const previousTs = this.debugStats.lastSseEventTs;
-    const sseStats = this.debugStats.sse || {
-      sampleCount: 0,
-      lastGapMs: null,
-      minGapMs: null,
-      maxGapMs: null,
-      avgGapMs: null,
-      totalGapMs: 0
-    };
-
-    if (Number.isFinite(previousTs) && previousTs > 0 && now >= previousTs) {
-      const gapMs = now - previousTs;
-      const sampleCount = (sseStats.sampleCount || 0) + 1;
-      const totalGapMs = (sseStats.totalGapMs || 0) + gapMs;
-      sseStats.sampleCount = sampleCount;
-      sseStats.lastGapMs = gapMs;
-      sseStats.minGapMs =
-        sseStats.minGapMs === null ? gapMs : Math.min(sseStats.minGapMs, gapMs);
-      sseStats.maxGapMs =
-        sseStats.maxGapMs === null ? gapMs : Math.max(sseStats.maxGapMs, gapMs);
-      sseStats.totalGapMs = totalGapMs;
-      sseStats.avgGapMs = Math.round(totalGapMs / sampleCount);
-      this.debugStats.sse = sseStats;
-    } else if (!this.debugStats.sse) {
-      this.debugStats.sse = sseStats;
-    }
-
     this.debugStats.lastSseEventTs = now;
     this.debugStats.lastSseTrafficTs = now;
     this.broadcastDebugStats();
   },
 
   recordSseKeepAlive() {
-    const now = Date.now();
-    const keepAliveStats = this.debugStats.keepAlive || {
-      sampleCount: 0,
-      lastGapMs: null,
-      minGapMs: null,
-      maxGapMs: null,
-      avgGapMs: null,
-      totalGapMs: 0,
-      lastTs: null
-    };
-    const previousTs = keepAliveStats.lastTs;
-
-    if (Number.isFinite(previousTs) && previousTs > 0 && now >= previousTs) {
-      const gapMs = now - previousTs;
-      const sampleCount = (keepAliveStats.sampleCount || 0) + 1;
-      const totalGapMs = (keepAliveStats.totalGapMs || 0) + gapMs;
-      keepAliveStats.sampleCount = sampleCount;
-      keepAliveStats.lastGapMs = gapMs;
-      keepAliveStats.minGapMs =
-        keepAliveStats.minGapMs === null ? gapMs : Math.min(keepAliveStats.minGapMs, gapMs);
-      keepAliveStats.maxGapMs =
-        keepAliveStats.maxGapMs === null ? gapMs : Math.max(keepAliveStats.maxGapMs, gapMs);
-      keepAliveStats.totalGapMs = totalGapMs;
-      keepAliveStats.avgGapMs = Math.round(totalGapMs / sampleCount);
-    }
-
-    keepAliveStats.lastTs = now;
-    this.debugStats.keepAlive = keepAliveStats;
-    this.debugStats.lastSseTrafficTs = now;
+    this.debugStats.lastSseTrafficTs = Date.now();
     this.broadcastDebugStats();
   },
 
