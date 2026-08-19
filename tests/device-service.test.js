@@ -128,6 +128,50 @@ function createDeviceService(overrides = {}) {
     assert.strictEqual(device.connected, true);
   }
 
+  // fetchDeviceStatus: applies fetched events to the live device in the Map,
+  // not the (possibly orphaned) object reference captured when the fetch
+  // started. processDevice() replaces the Map entry with a new merged object
+  // on every refresh cycle, so a status fetch that resolves after a second,
+  // overlapping refresh must not silently write into a discarded object.
+  {
+    const { service } = createDeviceService();
+    const originalDevice = { haId: "ha-race", name: "Washer", connected: true };
+    service.devices.set("ha-race", originalDevice);
+
+    let releaseStatus;
+    service.attachClient({
+      getStatus: async () =>
+        new Promise((resolve) => {
+          releaseStatus = () =>
+            resolve({ success: true, data: { status: [{ key: "BSH.Common.Status.OperationState" }] } });
+        }),
+      applyEventToDevice(device) {
+        device.sawEvent = true;
+      }
+    });
+
+    const statusPromise = service.fetchDeviceStatus(originalDevice);
+
+    // Simulate a concurrent refresh cycle replacing the Map entry before the
+    // in-flight status fetch above resolves.
+    const replacementDevice = { haId: "ha-race", name: "Washer", connected: true };
+    service.devices.set("ha-race", replacementDevice);
+
+    releaseStatus();
+    await statusPromise;
+
+    assert.strictEqual(
+      replacementDevice.sawEvent,
+      true,
+      "status update must land on the live device, not the orphaned reference"
+    );
+    assert.strictEqual(
+      originalDevice.sawEvent,
+      undefined,
+      "the orphaned reference must not be the one mutated"
+    );
+  }
+
   // handleGetDevicesSuccess: broadcasts the base device list immediately before slow enrichment settles
   {
     const { service, notifications } = createDeviceService();
