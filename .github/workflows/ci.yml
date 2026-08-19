@@ -29,8 +29,9 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
-          # Test the minimum version declared in package.json engines, not the latest.
-          # Otherwise the supported floor is never actually exercised.
+          # Pinned to a specific patch release for reproducible CI runs. This is
+          # newer than the floor declared in package.json engines (>=20.18.1) -
+          # that floor itself isn't exercised by this job.
           node-version: '22.22.2'
           cache: npm
 
