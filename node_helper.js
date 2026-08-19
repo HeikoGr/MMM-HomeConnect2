@@ -1821,11 +1821,6 @@ module.exports = NodeHelper.create({
     }
   },
 
-  applyProgramResult(result) {
-    if (!this.programService) return null;
-    return this.programService.applyProgramResult(result);
-  },
-
   broadcastProgramData(programData, requestingInstanceId) {
     if (!this.programService) return;
     this.programService.broadcastProgramData(
