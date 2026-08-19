@@ -146,7 +146,7 @@
   align-self: start;
 }
 
-progress {
+.MMM-HomeConnect2 progress {
   inline-size: 16em;
 }
 
@@ -175,7 +175,7 @@ progress {
 }
 
 /* Indeterminate styling: keep native progress but add subtle animation fallback */
-progress[max]:not([value]) {
+.MMM-HomeConnect2 progress[max]:not([value]) {
   /* browsers show indeterminate natively; ensure visibility */
   background: linear-gradient(90deg,
       rgba(255, 255, 255, 0.1) 0%,
