@@ -251,6 +251,34 @@ function resolveSessionLanguage(config = {}) {
   return preferred;
 }
 
+// Writing/deleting refresh_token.json happens both inside event-emitter callbacks
+// and socket-notification handlers with no enclosing try/catch of their own - an
+// unguarded EACCES/ENOSPC/EROFS here would throw synchronously and crash the whole
+// Node process hosting every MagicMirror module, not just this one.
+function persistRefreshToken(token) {
+  try {
+    fs.writeFileSync(refreshTokenPath, token);
+    moduleLog("info", "Refresh token saved successfully");
+    return true;
+  } catch (err) {
+    moduleLog("error", "Failed to persist refresh token to disk:", err);
+    return false;
+  }
+}
+
+function deleteRefreshTokenFile() {
+  try {
+    if (fs.existsSync(refreshTokenPath)) {
+      fs.unlinkSync(refreshTokenPath);
+      moduleLog("info", "Cached refresh token file deleted");
+      return true;
+    }
+  } catch (err) {
+    moduleLog("warn", "Failed to delete cached refresh token file:", err);
+  }
+  return false;
+}
+
 module.exports = NodeHelper.create({
   refreshToken: null,
   hc: null,
@@ -1276,8 +1304,7 @@ module.exports = NodeHelper.create({
   },
 
   handleHeadlessAuthSuccess(tokens) {
-    fs.writeFileSync(refreshTokenPath, tokens.refresh_token);
-    moduleLog("info", "Refresh token saved successfully");
+    persistRefreshToken(tokens.refresh_token);
 
     globalSession.refreshToken = tokens.refresh_token;
     globalSession.accessToken = tokens.access_token;
@@ -1398,14 +1425,7 @@ module.exports = NodeHelper.create({
 
       this.emitAuthStatus("token_invalid");
 
-      try {
-        if (fs.existsSync(refreshTokenPath)) {
-          fs.unlinkSync(refreshTokenPath);
-          moduleLog("info", "Removed cached refresh_token.json after invalid_grant");
-        }
-      } catch (fsErr) {
-        moduleLog("warn", "Failed to delete cached refresh token file:", fsErr);
-      }
+      deleteRefreshTokenFile();
 
       globalSession.refreshToken = null;
       globalSession.accessToken = null;
@@ -1486,8 +1506,7 @@ module.exports = NodeHelper.create({
 
   setupHomeConnectRefreshToken() {
     this.hc.on("newRefreshToken", (refreshToken) => {
-      fs.writeFileSync(refreshTokenPath, refreshToken);
-      moduleLog("info", "Refresh token updated");
+      persistRefreshToken(refreshToken);
       globalSession.refreshToken = refreshToken;
       if (this.deviceService && typeof this.deviceService.noteTokenRefreshed === "function") {
         this.deviceService.noteTokenRefreshed();
@@ -1571,10 +1590,7 @@ module.exports = NodeHelper.create({
       this.activeProgramManager.clearAll();
     }
 
-    if (fs.existsSync(refreshTokenPath)) {
-      fs.unlinkSync(refreshTokenPath);
-      moduleLog("info", "Old token file deleted");
-    }
+    deleteRefreshTokenFile();
 
     this.refreshToken = null;
 
