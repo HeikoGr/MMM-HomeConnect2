@@ -14,6 +14,7 @@ const NodeHelper = require("node_helper"),
     accessToken: null, // Access token for API requests
     refreshToken: null, // Refresh token for obtaining new access tokens
     clientInstances: new Set(), // Set of client instance IDs using this helper
+    clientInstanceLastSeen: new Map(), // instanceId -> timestamp of last CONFIGURE, for stale-entry pruning
     lastAuthAttempt: 0, // Timestamp of the last authentication attempt
     MIN_AUTH_INTERVAL: 60000, // 1 minute between auth attempts
     rateLimitUntil: 0, // Timestamp until which rate limiting is active
@@ -25,6 +26,11 @@ const ACTIVE_PROGRAM_RETRY_DELAY_MS = 5000; // 5s
 const ACTIVE_PROGRAM_MAX_RETRIES = 3; // Maximum number of retries for active program requests
 const FORCED_ACTIVE_PROGRAM_DEDUP_WINDOW_MS = 15000;
 const FULL_SNAPSHOT_INTERVAL_MS = 30 * 60 * 1000;
+// clientInstances has no disconnect hook (MagicMirror's node_helper API doesn't
+// expose one), so entries only ever accumulate as browsers reload/change. Prune
+// any instance that hasn't sent a CONFIGURE in this long during the periodic
+// snapshot tick, to bound growth over months of uptime.
+const STALE_CLIENT_INSTANCE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 // Transient init errors (e.g. network/DNS not ready yet right after a device reboot)
 // must not strand the session forever - retry with capped exponential backoff.
 const HC_INIT_RETRY_BASE_DELAY_MS = 5000; // 5s
@@ -666,6 +672,7 @@ module.exports = NodeHelper.create({
     });
 
     globalSession.clientInstances.delete(instanceId);
+    globalSession.clientInstanceLastSeen.delete(instanceId);
 
     this.emitInitStatus(
       "device_error",
@@ -738,12 +745,26 @@ module.exports = NodeHelper.create({
     moduleLog("info", `Starting module helper: ${this.name}`);
   },
 
+  pruneStaleClientInstances() {
+    const now = Date.now();
+    globalSession.clientInstances.forEach((instanceId) => {
+      const lastSeen = globalSession.clientInstanceLastSeen.get(instanceId) || 0;
+      if (now - lastSeen > STALE_CLIENT_INSTANCE_TTL_MS) {
+        globalSession.clientInstances.delete(instanceId);
+        globalSession.clientInstanceLastSeen.delete(instanceId);
+        moduleLog("debug", `Pruned stale client instance (no CONFIGURE in 24h): ${instanceId}`);
+      }
+    });
+  },
+
   schedulePeriodicFullSnapshotRefresh() {
     if (this.fullSnapshotTimer) {
       return;
     }
 
     this.fullSnapshotTimer = setInterval(() => {
+      this.pruneStaleClientInstances();
+
       if (!this.hc || !this.deviceService || this.isAuthFlowInProgress()) {
         return;
       }
@@ -901,6 +922,7 @@ module.exports = NodeHelper.create({
     }
 
     globalSession.clientInstances.add(instanceId);
+    globalSession.clientInstanceLastSeen.set(instanceId, Date.now());
 
     if (driftKeys.length > 0) {
       this.logConfigDrift(instanceId, driftKeys, clientSessionConfig);
