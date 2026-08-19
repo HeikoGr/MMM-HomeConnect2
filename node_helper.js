@@ -306,6 +306,8 @@ module.exports = NodeHelper.create({
   fullSnapshotTimer: null,
   hcInitRetryTimer: null,
   hcInitRetryAttempts: 0,
+  headlessAuthRetryTimer: null,
+  invalidGrantRetryTimer: null,
   sharedConfigHash: null,
   sharedSessionConfig: null,
   activeProgramFetchInFlight: false,
@@ -777,6 +779,14 @@ module.exports = NodeHelper.create({
     if (this.rateLimitReleaseTimer) {
       clearTimeout(this.rateLimitReleaseTimer);
       this.rateLimitReleaseTimer = null;
+    }
+    if (this.headlessAuthRetryTimer) {
+      clearTimeout(this.headlessAuthRetryTimer);
+      this.headlessAuthRetryTimer = null;
+    }
+    if (this.invalidGrantRetryTimer) {
+      clearTimeout(this.invalidGrantRetryTimer);
+      this.invalidGrantRetryTimer = null;
     }
     this.clearHomeConnectInitRetry();
     this.clearPeriodicFullSnapshotRefresh();
@@ -1342,7 +1352,8 @@ module.exports = NodeHelper.create({
         "info",
         `Retrying headless authentication in 30 seconds (${this.initializationAttempts}/${this.maxInitAttempts})`
       );
-      setTimeout(() => {
+      this.headlessAuthRetryTimer = setTimeout(() => {
+        this.headlessAuthRetryTimer = null;
         if (!this.hc) {
           this.initWithHeadlessAuth();
         }
@@ -1447,7 +1458,8 @@ module.exports = NodeHelper.create({
       });
 
       // Start a fresh headless authentication flow (shows QR code on clients)
-      setTimeout(() => {
+      this.invalidGrantRetryTimer = setTimeout(() => {
+        this.invalidGrantRetryTimer = null;
         if (!this.isAuthFlowInProgress()) {
           this.initWithHeadlessAuth();
         }
