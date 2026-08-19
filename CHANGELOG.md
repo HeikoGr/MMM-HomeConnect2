@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.3.3](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.3.2...v1.3.3) (2026-08-19)
+
+
+### ⚡ Performance
+
+* **debug:** trim debug stats to timestamps and counters ([5bf421d](https://github.com/HeikoGr/MMM-HomeConnect2/commit/5bf421d1ac53c58d1f8dd0a8bdbb2ac3836cd5fe))
+
+
+### 🧱 Refactoring
+
+* **config:** drop session-config echo and drift protocol ([8db8530](https://github.com/HeikoGr/MMM-HomeConnect2/commit/8db8530bb60f37ec031bec1ca6bae1888f947e89))
+* **device:** store each observable under one key instead of two ([0364a03](https://github.com/HeikoGr/MMM-HomeConnect2/commit/0364a031cb6850b35e3c71a0b089c1a2b0ad8fde))
+* **node_helper:** replace session state machine with lifecycle flags ([deddbb4](https://github.com/HeikoGr/MMM-HomeConnect2/commit/deddbb47718c254995f8b2edfd8603e97daa98ef))
+* **node_helper:** unify active-program fetch admission control ([5204432](https://github.com/HeikoGr/MMM-HomeConnect2/commit/5204432b0703fd5b530d17a94a3f3d8497bf1dca))
+
 ## [1.3.2](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.3.1...v1.3.2) (2026-08-19)
 
 
