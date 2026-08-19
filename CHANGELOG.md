@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.2](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.3.1...v1.3.2) (2026-08-19)
+
+
+### 🐛 Fixes
+
+* **device:** prevent stale progress display when appliance is idle ([bfd387f](https://github.com/HeikoGr/MMM-HomeConnect2/commit/bfd387fce39424eb1bfd853f0f10b43703751578))
+
 ## [1.3.1](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.3.0...v1.3.1) (2026-08-19)
 
 
