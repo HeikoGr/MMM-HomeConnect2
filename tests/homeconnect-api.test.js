@@ -3,6 +3,7 @@
 const assert = require("assert");
 const modulePath = require.resolve("../lib/homeconnect-api");
 const HomeConnect = require(modulePath);
+const deviceUtils = require("../lib/device-utils");
 
 function getGlobalBuiltin(name) {
   return Reflect.get(globalThis, name);
@@ -74,7 +75,7 @@ function setGlobalBuiltin(name, value) {
   // otherwise a long-running instance keeps painting a bar the appliance no
   // longer reports while a freshly started one shows nothing.
   hc.applyEventToDevice(device, {
-    key: "BSH.Common.Status.ProgramProgress",
+    key: "BSH.Common.Option.ProgramProgress",
     value: { value: "0" }
   });
   hc.applyEventToDevice(device, {
@@ -82,9 +83,88 @@ function setGlobalBuiltin(name, value) {
     value: "BSH.Common.EnumType.OperationState.Ready"
   });
 
+  // Asserted through the parser rather than key by key: what matters is that no
+  // spelling of the value yields a number any more.
+  assert.ok(!Number.isFinite(deviceUtils.parseProgress(device)));
   assert.strictEqual(device.ProgramProgress, undefined);
-  assert.strictEqual(device["BSH.Common.Status.ProgramProgress"], undefined);
   assert.strictEqual(device["BSH.Common.Option.ProgramProgress"], undefined);
+
+  // The remaining time is the more damaging leftover: an appliance that ends a
+  // cycle leaves it at 0, and 0 combined with the planned duration computes to a
+  // permanent 100 %. Clearing it must cover the raw API keys as well, because the
+  // parsers fall back to those.
+  hc.applyEventToDevice(device, {
+    key: "BSH.Common.Option.RemainingProgramTime",
+    value: 0
+  });
+  hc.applyEventToDevice(device, {
+    key: "BSH.Common.Status.OperationState",
+    value: "BSH.Common.EnumType.OperationState.Ready"
+  });
+
+  assert.strictEqual(deviceUtils.parseRemainingSeconds(device), null);
+  assert.strictEqual(device.RemainingProgramTime, undefined);
+  assert.strictEqual(device["BSH.Common.Option.RemainingProgramTime"], undefined);
+  assert.strictEqual(device._initialRemaining, undefined);
+  assert.strictEqual(device._remainingObservedAt, undefined);
+
+  // A finished cycle clears the planned duration through every alias, so the raw
+  // option key cannot resurrect it via parseEstimatedTotalSeconds().
+  const finishedDevice = {
+    "BSH.Common.Option.EstimatedTotalProgramTime": 8940,
+    EstimatedTotalProgramTime: 8940,
+    "BSH.Common.Option.RemainingProgramTimeIsEstimated": true,
+    ActiveProgramName: "Easy Care"
+  };
+  hc.applyEventToDevice(finishedDevice, {
+    key: "BSH.Common.Status.OperationState",
+    value: "BSH.Common.EnumType.OperationState.Finished"
+  });
+
+  assert.strictEqual(deviceUtils.parseEstimatedTotalSeconds(finishedDevice), null);
+  assert.strictEqual(deviceUtils.isEstimatedDuration(finishedDevice), false);
+  assert.strictEqual(finishedDevice.ActiveProgramName, undefined);
+  assert.strictEqual(finishedDevice.RemainingProgramTime, 0);
+
+  // Home Connect nulls BSH.Common.Root.ActiveProgram when a program ends. The
+  // appliance is stating outright that nothing runs, so the leftover "active"
+  // claim is demoted to what it really is - the program sitting on the dial.
+  // Name and options survive, the run-specific phase does not.
+  const endedDevice = {
+    ActiveProgramKey: "LaundryCare.Dryer.Program.Synthetic",
+    ActiveProgramName: "Synthetics",
+    ActiveProgramSource: "active",
+    ActiveProgramPhase: "Drying",
+    ActiveProgramDetails: ["Drying target: Extra Dry"]
+  };
+  hc.applyEventToDevice(endedDevice, {
+    key: "BSH.Common.Root.ActiveProgram",
+    value: null
+  });
+
+  assert.strictEqual(endedDevice.ActiveProgramSource, "selected");
+  assert.strictEqual(endedDevice.ActiveProgramName, "Synthetics");
+  assert.strictEqual(endedDevice.ActiveProgramPhase, undefined);
+  assert.deepStrictEqual(endedDevice.ActiveProgramDetails, ["Drying target: Extra Dry"]);
+
+  // Reaching Ready demotes the same way - a status refresh always reports the
+  // operation state, while Root.ActiveProgram only arrives as an event.
+  const idleDevice = { ActiveProgramName: "Eco", ActiveProgramSource: "active" };
+  hc.applyEventToDevice(idleDevice, {
+    key: "BSH.Common.Status.OperationState",
+    value: "BSH.Common.EnumType.OperationState.Ready"
+  });
+
+  assert.strictEqual(idleDevice.ActiveProgramSource, "selected");
+
+  // A program that is genuinely running keeps its claim.
+  const runningDevice = { ActiveProgramName: "Eco", ActiveProgramSource: "active" };
+  hc.applyEventToDevice(runningDevice, {
+    key: "BSH.Common.Root.ActiveProgram",
+    value: "Dishcare.Dishwasher.Program.Eco50"
+  });
+
+  assert.strictEqual(runningDevice.ActiveProgramSource, "active");
 
   hc.applyEventToDevice(device, {
     key: "Refrigeration.Common.Status.Door.Freezer",

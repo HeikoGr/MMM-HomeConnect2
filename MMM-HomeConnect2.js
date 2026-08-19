@@ -39,8 +39,16 @@ function computeProgressDisplayState({
   effectiveOperationStateActive,
   observedPercent
 }) {
+  // A remaining time of exactly 0 turns this formula into a constant 100 %, which
+  // is only meaningful while a program actually runs. Appliances keep reporting a
+  // stale 0 next to the planned duration once a cycle is over, so without this
+  // proof an idle appliance would paint a permanently full bar.
+  const hasRunningProgramEvidence =
+    effectiveRemainingSeconds > 0 || effectiveOperationStateActive === true;
+
   let estimatedTotalPercent;
   if (
+    hasRunningProgramEvidence &&
     Number.isFinite(estimatedTotalSeconds) &&
     estimatedTotalSeconds > 0 &&
     Number.isFinite(effectiveRemainingSeconds) &&
@@ -151,7 +159,8 @@ function getOperationStateInfo(device, deviceUtils) {
     isFinished: state.isFinished,
     isActive: state.isRun,
     isDelayedStart: state.isDelayedStart,
-    isPaused: state.isPaused
+    isPaused: state.isPaused,
+    hasNoProgram: state.hasNoProgram
   };
 }
 
@@ -163,6 +172,7 @@ function isWrinkleProtectionLabel(value) {
 
 function computeProgramDisplayState({
   device,
+  operationStateHasNoProgram,
   operationStateDelayedStart,
   programRunning,
   suppressSelectedProgramRuntime,
@@ -184,7 +194,16 @@ function computeProgramDisplayState({
   const visiblePlannedDurationLabel = suppressSelectedProgramRuntime ? "" : plannedDurationLabel;
   const showPlannedDurationInTitle = !(visibleRemainingSeconds > 0);
   const rawProgramName = typeof device.ActiveProgramName === "string" ? device.ActiveProgramName : "";
-  const source = device.ActiveProgramSource || (rawProgramName ? "active" : "");
+  const rawSource = device.ActiveProgramSource || (rawProgramName ? "active" : "");
+  // "active" claims that this program is running right now. An appliance reporting
+  // Inactive or Ready contradicts that, and the operation state is the more
+  // reliable of the two: it keeps being reported, while the program data lingers
+  // from the run that just ended. What remains is the program on the dial, which
+  // is exactly what "selected" means. A finished program is left alone - it is not
+  // running either, but it is still worth naming. The backend demotes the same
+  // way; this also catches a device object that has not been refreshed since.
+  const source =
+    rawSource === "active" && operationStateHasNoProgram ? "selected" : rawSource;
   // A merely selected program says nothing about what the appliance is doing - the
   // dial can sit on "Synthetics" for days. It is only worth showing once that
   // program is actually running or scheduled to start.
@@ -250,10 +269,16 @@ function computeProgramDisplayState({
       ? `${translate("DELAYED_START")} • ${translate("STARTS_IN")} ${hasEstimatedDuration ? `${translate("APPROX_PREFIX")} ` : ""}${formatDuration(effectiveStartInRelativeSeconds)}${delayedStartScheduleParts.length ? ` • ${delayedStartScheduleParts.join(" • ")}` : ""}`
       : translate("DELAYED_START")
     : "";
+  // A planned duration is a property of a program, so it is only shown next to the
+  // program it belongs to. On its own it is unattributable - after a cycle ends an
+  // appliance keeps reporting the duration of the run that just finished, and a
+  // bare "approx. 2h 29m" under an idle appliance claims a program that is not
+  // there. While a program runs the remaining time is the better number anyway,
+  // which is what showPlannedDurationInTitle already encodes.
   const programMeta =
     programName && visiblePlannedDurationLabel && showPlannedDurationInTitle
       ? `${programName} • ${visiblePlannedDurationLabel}`
-      : programName || (showPlannedDurationInTitle ? visiblePlannedDurationLabel : "");
+      : programName;
 
   return {
     programMeta,
@@ -771,6 +796,7 @@ Module.register("MMM-HomeConnect2", {
     const typeMeta = deviceUtils.getDeviceTypeMeta(device.type);
     const programState = computeProgramDisplayState({
       device,
+      operationStateHasNoProgram: operationState.hasNoProgram,
       operationStateDelayedStart: operationState.isDelayedStart,
       programRunning,
       suppressSelectedProgramRuntime,

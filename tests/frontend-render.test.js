@@ -534,6 +534,95 @@ function createInstance(overrides = {}) {
     assert.ok(!staleZeroProgressDom.innerHTML.includes("<progress"));
     assert.ok(!staleZeroProgressDom.innerHTML.includes("0%"));
 
+    // The same appliance one step further: the cycle is over, the door is open and
+    // all that survived is a remaining time stuck at 0 next to the planned
+    // duration - reported through the raw API keys, which outlive the friendly
+    // ones. (estimatedTotalSeconds - 0) / estimatedTotalSeconds is exactly 100 %,
+    // so this used to paint a full bar under an idle appliance for the lifetime of
+    // the process. Without a running program neither the bar nor the unattributed
+    // duration may appear.
+    const staleFullBarInstance = createInstance({
+      devices: [
+        {
+          name: "Washer",
+          type: "Washer",
+          connected: true,
+          OperationState: "BSH.Common.EnumType.OperationState.Ready",
+          DoorState: "Open",
+          RemainingProgramTime: 0,
+          "BSH.Common.Option.EstimatedTotalProgramTime": 8940,
+          "BSH.Common.Option.RemainingProgramTimeIsEstimated": true
+        }
+      ]
+    });
+    const staleFullBarDom = staleFullBarInstance.getDom();
+    assert.ok(staleFullBarDom.innerHTML.includes("fa-door-open"));
+    assert.ok(!staleFullBarDom.innerHTML.includes("<progress"));
+    assert.ok(!staleFullBarDom.innerHTML.includes("100%"));
+    assert.ok(!staleFullBarDom.innerHTML.includes("2h 29m"));
+
+    // The guard must not cost a running program its bar: with a remaining time
+    // the planned duration stays a valid progress source.
+    const runningEstimateInstance = createInstance({
+      devices: [
+        {
+          name: "Washer",
+          type: "Washer",
+          connected: true,
+          PowerState: "On",
+          OperationState: "BSH.Common.EnumType.OperationState.Run",
+          ActiveProgramName: "Easy Care",
+          ActiveProgramSource: "active",
+          RemainingProgramTime: 894,
+          EstimatedTotalProgramTime: 8940
+        }
+      ]
+    });
+    const runningEstimateHtml = runningEstimateInstance.getDom().innerHTML;
+    assert.ok(runningEstimateHtml.includes("<progress value='90'"));
+    assert.ok(runningEstimateHtml.includes("90%"));
+
+    // A running program whose remaining time reached 0 is reported as finished -
+    // the bar gives way to the finished notice rather than a stale 100 %.
+    const runningAtEndInstance = createInstance({
+      devices: [
+        {
+          name: "Washer",
+          type: "Washer",
+          connected: true,
+          PowerState: "On",
+          OperationState: "BSH.Common.EnumType.OperationState.Run",
+          ActiveProgramName: "Easy Care",
+          ActiveProgramSource: "active",
+          RemainingProgramTime: 0,
+          EstimatedTotalProgramTime: 8940
+        }
+      ]
+    });
+    const runningAtEndHtml = runningAtEndInstance.getDom().innerHTML;
+    assert.ok(runningAtEndHtml.includes("PROGRAM_FINISHED"));
+    assert.ok(!runningAtEndHtml.includes("<progress"));
+
+    // A planned duration stays visible as long as it can be attributed to the
+    // program it belongs to.
+    const plannedDurationInstance = createInstance({
+      devices: [
+        {
+          name: "Washer",
+          type: "Washer",
+          connected: true,
+          PowerState: "On",
+          OperationState: "BSH.Common.EnumType.OperationState.Run",
+          ActiveProgramName: "Easy Care",
+          ActiveProgramSource: "active",
+          EstimatedTotalProgramTime: 8940
+        }
+      ]
+    });
+    const plannedDurationHtml = plannedDurationInstance.getDom().innerHTML;
+    assert.ok(plannedDurationHtml.includes("ACTIVE_PROGRAM: Easy Care"));
+    assert.ok(plannedDurationHtml.includes("2h 29m"));
+
     const finishedProgramInstance = createInstance({
       config: {
         showDeviceIcon: false,
@@ -556,6 +645,54 @@ function createInstance(overrides = {}) {
     const finishedProgramDom = finishedProgramInstance.getDom();
     assert.ok(finishedProgramDom.innerHTML.includes("Cotton"));
     assert.ok(finishedProgramDom.innerHTML.includes("Silent Wash • varioSpeed"));
+
+    // The mirror image of the case above: an appliance back in Ready reports no
+    // program at all, so a device object still carrying "active" from the run that
+    // just ended must not keep announcing it. Unlike the finished appliance there
+    // is nothing left to name here - only the open door.
+    const staleActiveClaimInstance = createInstance({
+      devices: [
+        {
+          name: "Dryer",
+          type: "Dryer",
+          connected: true,
+          OperationState: "BSH.Common.EnumType.OperationState.Ready",
+          DoorState: "Open",
+          ActiveProgramName: "Synthetics",
+          ActiveProgramSource: "active",
+          ActiveProgramDetails: ["Drying target: Extra Dry", "Wrinkle Block: 120 min"],
+          RemainingProgramTime: 0,
+          FinishInRelative: 4560
+        }
+      ]
+    });
+    const staleActiveClaimHtml = staleActiveClaimInstance.getDom().innerHTML;
+    assert.ok(staleActiveClaimHtml.includes("fa-door-open"));
+    assert.ok(!staleActiveClaimHtml.includes("ACTIVE_PROGRAM"));
+    assert.ok(!staleActiveClaimHtml.includes("Synthetics"));
+    assert.ok(!staleActiveClaimHtml.includes("Extra Dry"));
+    assert.ok(!staleActiveClaimHtml.includes("<progress"));
+
+    // A running appliance keeps its active program - the guard only fires on the
+    // states that mean "no program at all".
+    const genuinelyActiveInstance = createInstance({
+      devices: [
+        {
+          name: "Dryer",
+          type: "Dryer",
+          connected: true,
+          PowerState: "On",
+          OperationState: "BSH.Common.EnumType.OperationState.Run",
+          ActiveProgramName: "Synthetics",
+          ActiveProgramSource: "active",
+          ActiveProgramDetails: ["Drying target: Extra Dry"],
+          RemainingProgramTime: 1800
+        }
+      ]
+    });
+    const genuinelyActiveHtml = genuinelyActiveInstance.getDom().innerHTML;
+    assert.ok(genuinelyActiveHtml.includes("ACTIVE_PROGRAM: Synthetics"));
+    assert.ok(genuinelyActiveHtml.includes("Extra Dry"));
 
     const wrinkleGuardInstance = createInstance({
       devices: [
