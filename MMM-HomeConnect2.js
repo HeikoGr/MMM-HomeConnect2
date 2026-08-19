@@ -296,8 +296,6 @@ Module.register("MMM-HomeConnect2", {
   authInfo: null,
   authStatus: null,
   instanceId: null,
-  sessionConfig: null,
-  configDrift: null,
   deviceRuntimeHints: {},
   lastActiveProgramRequestTs: 0,
   debugStats: null,
@@ -493,20 +491,6 @@ Module.register("MMM-HomeConnect2", {
             status: "polling",
             message: safePayload.message
           };
-        }
-        this.lifecycle.render();
-        break;
-      }
-      case "SESSION_CONFIG": {
-        // The helper is the source of truth for everything that shapes the shared
-        // API session; display options stay local to this browser.
-        this.sessionConfig = safePayload.sessionConfig || null;
-        this.configDrift =
-          safePayload.drift && Array.isArray(safePayload.drift.keys) && safePayload.drift.keys.length
-            ? safePayload.drift
-            : null;
-        if (this.sessionConfig && typeof this.sessionConfig.apiLanguage === "string") {
-          this.config.apiLanguage = this.sessionConfig.apiLanguage;
         }
         this.lifecycle.render();
         break;
@@ -1003,21 +987,6 @@ Module.register("MMM-HomeConnect2", {
     ].join("");
   },
 
-  // Soft counterpart to the mismatch banner: this display stays fully connected,
-  // it just runs against session settings that were established by another client.
-  getConfigDriftNoticeHtml() {
-    const drift = this.configDrift;
-    if (!drift || !Array.isArray(drift.keys) || drift.keys.length === 0) {
-      return "";
-    }
-
-    return [
-      "<div class='hc-status-note dimmed'>",
-      `${this.translate("CONFIG_DRIFT")} ${drift.keys.join(", ")}`,
-      "</div>"
-    ].join("");
-  },
-
   getStatusIconsHtml(device, displayState) {
     const { runtime } = displayState;
     let programIcon = "";
@@ -1111,7 +1080,6 @@ Module.register("MMM-HomeConnect2", {
     const rateLimitNoticeHtml = this.getRateLimitNoticeHtml();
     const homeConnectErrorNoticeHtml = this.getHomeConnectErrorNoticeHtml();
     const configMismatchNoticeHtml = this.getConfigMismatchNoticeHtml();
-    const configDriftNoticeHtml = this.getConfigDriftNoticeHtml();
 
     // Show authentication info if available
     if (this.authInfo && this.authInfo.status === "waiting") {
@@ -1138,7 +1106,7 @@ Module.register("MMM-HomeConnect2", {
         `<i class='fa fa-cog fa-spin'></i> ${this.translate("SESSION_BASED_AUTH")}<br>` +
         `<span class='dimmed'>${this.translate("LOADING_APPLIANCES")}...</span>` +
         "</div>";
-      div.innerHTML = `${rateLimitNoticeHtml}${homeConnectErrorNoticeHtml}${configMismatchNoticeHtml}${configDriftNoticeHtml}${loadingHtml}`;
+      div.innerHTML = `${rateLimitNoticeHtml}${homeConnectErrorNoticeHtml}${configMismatchNoticeHtml}${loadingHtml}`;
       return div;
     }
 
@@ -1148,12 +1116,12 @@ Module.register("MMM-HomeConnect2", {
       .join("");
 
     if (wrapper === "") {
-      div.innerHTML = `${rateLimitNoticeHtml}${homeConnectErrorNoticeHtml}${configMismatchNoticeHtml}${configDriftNoticeHtml}<div class='dimmed small'>${this.translate("NO_ACTIVE_APPLIANCES")}</div>${this.getDebugPanel()}`;
+      div.innerHTML = `${rateLimitNoticeHtml}${homeConnectErrorNoticeHtml}${configMismatchNoticeHtml}<div class='dimmed small'>${this.translate("NO_ACTIVE_APPLIANCES")}</div>${this.getDebugPanel()}`;
       return div;
     }
 
     const debugPanel = this.getDebugPanel();
-    div.innerHTML = `${rateLimitNoticeHtml}${homeConnectErrorNoticeHtml}${configMismatchNoticeHtml}${configDriftNoticeHtml}${wrapper}${debugPanel}`;
+    div.innerHTML = `${rateLimitNoticeHtml}${homeConnectErrorNoticeHtml}${configMismatchNoticeHtml}${wrapper}${debugPanel}`;
     return div;
   },
 

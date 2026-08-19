@@ -63,8 +63,7 @@ function resetHelperState() {
   helper.hc = null;
   helper.instanceId = null;
   helper.sharedConfigOwnerInstanceId = null;
-  helper.sharedConfigHash = null;
-  helper.sharedSessionConfig = null;
+  helper.sessionOwnerConfig = null;
   helper.activeProgramFetchInFlight = false;
   helper.activeProgramFetchSignature = null;
   helper.recentForcedProgramFetch = null;
@@ -445,26 +444,25 @@ function registeredInstances() {
 
   assert.strictEqual(fetchCalls, 1);
 
-  // Only session-relevant config takes part in the hash. Display-local drift keeps
-  // the client connected, foreign credentials are rejected.
+  // Foreign credentials are rejected; every other config difference only keeps the
+  // client connected against the session's settings (and is logged).
   resetHelperState();
   const authConfigs = [];
   const deviceConfigs = [];
   const acceptLanguages = [];
   const configuredInstances = [];
   const configMismatchStatuses = [];
-  const sessionConfigEvents = [];
+  const ignoredConfigWarnings = [];
   const originalEmitInitStatus = helper.emitInitStatus;
-  const originalSendEventToInstance = helper.sendEventToInstance;
+  const originalWarnAboutIgnoredSessionConfig = helper.warnAboutIgnoredSessionConfig;
   helper.emitInitStatus = (status, payload = {}) => {
     if (payload.isConfigMismatch) {
       configMismatchStatuses.push({ status, payload });
     }
   };
-  helper.sendEventToInstance = (instanceId, action, data) => {
-    if (action === "SESSION_CONFIG") {
-      sessionConfigEvents.push({ instanceId, data });
-    }
+  helper.warnAboutIgnoredSessionConfig = function patched(instanceId, clientSessionConfig) {
+    ignoredConfigWarnings.push(instanceId);
+    return originalWarnAboutIgnoredSessionConfig.call(this, instanceId, clientSessionConfig);
   };
   helper.authService = {
     setConfig(config) {
@@ -498,7 +496,7 @@ function registeredInstances() {
     showDeviceIcon: true
   });
 
-  // Display-only options must not register as drift at all.
+  // Display-only options must not be reported as ignored session settings.
   helper.handleConfigNotification({
     instanceId: "frontend-b",
     clientId: "client-1",
@@ -510,7 +508,7 @@ function registeredInstances() {
     header: "Another header"
   });
 
-  // Session-relevant drift: client stays registered but is told what applies.
+  // Session-relevant difference: the client stays registered, its values are ignored.
   helper.handleConfigNotification({
     instanceId: "frontend-c",
     clientId: "client-1",
@@ -532,7 +530,7 @@ function registeredInstances() {
   assert.strictEqual(helper.sharedConfigOwnerInstanceId, "frontend-a");
   assert.strictEqual(helper.config.apiLanguage, "de");
   assert.strictEqual(helper.config.minActiveProgramIntervalMs, 1111);
-  assert.ok(typeof helper.sharedConfigHash === "string" && helper.sharedConfigHash.length > 0);
+  assert.strictEqual(helper.sessionOwnerConfig.minActiveProgramIntervalMs, 1111);
   assert.deepStrictEqual(configuredInstances, [
     "first:frontend-a",
     "next:frontend-b",
@@ -561,33 +559,12 @@ function registeredInstances() {
     false
   );
 
-  // Every accepted client learns the effective session config, credentials excluded.
-  assert.deepStrictEqual(
-    sessionConfigEvents.map((event) => event.instanceId),
-    ["frontend-a", "frontend-b", "frontend-c"]
-  );
-  assert.strictEqual(sessionConfigEvents[0].data.drift, null);
-  assert.strictEqual(sessionConfigEvents[1].data.drift, null);
-  assert.deepStrictEqual(sessionConfigEvents[2].data.drift.keys.sort(), [
-    "enableSSEHeartbeat",
-    "minActiveProgramIntervalMs"
-  ]);
-  assert.strictEqual(sessionConfigEvents[2].data.ownerInstanceId, "frontend-a");
-  assert.strictEqual(sessionConfigEvents[2].data.sessionConfig.apiLanguage, "de");
-  assert.strictEqual(sessionConfigEvents[2].data.sessionConfig.minActiveProgramIntervalMs, 1111);
-  assert.strictEqual(
-    Object.hasOwn(sessionConfigEvents[2].data.sessionConfig, "clientId"),
-    false
-  );
-  assert.strictEqual(
-    Object.hasOwn(sessionConfigEvents[2].data.sessionConfig, "clientSecret"),
-    false
-  );
+  // Every accepted late client is checked, and only real differences are logged.
+  assert.deepStrictEqual(ignoredConfigWarnings, ["frontend-b", "frontend-c"]);
 
   // A browser-derived language only fills the gap when nothing is configured.
   resetHelperState();
   helper.emitInitStatus = () => { };
-  helper.sendEventToInstance = () => { };
   helper.authService = { setConfig() { } };
   helper.deviceService = { setConfig() { } };
   helper.hc = null;
@@ -610,18 +587,20 @@ function registeredInstances() {
   });
 
   assert.strictEqual(helper.config.apiLanguage, "de-DE");
-  assert.strictEqual(helper.sharedSessionConfig.apiLanguage, "de-DE");
+  assert.strictEqual(helper.sessionOwnerConfig.apiLanguage, "de-DE");
   const registeredAfterLanguage = registeredInstances();
   assert.ok(registeredAfterLanguage.includes("kiosk"));
   assert.ok(registeredAfterLanguage.includes("phone"));
 
   // A client whose browser hint resolves to the session language must not be
-  // reported as drift, even when another session key differs.
-  const languageDriftEvents = [];
-  helper.sendEventToInstance = (instanceId, action, data) => {
-    if (action === "SESSION_CONFIG") {
-      languageDriftEvents.push({ instanceId, data });
-    }
+  // reported as ignored, even when another session key differs.
+  const languageDriftKeys = [];
+  helper.warnAboutIgnoredSessionConfig = function patched(_instanceId, clientSessionConfig) {
+    languageDriftKeys.push(
+      Object.keys(clientSessionConfig).filter(
+        (key) => this.sessionOwnerConfig[key] !== clientSessionConfig[key]
+      )
+    );
   };
   helper.handleConfigNotification({
     instanceId: "tablet",
@@ -631,10 +610,10 @@ function registeredInstances() {
     enableSSEHeartbeat: false
   });
 
-  assert.deepStrictEqual(languageDriftEvents[0].data.drift.keys, ["enableSSEHeartbeat"]);
+  assert.deepStrictEqual(languageDriftKeys[0], ["instanceId", "enableSSEHeartbeat"]);
 
   helper.emitInitStatus = originalEmitInitStatus;
-  helper.sendEventToInstance = originalSendEventToInstance;
+  helper.warnAboutIgnoredSessionConfig = originalWarnAboutIgnoredSessionConfig;
 
   // Manual auth retry must preserve all registered frontend instances.
   resetHelperState();

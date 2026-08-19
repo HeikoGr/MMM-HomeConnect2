@@ -30,7 +30,6 @@
   "CONFIG_MISMATCH_TITLE": "Konfigurationskonflikt",
   "CONFIG_MISMATCH": "Dette display bruger en anden MMM-HomeConnect2-konfiguration end den kørende serverinstans.",
   "CONFIG_MISMATCH_CREDENTIALS": "Dette display bruger andre Home Connect-legitimationsoplysninger end den kørende serversession.",
-  "CONFIG_DRIFT": "Den kørende session blev startet med andre indstillinger, disse gælder:",
   "AVAILABLE_PROGRAMS": "Programmer",
   "AVAILABLE_OPTIONS": "Valgmuligheder",
   "ACTIVE_ALERTS": "Advarsler"

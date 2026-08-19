@@ -101,8 +101,6 @@ function createInstance(overrides = {}) {
     authStatus: overrides.authStatus || null,
     debugStats: overrides.debugStats || null,
     lastInitStatus: overrides.lastInitStatus || null,
-    sessionConfig: overrides.sessionConfig || null,
-    configDrift: overrides.configDrift || null,
     deviceRuntimeHints: overrides.deviceRuntimeHints || {},
     instanceId: "test-instance",
     notifications: {
@@ -949,64 +947,6 @@ function createInstance(overrides = {}) {
     });
     const credentialMismatchDom = credentialMismatchInstance.getDom();
     assert.ok(credentialMismatchDom.innerHTML.includes("CONFIG_MISMATCH_CREDENTIALS"));
-    assert.ok(!credentialMismatchDom.innerHTML.includes("CONFIG_DRIFT"));
-
-    // Soft drift keeps the display working and only names the affected keys.
-    const driftInstance = createInstance({
-      devices: [
-        {
-          name: "Washer",
-          type: "Washer",
-          PowerState: "On",
-          ActiveProgramName: "Eco 40-60",
-          ActiveProgramSource: "active"
-        }
-      ],
-      configDrift: { keys: ["minActiveProgramIntervalMs", "enableSSEHeartbeat"] }
-    });
-    const driftDom = driftInstance.getDom();
-    assert.ok(driftDom.innerHTML.includes("CONFIG_DRIFT"));
-    assert.ok(driftDom.innerHTML.includes("minActiveProgramIntervalMs, enableSSEHeartbeat"));
-    assert.ok(driftDom.innerHTML.includes("Eco 40-60"));
-    assert.ok(!driftDom.innerHTML.includes("CONFIG_MISMATCH_TITLE"));
-
-    // A client without drift renders no notice at all.
-    const noDriftInstance = createInstance({
-      configDrift: { keys: [] }
-    });
-    assert.ok(!noDriftInstance.getDom().innerHTML.includes("CONFIG_DRIFT"));
-
-    // SESSION_CONFIG makes the helper the source of truth for session settings.
-    const sessionConfigInstance = createInstance({ config: { apiLanguage: "" } });
-    sessionConfigInstance.socketNotificationReceived("MMM-HomeConnect2_EVENT", {
-      identifier: "test-instance",
-      instanceId: "test-instance",
-      action: "SESSION_CONFIG",
-      data: {
-        ownerInstanceId: "kiosk",
-        sessionConfig: { apiLanguage: "de-DE", minActiveProgramIntervalMs: 1111 },
-        drift: { keys: ["minActiveProgramIntervalMs"] }
-      }
-    });
-
-    assert.strictEqual(sessionConfigInstance.config.apiLanguage, "de-DE");
-    assert.strictEqual(sessionConfigInstance.sessionConfig.minActiveProgramIntervalMs, 1111);
-    assert.deepStrictEqual(sessionConfigInstance.configDrift.keys, ["minActiveProgramIntervalMs"]);
-    assert.ok(sessionConfigInstance.getDom().innerHTML.includes("CONFIG_DRIFT"));
-
-    sessionConfigInstance.socketNotificationReceived("MMM-HomeConnect2_EVENT", {
-      identifier: "test-instance",
-      instanceId: "test-instance",
-      action: "SESSION_CONFIG",
-      data: {
-        ownerInstanceId: "kiosk",
-        sessionConfig: { apiLanguage: "de-DE" },
-        drift: null
-      }
-    });
-
-    assert.strictEqual(sessionConfigInstance.configDrift, null);
-    assert.ok(!sessionConfigInstance.getDom().innerHTML.includes("CONFIG_DRIFT"));
 
     const debugSessionInstance = createInstance({
       config: {
