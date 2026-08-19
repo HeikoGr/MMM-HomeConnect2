@@ -1327,24 +1327,17 @@ Module.register("MMM-HomeConnect2", {
       const rateLimitRemainingSec = Number.isFinite(session.rateLimitRemainingMs)
         ? Math.max(0, Math.ceil(session.rateLimitRemainingMs / 1000))
         : 0;
+      const sessionFlags = [
+        session.authenticated ? "authenticated" : "not authenticated",
+        session.authFlowInProgress ? "auth in progress" : null,
+        session.deviceRefreshInFlight ? "device refresh" : null,
+        session.programFetchInFlight ? "program fetch" : null
+      ]
+        .filter(Boolean)
+        .join(", ");
       rows.push(
-        `<div class='hc-debug-row'><span class='hc-debug-label'>session state:</span> ${escapeHtml(
-          session.state || "n/a"
-        )}</div>`
-      );
-      rows.push(
-        `<div class='hc-debug-row'><span class='hc-debug-label'>session event:</span> ${escapeHtml(
-          session.event || "n/a"
-        )}</div>`
-      );
-      if (session.reason) {
-        rows.push(
-          `<div class='hc-debug-row'><span class='hc-debug-label'>session reason:</span> ${escapeHtml(session.reason)}</div>`
-        );
-      }
-      rows.push(
-        `<div class='hc-debug-row'><span class='hc-debug-label'>session updated:</span> ${formatTime(
-          session.updatedAt
+        `<div class='hc-debug-row'><span class='hc-debug-label'>session:</span> ${escapeHtml(
+          sessionFlags
         )}</div>`
       );
       rows.push(

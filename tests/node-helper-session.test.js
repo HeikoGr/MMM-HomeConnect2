@@ -11,16 +11,6 @@ const testRefreshTokenPath = path.join(os.tmpdir(), "mmm-homeconnect2-test-refre
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Timer assertions must not race the event loop under load: poll for the expected
-// state instead of sleeping for a fixed margin and hoping the timer already fired.
-async function waitForSessionState(expected, timeoutMs = 2000) {
-  const deadline = Date.now() + timeoutMs;
-  while (helper.sessionState !== expected && Date.now() < deadline) {
-    await wait(10);
-  }
-  return helper.sessionState;
-}
-
 const originalLoad = Module._load;
 Module._load = function patchedLoad(request, parent, isMain) {
   if (request === "node_helper") {
@@ -43,12 +33,10 @@ Module._load = originalLoad;
 const originalFetchActiveProgramsForDevices = helper.fetchActiveProgramsForDevices;
 
 function resetHelperState() {
-  helper.sessionState = "boot";
-  helper.sessionStateMeta = {
-    updatedAt: 0,
-    event: "init",
-    reason: null
-  };
+  helper.sessionAuthenticated = false;
+  helper.authFlowInProgress = false;
+  helper.deviceRefreshInFlight = false;
+  helper.programFetchInFlight = false;
   helper.debugStats = {
     lastApiCallTs: null,
     lastSseEventTs: null,
@@ -85,10 +73,6 @@ function resetHelperState() {
     helper.fullSnapshotTimer = null;
   }
   helper.setRateLimitUntil(0);
-  if (helper.rateLimitReleaseTimer) {
-    clearTimeout(helper.rateLimitReleaseTimer);
-    helper.rateLimitReleaseTimer = null;
-  }
   helper.notifications = {
     REQUEST: "MMM-HomeConnect2_REQUEST",
     EVENT: "MMM-HomeConnect2_EVENT"
@@ -113,105 +97,27 @@ function registeredInstances() {
 (async () => {
   resetHelperState();
 
-  // Unknown events must be ignored.
-  const unknownResult = helper.transitionSessionState("UNKNOWN_EVENT", {
-    reason: "test_unknown"
-  });
-  assert.strictEqual(unknownResult, "boot");
-  assert.strictEqual(helper.sessionState, "boot");
+  // Session lifecycle flags: a fresh helper is neither authenticated nor busy.
+  assert.strictEqual(helper.isSessionAuthenticated(), false);
+  assert.strictEqual(helper.isAuthFlowInProgress(), false);
 
-  // Invalid transition must be blocked by guard.
-  const invalidResult = helper.transitionSessionState("PROGRAM_FETCH_DONE", {
-    reason: "test_invalid"
-  });
-  assert.strictEqual(invalidResult, "boot");
-  assert.strictEqual(helper.sessionState, "boot");
+  // Rate limiting is derived from the deadline alone - no state to get out of sync.
+  assert.strictEqual(helper.isRateLimited(), false);
 
-  // Happy path: auth bootstrap to ready.
-  helper.transitionSessionState("AUTH_START", {
-    reason: "test_auth_start"
-  });
-  assert.strictEqual(helper.sessionState, "authenticating");
-
-  helper.transitionSessionState("HC_INIT_START", {
-    reason: "test_hc_init"
-  });
-  assert.strictEqual(helper.sessionState, "initializing");
-
-  helper.transitionSessionState("AUTH_SUCCESS", {
-    reason: "test_auth_success"
-  });
-  assert.strictEqual(helper.sessionState, "ready");
-
-  // Refresh/program flow transitions are allowed from authenticated states.
-  helper.transitionSessionState("DEVICE_REFRESH_START", {
-    reason: "test_refresh_start"
-  });
-  assert.strictEqual(helper.sessionState, "refreshing_devices");
-
-  helper.transitionSessionState("DEVICE_REFRESH_DONE", {
-    reason: "test_refresh_done"
-  });
-  assert.strictEqual(helper.sessionState, "ready");
-
-  helper.transitionSessionState("PROGRAM_FETCH_START", {
-    reason: "test_program_start"
-  });
-  assert.strictEqual(helper.sessionState, "refreshing_programs");
-
-  helper.transitionSessionState("PROGRAM_FETCH_DONE", {
-    reason: "test_program_done"
-  });
-  assert.strictEqual(helper.sessionState, "ready");
-
-  // Guard: rate-limit clear is only valid from rate_limited.
-  helper.transitionSessionState("RATE_LIMIT_CLEARED", {
-    reason: "test_invalid_clear"
-  });
-  assert.strictEqual(helper.sessionState, "ready");
-
-  // Edge case: auth start from rate_limited is blocked until limiter clears.
-  helper.transitionSessionState("RATE_LIMIT_HIT", {
-    reason: "test_rate_limit"
-  });
-  assert.strictEqual(helper.sessionState, "rate_limited");
-
-  helper.transitionSessionState("AUTH_START", {
-    reason: "test_blocked_auth_start_while_rate_limited"
-  });
-  assert.strictEqual(helper.sessionState, "rate_limited");
-
-  helper.setRateLimitUntil(Date.now() - 1);
-  helper.transitionSessionState("RATE_LIMIT_CLEARED", {
-    reason: "test_manual_rate_limit_clear"
-  });
-  assert.strictEqual(helper.sessionState, "ready");
-
-  // Timer path: syncRateLimitState should move to rate_limited and later auto-clear.
   helper.setRateLimitUntil(Date.now() + 30);
-  const active = helper.syncRateLimitState();
-  assert.strictEqual(active, true);
-  assert.strictEqual(helper.sessionState, "rate_limited");
+  assert.strictEqual(helper.isRateLimited(), true);
 
+  await wait(40);
   assert.strictEqual(
-    await waitForSessionState("ready"),
-    "ready",
-    "A release timer firing early must re-arm instead of stranding the session"
+    helper.isRateLimited(),
+    false,
+    "An elapsed rate limit must clear itself without a release timer"
   );
 
-  // Race path: extending rate limit before timer fires must keep state rate_limited.
-  helper.setRateLimitUntil(Date.now() + 25);
-  helper.syncRateLimitState();
-  assert.strictEqual(helper.sessionState, "rate_limited");
-
-  await wait(10);
-  helper.setRateLimitUntil(Date.now() + 80);
-  helper.scheduleRateLimitRelease(helper.getRateLimitUntil());
-
-  await wait(35);
-  assert.strictEqual(helper.sessionState, "rate_limited");
-
-  assert.strictEqual(await waitForSessionState("ready"), "ready");
+  helper.setRateLimitUntil(Date.now() + 30);
+  assert.strictEqual(helper.isRateLimited(), true);
+  helper.setRateLimitUntil(0);
+  assert.strictEqual(helper.isRateLimited(), false);
 
   // SSE debug stats should track real gaps between events.
   resetHelperState();
@@ -256,7 +162,7 @@ function registeredInstances() {
   // SSE stale should rebuild subscriptions and then perform one full resync.
   resetHelperState();
   helper.hc = {};
-  helper.sessionState = "ready";
+  helper.sessionAuthenticated = true;
   const staleSequence = [];
   helper.deviceService = {
     reconnectEventSubscriptions() {
@@ -292,7 +198,7 @@ function registeredInstances() {
   // An already authenticated session should start the initial device fetch immediately.
   resetHelperState();
   helper.hc = {};
-  helper.sessionState = "ready";
+  helper.sessionAuthenticated = true;
   let immediateGetDevicesCalls = 0;
   helper.deviceService = {
     getDevices() {
@@ -347,7 +253,7 @@ function registeredInstances() {
       callback("DEVICES_UPDATE", []);
     }
   };
-  helper.sessionState = "ready";
+  helper.sessionAuthenticated = true;
   const originalSetInterval = global.setInterval;
   const originalClearInterval = global.clearInterval;
   const originalHandleGetActiveProgramsForScheduler = helper.handleGetActivePrograms;
@@ -378,7 +284,7 @@ function registeredInstances() {
   // when the API momentarily reports no active program.
   resetHelperState();
   helper.hc = {};
-  helper.sessionState = "ready";
+  helper.sessionAuthenticated = true;
   const washerDevice = {
     haId: "ha-washer",
     name: "Washer",
@@ -416,7 +322,7 @@ function registeredInstances() {
   // Overlapping forced active-program requests should be deduplicated while one fetch is in flight.
   resetHelperState();
   helper.hc = {};
-  helper.sessionState = "ready";
+  helper.sessionAuthenticated = true;
   helper.deviceService = {
     devices: new Map([["ha-1", { haId: "ha-1", name: "Washer" }]])
   };
@@ -445,7 +351,7 @@ function registeredInstances() {
   // instead of relying on another SSE delta to re-trigger it.
   resetHelperState();
   helper.hc = {};
-  helper.sessionState = "ready";
+  helper.sessionAuthenticated = true;
   helper.fetchActiveProgramsForDevices = originalFetchActiveProgramsForDevices;
   helper.deviceService = {
     devices: new Map([
@@ -512,7 +418,7 @@ function registeredInstances() {
   // across different frontend instances for a short window.
   resetHelperState();
   helper.hc = {};
-  helper.sessionState = "ready";
+  helper.sessionAuthenticated = true;
   helper.deviceService = {
     devices: new Map([["ha-1", { haId: "ha-1", name: "Washer" }]])
   };
@@ -771,10 +677,12 @@ function registeredInstances() {
     1
   );
 
-  helper.transitionSessionState("RESET", {
-    reason: "test_reset"
-  });
-  assert.strictEqual(helper.sessionState, "boot");
+  assert.strictEqual(
+    helper.isSessionAuthenticated(),
+    false,
+    "retryAuthentication() must drop the authenticated session"
+  );
+  assert.strictEqual(helper.isAuthFlowInProgress(), false);
 
-  console.log("node-helper-state-machine.test.js OK");
+  console.log("node-helper-session.test.js OK");
 })();

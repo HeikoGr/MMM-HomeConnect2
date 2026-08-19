@@ -1044,10 +1044,10 @@ function createInstance(overrides = {}) {
         },
         apiCounters: { homeappliances: 3 },
         session: {
-          state: "rate_limited",
-          event: "RATE_LIMIT_HIT",
-          updatedAt: Date.now(),
-          reason: "active_program_429",
+          authenticated: true,
+          authFlowInProgress: false,
+          deviceRefreshInFlight: false,
+          programFetchInFlight: true,
           rateLimitRemainingMs: 120000
         }
       }
@@ -1058,10 +1058,8 @@ function createInstance(overrides = {}) {
     assert.ok(debugSessionDom.innerHTML.includes("n/a"));
     assert.ok(debugSessionDom.innerHTML.includes("KEEP-ALIVE last:"));
     assert.ok(debugSessionDom.innerHTML.includes("55s"));
-    assert.ok(debugSessionDom.innerHTML.includes("session state:"));
-    assert.ok(debugSessionDom.innerHTML.includes("rate_limited"));
-    assert.ok(debugSessionDom.innerHTML.includes("session reason:"));
-    assert.ok(debugSessionDom.innerHTML.includes("active_program_429"));
+    assert.ok(debugSessionDom.innerHTML.includes("session:"));
+    assert.ok(debugSessionDom.innerHTML.includes("authenticated, program fetch"));
     assert.ok(debugSessionDom.innerHTML.includes("rate limit remaining:"));
     assert.ok(debugSessionDom.innerHTML.includes("SSE gap last:"));
     assert.ok(debugSessionDom.innerHTML.includes("1m 30s"));

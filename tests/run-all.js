@@ -38,7 +38,7 @@ function runNode(file) {
 function runUnitTests() {
   runNode("auth-service.test.js");
   runNode("active-program-manager.test.js");
-  runNode("node-helper-state-machine.test.js");
+  runNode("node-helper-session.test.js");
   runNode("device-utils.test.js");
   runNode("device-service.test.js");
   runNode("frontend-render.test.js");
