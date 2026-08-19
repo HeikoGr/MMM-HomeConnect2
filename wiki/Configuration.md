@@ -13,8 +13,11 @@
 
 | Option | Description |
 | --- | --- |
+| `header` | Module header text. |
 | `showDeviceIcon` | Show appliance icons. |
 | `showDeviceIfInfoIsAvailable` | Keep devices visible when useful status data exists, even if they are idle. |
+| `showDeviceIfDoorIsOpen` | Keep a device visible while its door is open, even if otherwise idle. |
+| `showDeviceIfFailure` | Keep a device visible while it reports a failure/error state. |
 | `showAlwaysAllDevices` | Always render all appliances regardless of current state. |
 
 ## Timing And Recovery Options
