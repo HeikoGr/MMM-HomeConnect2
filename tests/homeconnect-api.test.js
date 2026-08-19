@@ -24,6 +24,16 @@ function setGlobalBuiltin(name, value) {
 
   assert.strictEqual(device.connected, true);
   assert.strictEqual(device.RemainingProgramTime.value, "PT1H15M");
+  // A normalized observable is stored once, under its friendly name only. Keeping
+  // the raw key as a second copy is what let cleared values resurface.
+  assert.strictEqual(device["BSH.Common.Status.RemainingProgramTime"], undefined);
+
+  // A key with no friendly field keeps its raw spelling - that is its only storage.
+  hc.applyEventToDevice(device, {
+    key: "BSH.Common.Option.StartInRelative",
+    value: { value: "PT2H" }
+  });
+  assert.strictEqual(deviceUtils.parseStartInRelativeSeconds(device), 7200);
   assert.strictEqual(device._initialRemaining, 4500);
   assert.ok(Number.isFinite(device._remainingObservedAt));
 
@@ -83,16 +93,14 @@ function setGlobalBuiltin(name, value) {
     value: "BSH.Common.EnumType.OperationState.Ready"
   });
 
-  // Asserted through the parser rather than key by key: what matters is that no
-  // spelling of the value yields a number any more.
+  // Asserted through the parser rather than field by field: what matters is that
+  // the value no longer yields a number.
   assert.ok(!Number.isFinite(deviceUtils.parseProgress(device)));
   assert.strictEqual(device.ProgramProgress, undefined);
-  assert.strictEqual(device["BSH.Common.Option.ProgramProgress"], undefined);
 
   // The remaining time is the more damaging leftover: an appliance that ends a
   // cycle leaves it at 0, and 0 combined with the planned duration computes to a
-  // permanent 100 %. Clearing it must cover the raw API keys as well, because the
-  // parsers fall back to those.
+  // permanent 100 %.
   hc.applyEventToDevice(device, {
     key: "BSH.Common.Option.RemainingProgramTime",
     value: 0
@@ -104,16 +112,14 @@ function setGlobalBuiltin(name, value) {
 
   assert.strictEqual(deviceUtils.parseRemainingSeconds(device), null);
   assert.strictEqual(device.RemainingProgramTime, undefined);
-  assert.strictEqual(device["BSH.Common.Option.RemainingProgramTime"], undefined);
   assert.strictEqual(device._initialRemaining, undefined);
   assert.strictEqual(device._remainingObservedAt, undefined);
 
-  // A finished cycle clears the planned duration through every alias, so the raw
-  // option key cannot resurrect it via parseEstimatedTotalSeconds().
+  // A finished cycle clears the planned duration, so parseEstimatedTotalSeconds()
+  // cannot resurrect it.
   const finishedDevice = {
-    "BSH.Common.Option.EstimatedTotalProgramTime": 8940,
     EstimatedTotalProgramTime: 8940,
-    "BSH.Common.Option.RemainingProgramTimeIsEstimated": true,
+    RemainingProgramTimeIsEstimated: true,
     ActiveProgramName: "Easy Care"
   };
   hc.applyEventToDevice(finishedDevice, {

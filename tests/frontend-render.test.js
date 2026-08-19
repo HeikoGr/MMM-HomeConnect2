@@ -548,8 +548,8 @@ function createInstance(overrides = {}) {
           OperationState: "BSH.Common.EnumType.OperationState.Ready",
           DoorState: "Open",
           RemainingProgramTime: 0,
-          "BSH.Common.Option.EstimatedTotalProgramTime": 8940,
-          "BSH.Common.Option.RemainingProgramTimeIsEstimated": true
+          EstimatedTotalProgramTime: 8940,
+          RemainingProgramTimeIsEstimated: true
         }
       ]
     });
@@ -745,7 +745,7 @@ function createInstance(overrides = {}) {
           ActiveProgramName: "Easy Care",
           RemainingProgramTimeIsEstimated: true,
           "BSH.Common.Option.StartInRelative": { value: "PT2H29M" },
-          "BSH.Common.Option.FinishInRelative": { value: "PT4H10M" }
+          FinishInRelative: { value: "PT4H10M" }
         }
       ]
     });
@@ -770,7 +770,7 @@ function createInstance(overrides = {}) {
           OperationState: "BSH.Common.EnumType.OperationState.DelayedStart",
           ActiveProgramName: "Cottons",
           EstimatedTotalProgramTime: 11760,
-          "BSH.Common.Option.FinishInRelative": { value: 39309 }
+          FinishInRelative: { value: 39309 }
         }
       ]
     });

@@ -42,13 +42,11 @@ const {
   assert.strictEqual(parseDurationSeconds({ displayValue: "PT30S" }), 30);
   assert.strictEqual(parseRemainingSeconds({ RemainingProgramTime: { value: "PT20M" } }), 1200);
   assert.strictEqual(
-    parseFinishInRelativeSeconds({ "BSH.Common.Option.FinishInRelative": { value: "PT2H10M" } }),
+    parseFinishInRelativeSeconds({ FinishInRelative: { value: "PT2H10M" } }),
     7800
   );
   assert.strictEqual(
-    parseEstimatedTotalSeconds({
-      "BSH.Common.Option.EstimatedTotalProgramTime": { value: "PT1H" }
-    }),
+    parseEstimatedTotalSeconds({ EstimatedTotalProgramTime: { value: "PT1H" } }),
     3600
   );
   assert.strictEqual(
