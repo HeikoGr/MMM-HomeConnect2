@@ -257,7 +257,12 @@ function resolveSessionLanguage(config = {}) {
 // Node process hosting every MagicMirror module, not just this one.
 function persistRefreshToken(token) {
   try {
-    fs.writeFileSync(refreshTokenPath, token);
+    // Owner-only permissions: this file holds a long-lived OAuth refresh token,
+    // equivalent to a credential for the user's Home Connect account. The mode
+    // option only applies when the file is newly created, so chmod explicitly
+    // in case a previous run left it with looser (e.g. default 0o666) permissions.
+    fs.writeFileSync(refreshTokenPath, token, { mode: 0o600 });
+    fs.chmodSync(refreshTokenPath, 0o600);
     moduleLog("info", "Refresh token saved successfully");
     return true;
   } catch (err) {
