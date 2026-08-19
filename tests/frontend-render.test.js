@@ -512,6 +512,28 @@ function createInstance(overrides = {}) {
     assert.ok(!selectedDoorOpenDom.innerHTML.includes("SELECTED_PROGRAM"));
     assert.ok(!selectedDoorOpenDom.innerHTML.includes("1h 16m"));
 
+    // The appliance resets progress to 0 when a cycle ends; a client that stayed
+    // online through the whole program keeps that value in its device state. It
+    // must render exactly like a freshly started client, which never saw it: the
+    // open door and nothing else.
+    const staleZeroProgressInstance = createInstance({
+      devices: [
+        {
+          name: "Dishwasher",
+          type: "Dishwasher",
+          PowerState: "On",
+          OperationState: "BSH.Common.EnumType.OperationState.Ready",
+          DoorState: "Open",
+          ProgramProgress: 0,
+          RemainingProgramTime: 0
+        }
+      ]
+    });
+    const staleZeroProgressDom = staleZeroProgressInstance.getDom();
+    assert.ok(staleZeroProgressDom.innerHTML.includes("fa-door-open"));
+    assert.ok(!staleZeroProgressDom.innerHTML.includes("<progress"));
+    assert.ok(!staleZeroProgressDom.innerHTML.includes("0%"));
+
     const finishedProgramInstance = createInstance({
       config: {
         showDeviceIcon: false,

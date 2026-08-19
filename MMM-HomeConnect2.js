@@ -75,12 +75,15 @@ function computeProgressDisplayState({
     );
   }
 
+  // A reported 0 % is only meaningful while a program actually runs. Appliances
+  // reset progress to 0 when a cycle ends and then stop updating it, so an idle
+  // appliance carrying that leftover value must fall back to the other sources
+  // (or show no bar at all) instead of claiming a program is at 0 %.
   const canTrustExplicitProgress =
     !suppressSelectedProgramRuntime &&
     progressNumeric !== undefined &&
-    (progressNumeric >= 100 ||
-      progressNumeric > 0 ||
-      !(effectiveRemainingSeconds > 0 && effectiveOperationStateActive));
+    (progressNumeric > 0 ||
+      (effectiveOperationStateActive && !(effectiveRemainingSeconds > 0)));
 
   let percent;
   let progressSource = "none";

@@ -69,6 +69,23 @@ function setGlobalBuiltin(name, value) {
   assert.strictEqual(device._initialRemaining, 1980);
   assert.ok(Number.isFinite(device._remainingObservedAt));
 
+  // Opening the door after a cycle moves the appliance to Ready/Inactive and it
+  // stops sending progress. A leftover value must not survive that transition,
+  // otherwise a long-running instance keeps painting a bar the appliance no
+  // longer reports while a freshly started one shows nothing.
+  hc.applyEventToDevice(device, {
+    key: "BSH.Common.Status.ProgramProgress",
+    value: { value: "0" }
+  });
+  hc.applyEventToDevice(device, {
+    key: "BSH.Common.Status.OperationState",
+    value: "BSH.Common.EnumType.OperationState.Ready"
+  });
+
+  assert.strictEqual(device.ProgramProgress, undefined);
+  assert.strictEqual(device["BSH.Common.Status.ProgramProgress"], undefined);
+  assert.strictEqual(device["BSH.Common.Option.ProgramProgress"], undefined);
+
   hc.applyEventToDevice(device, {
     key: "Refrigeration.Common.Status.Door.Freezer",
     value: "BSH.Common.EnumType.DoorState.Open"
