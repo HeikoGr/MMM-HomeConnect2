@@ -23,6 +23,8 @@ const NodeHelper = require("node_helper"),
 
 const ACTIVE_PROGRAM_RETRY_DELAY_MS = 5000; // 5s
 const ACTIVE_PROGRAM_MAX_RETRIES = 3; // Maximum number of retries for active program requests
+// A forced active-program fetch for an appliance stays good for this long, so a
+// burst of SSE deltas on one device cannot turn into one API round per event.
 const FORCED_ACTIVE_PROGRAM_DEDUP_WINDOW_MS = 15000;
 const FULL_SNAPSHOT_INTERVAL_MS = 30 * 60 * 1000;
 // clientInstances has no disconnect hook (MagicMirror's node_helper API doesn't
@@ -151,21 +153,19 @@ module.exports = NodeHelper.create({
   sessionAuthenticated: false,
   authFlowInProgress: false,
   deviceRefreshInFlight: false,
-  programFetchInFlight: false,
   fullSnapshotTimer: null,
   hcInitRetryTimer: null,
   hcInitRetryAttempts: 0,
   headlessAuthRetryTimer: null,
   invalidGrantRetryTimer: null,
   sessionOwnerConfig: null,
+  // One active-program fetch runs at a time. Devices requested while it runs and
+  // not already covered by it wait in pendingActiveProgramHaIds and are picked up
+  // the moment it finishes, instead of being lost until another SSE delta arrives.
   activeProgramFetchInFlight: false,
-  activeProgramFetchSignature: null,
-  // Devices whose "active program" request was dropped only because it
-  // collided with another fetch already in flight - not a real failure, so
-  // they're picked up again as soon as that fetch finishes instead of waiting
-  // for another SSE delta to re-trigger them (see handleGetActivePrograms).
+  inFlightActiveProgramHaIds: new Set(),
   pendingActiveProgramHaIds: new Set(),
-  recentForcedProgramFetch: null,
+  lastForcedProgramFetchAt: new Map(),
   debugStats: {
     lastApiCallTs: null,
     lastSseEventTs: null,
@@ -289,37 +289,6 @@ module.exports = NodeHelper.create({
     });
 
     return true;
-  },
-
-  buildActiveProgramFetchScopeKey(devices) {
-    const deviceIds = Array.isArray(devices)
-      ? devices
-        .map((device) => device && device.haId)
-        .filter((haId) => typeof haId === "string" && haId.length)
-        .sort()
-      : [];
-
-    return deviceIds.join(",") || "all";
-  },
-
-  buildActiveProgramFetchSignature(devices, requester) {
-    return `${requester || "unknown"}:${this.buildActiveProgramFetchScopeKey(devices)}`;
-  },
-
-  hasRecentForcedProgramFetch(scopeKey, now = Date.now()) {
-    const recentFetch = this.recentForcedProgramFetch;
-    if (!recentFetch || recentFetch.scopeKey !== scopeKey) {
-      return false;
-    }
-
-    return now - recentFetch.completedAt < FORCED_ACTIVE_PROGRAM_DEDUP_WINDOW_MS;
-  },
-
-  rememberForcedProgramFetch(scopeKey, completedAt = Date.now()) {
-    this.recentForcedProgramFetch = {
-      scopeKey,
-      completedAt
-    };
   },
 
   // Warn about session settings a late client asked for but will not get. Purely
@@ -446,7 +415,7 @@ module.exports = NodeHelper.create({
       if (
         !this.sessionAuthenticated ||
         this.deviceRefreshInFlight ||
-        this.programFetchInFlight
+        this.activeProgramFetchInFlight
       ) {
         return;
       }
@@ -483,6 +452,9 @@ module.exports = NodeHelper.create({
     this.clearHomeConnectInitRetry();
     this.clearPeriodicFullSnapshotRefresh();
     this.pendingActiveProgramHaIds.clear();
+    this.inFlightActiveProgramHaIds.clear();
+    this.lastForcedProgramFetchAt.clear();
+    this.activeProgramFetchInFlight = false;
     if (this.deviceService && typeof this.deviceService.shutdown === "function") {
       this.deviceService.shutdown();
     }
@@ -691,15 +663,38 @@ module.exports = NodeHelper.create({
       this.deviceService && this.deviceService.devices
         ? Array.from(this.deviceService.devices.values())
         : [];
-    const targetDevices =
+    let targetDevices =
       haIds && haIds.length
         ? deviceArray.filter((device) => haIds.includes(device.haId))
         : deviceArray;
 
+    if (force) {
+      targetDevices = targetDevices.filter(
+        (device) =>
+          now - (this.lastForcedProgramFetchAt.get(device.haId) || 0) >=
+          FORCED_ACTIVE_PROGRAM_DEDUP_WINDOW_MS
+      );
+    }
+
     if (targetDevices.length === 0) {
-      moduleLog("debug", "No devices matched active program request", {
+      moduleLog("debug", "No devices left for active program request", {
         requester: requesterLabel,
-        requestedHaIds: haIds
+        requestedHaIds: haIds,
+        force
+      });
+      return;
+    }
+
+    if (this.activeProgramFetchInFlight) {
+      // Queue whatever the running fetch does not already cover. Devices it does
+      // cover need nothing: their data is on its way.
+      const uncovered = targetDevices
+        .map((device) => device.haId)
+        .filter((haId) => !this.inFlightActiveProgramHaIds.has(haId));
+      uncovered.forEach((haId) => this.pendingActiveProgramHaIds.add(haId));
+      moduleLog("debug", "Active program fetch already in flight", {
+        requester: requesterLabel,
+        queued: uncovered
       });
       return;
     }
@@ -710,48 +705,10 @@ module.exports = NodeHelper.create({
       force
     });
 
-    const scopeKey = this.buildActiveProgramFetchScopeKey(targetDevices);
-    if (force && this.hasRecentForcedProgramFetch(scopeKey, now)) {
-      moduleLog("debug", "Skipping recently completed forced active program request", {
-        requester: requesterLabel,
-        scopeKey
-      });
-      return;
-    }
-
-    const fetchSignature = this.buildActiveProgramFetchSignature(targetDevices, requesterLabel);
-    if (this.activeProgramFetchInFlight) {
-      if (this.activeProgramFetchSignature === fetchSignature) {
-        moduleLog("debug", "Skipping duplicate active program request while fetch in flight", {
-          requester: requesterLabel,
-          deviceCount: targetDevices.length,
-          force
-        });
-        return;
-      }
-
-      moduleLog("debug", "Skipping overlapping active program request while another fetch is in flight", {
-        requester: requesterLabel,
-        deviceCount: targetDevices.length,
-        force,
-        activeFetchSignature: this.activeProgramFetchSignature
-      });
-      // Not a failure, just bad timing (e.g. an SSE-triggered single-device
-      // fetch colliding with the full-snapshot batch) - queue it so it's
-      // picked up immediately once the in-flight fetch finishes, instead of
-      // being lost until another SSE delta happens to re-trigger it.
-      targetDevices.forEach((device) => this.pendingActiveProgramHaIds.add(device.haId));
-      return;
-    }
-
-    this.programFetchInFlight = true;
     this.activeProgramFetchInFlight = true;
-    this.activeProgramFetchSignature = fetchSignature;
+    this.inFlightActiveProgramHaIds = new Set(targetDevices.map((device) => device.haId));
     globalSession.lastActiveProgramFetch = now;
-    this.fetchActiveProgramsForDevices(targetDevices, requester, {
-      force,
-      scopeKey
-    });
+    this.fetchActiveProgramsForDevices(targetDevices, requester, { force });
   },
 
   socketNotificationReceived(notification, payload) {
@@ -809,7 +766,7 @@ module.exports = NodeHelper.create({
         authenticated: this.sessionAuthenticated,
         authFlowInProgress: this.authFlowInProgress,
         deviceRefreshInFlight: this.deviceRefreshInFlight,
-        programFetchInFlight: this.programFetchInFlight,
+        programFetchInFlight: this.activeProgramFetchInFlight,
         rateLimitUntil: this.getRateLimitUntil(),
         rateLimitRemainingMs: Math.max(0, this.getRateLimitUntil() - Date.now())
       }
@@ -1236,23 +1193,26 @@ module.exports = NodeHelper.create({
   },
 
   async fetchActiveProgramsForDevices(deviceArray, requestingInstanceId, requestMeta = {}) {
-    if (!this.deviceService) {
-      moduleLog("debug", "DeviceService not available - cannot fetch programs");
-      return;
-    }
-
-    if (!Array.isArray(deviceArray) || deviceArray.length === 0) {
-      moduleLog("debug", "No target devices provided for fetching active programs");
-      return;
-    }
-
-    moduleLog("info", `Fetching active programs for ${deviceArray.length} device(s)`);
-
-    this.emitInitStatus("fetching_programs", {
-      instanceId: requestingInstanceId
-    });
-
+    // Everything below runs inside the try so that the finally clause - which
+    // releases the in-flight slot and drains the pending queue - cannot be
+    // skipped by an early return.
     try {
+      if (!this.deviceService) {
+        moduleLog("debug", "DeviceService not available - cannot fetch programs");
+        return;
+      }
+
+      if (!Array.isArray(deviceArray) || deviceArray.length === 0) {
+        moduleLog("debug", "No target devices provided for fetching active programs");
+        return;
+      }
+
+      moduleLog("info", `Fetching active programs for ${deviceArray.length} device(s)`);
+
+      this.emitInitStatus("fetching_programs", {
+        instanceId: requestingInstanceId
+      });
+
       const results = [];
       const retryCandidates = [];
 
@@ -1364,12 +1324,14 @@ module.exports = NodeHelper.create({
     } catch (error) {
       this.handleActiveProgramFetchError(error);
     } finally {
-      if (requestMeta.force && requestMeta.scopeKey) {
-        this.rememberForcedProgramFetch(requestMeta.scopeKey);
+      if (requestMeta.force) {
+        const completedAt = Date.now();
+        this.inFlightActiveProgramHaIds.forEach((haId) =>
+          this.lastForcedProgramFetchAt.set(haId, completedAt)
+        );
       }
       this.activeProgramFetchInFlight = false;
-      this.activeProgramFetchSignature = null;
-      this.programFetchInFlight = false;
+      this.inFlightActiveProgramHaIds.clear();
 
       if (this.pendingActiveProgramHaIds.size > 0) {
         const pendingHaIds = [...this.pendingActiveProgramHaIds];

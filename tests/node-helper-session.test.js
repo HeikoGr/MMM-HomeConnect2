@@ -49,8 +49,9 @@ function resetHelperState() {
   helper.sharedConfigOwnerInstanceId = null;
   helper.sessionOwnerConfig = null;
   helper.activeProgramFetchInFlight = false;
-  helper.activeProgramFetchSignature = null;
-  helper.recentForcedProgramFetch = null;
+  helper.inFlightActiveProgramHaIds.clear();
+  helper.pendingActiveProgramHaIds.clear();
+  helper.lastForcedProgramFetchAt.clear();
   if (helper.fullSnapshotTimer) {
     clearInterval(helper.fullSnapshotTimer);
     helper.fullSnapshotTimer = null;
@@ -384,6 +385,17 @@ function registeredInstances() {
   );
   assert.strictEqual(helper.pendingActiveProgramHaIds.has("ha-2"), true);
 
+  // A device the running fetch already covers needs nothing queued: its data is
+  // on its way, so re-requesting it must not schedule a second round.
+  helper.handleGetActivePrograms({
+    instanceId: "sse_program_detected",
+    haIds: ["ha-1"],
+    force: true
+  });
+  await wait(10);
+  assert.strictEqual(helper.pendingActiveProgramHaIds.has("ha-1"), false);
+  assert.strictEqual(helper.pendingActiveProgramHaIds.size, 1);
+
   releaseWasherFetch();
   // fetchActiveProgramsForDevices waits 500ms between devices to avoid
   // hammering the API before its finally block (which drains the pending
@@ -408,13 +420,13 @@ function registeredInstances() {
     devices: new Map([["ha-1", { haId: "ha-1", name: "Washer" }]])
   };
   fetchCalls = 0;
-  helper.fetchActiveProgramsForDevices = (_devices, _instanceId, requestMeta = {}) => {
+  helper.fetchActiveProgramsForDevices = (devices, _instanceId, requestMeta = {}) => {
     fetchCalls += 1;
-    if (requestMeta.force && requestMeta.scopeKey) {
-      helper.rememberForcedProgramFetch(requestMeta.scopeKey, Date.now());
+    if (requestMeta.force) {
+      devices.forEach((device) => helper.lastForcedProgramFetchAt.set(device.haId, Date.now()));
     }
     helper.activeProgramFetchInFlight = false;
-    helper.activeProgramFetchSignature = null;
+    helper.inFlightActiveProgramHaIds.clear();
   };
 
   helper.handleGetActivePrograms({
