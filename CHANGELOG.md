@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.4.0](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.3.3...v1.4.0) (2026-08-20)
+
+
+### 🔌 Features
+
+* **api:** implement exponential backoff for token refresh and SSE retries ([2530255](https://github.com/HeikoGr/MMM-HomeConnect2/commit/25302552b49d3a509d22f258b89986df8f62c921))
+
+
+### 🐛 Fixes
+
+* **device:** seed PowerState from /settings for every appliance type ([50f295d](https://github.com/HeikoGr/MMM-HomeConnect2/commit/50f295db4cb4c529304652616085dc0c0d7b1eff))
+
 ## [1.3.3](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.3.2...v1.3.3) (2026-08-19)
 
 
