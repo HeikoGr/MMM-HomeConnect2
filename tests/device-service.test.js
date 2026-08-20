@@ -451,5 +451,148 @@ function createDeviceService(overrides = {}) {
     service.shutdown();
   }
 
+  // A repeated device snapshot must not tear down healthy SSE channels: the
+  // refresh callback changes per run, but the event handler identity must not.
+  {
+    const { service } = createDeviceService();
+    const subscribeCalls = [];
+    let closeCalls = 0;
+    let tokenRefreshes = 0;
+    let settingsFetches = 0;
+    const hcMock = {
+      subscribeDevice: (haId, type) => subscribeCalls.push(`${haId}:${type}`),
+      refreshTokens: () => {
+        tokenRefreshes += 1;
+        return Promise.resolve();
+      },
+      closeEventSources: () => {
+        closeCalls += 1;
+      },
+      getStatus: () => Promise.resolve({ success: true, data: { status: [] } }),
+      getSettings: () => {
+        settingsFetches += 1;
+        return Promise.resolve({ success: true, data: { settings: [] } });
+      },
+      applyEventToDevice: () => { }
+    };
+    service.attachClient(hcMock);
+    service.setConfig({ enableSSEHeartbeat: false });
+
+    const apiResult = {
+      data: { homeappliances: [{ haId: "ha-1", name: "Washer", connected: true }] }
+    };
+
+    service.handleGetDevicesSuccess(apiResult, () => { });
+    await wait(10);
+
+    const subscribesAfterFirst = subscribeCalls.length;
+    const closesAfterFirst = closeCalls;
+    assert.strictEqual(subscribesAfterFirst, 4, "Expected one channel with four event types");
+    assert.strictEqual(settingsFetches, 1, "Expected settings to be seeded once");
+
+    // Second snapshot with a brand new callback - the SSE session must survive.
+    service.handleGetDevicesSuccess(apiResult, () => { });
+    await wait(10);
+
+    assert.strictEqual(
+      subscribeCalls.length,
+      subscribesAfterFirst,
+      "Expected no re-subscription on a follow-up device snapshot"
+    );
+    assert.strictEqual(
+      closeCalls,
+      closesAfterFirst,
+      "Expected no SSE teardown on a follow-up device snapshot"
+    );
+    assert.strictEqual(tokenRefreshes, 1, "Expected no extra token refresh per snapshot");
+    assert.strictEqual(settingsFetches, 1, "Expected /settings not to be refetched per snapshot");
+
+    service.shutdown();
+  }
+
+  // The SSE watchdog rebuild is a channel-level operation: it must not invalidate
+  // the "settings already seeded" cache and cause a /settings refetch per device.
+  {
+    const { service } = createDeviceService();
+    let settingsFetches = 0;
+    service.attachClient({
+      subscribeDevice: () => { },
+      refreshTokens: () => Promise.resolve(),
+      closeEventSources: () => { },
+      getStatus: () => Promise.resolve({ success: true, data: { status: [] } }),
+      getSettings: () => {
+        settingsFetches += 1;
+        return Promise.resolve({ success: true, data: { settings: [] } });
+      },
+      applyEventToDevice: () => { }
+    });
+    service.setConfig({ enableSSEHeartbeat: false });
+
+    const apiResult = {
+      data: { homeappliances: [{ haId: "ha-1", name: "Washer", connected: true }] }
+    };
+    service.handleGetDevicesSuccess(apiResult, () => { });
+    await wait(10);
+    assert.strictEqual(settingsFetches, 1);
+
+    await service.reconnectEventSubscriptions();
+    await wait(10);
+
+    service.handleGetDevicesSuccess(apiResult, () => { });
+    await wait(10);
+
+    assert.strictEqual(
+      settingsFetches,
+      1,
+      "Expected the settings cache to survive an SSE channel rebuild"
+    );
+
+    service.shutdown();
+  }
+
+  // A 429 on the device fetch must engage the shared backoff and settle the run.
+  {
+    const rateLimitCalls = [];
+    let settled = 0;
+    const { service } = createDeviceService({
+      setRateLimitUntil: (ts) => rateLimitCalls.push(ts),
+      onRefreshSettled: () => {
+        settled += 1;
+      }
+    });
+    service.attachClient({
+      getHomeAppliances: () =>
+        Promise.resolve({
+          success: false,
+          statusCode: 429,
+          retryAfterSeconds: 120,
+          error: "Too Many Requests"
+        })
+    });
+
+    const before = Date.now();
+    service.getDevices(() => { });
+    await wait(10);
+
+    assert.strictEqual(rateLimitCalls.length, 1, "Expected the global rate limit to be set");
+    assert.ok(
+      rateLimitCalls[0] >= before + 120 * 1000,
+      "Expected Retry-After to drive the backoff window"
+    );
+    assert.strictEqual(settled, 1, "Expected the failed refresh to settle exactly once");
+  }
+
+  // A refresh that never reaches the API must still settle its in-flight state.
+  {
+    let settled = 0;
+    const { service } = createDeviceService({
+      onRefreshSettled: () => {
+        settled += 1;
+      }
+    });
+    service.getDevices(() => { });
+    assert.strictEqual(settled, 1, "Expected the hc-not-ready exit to settle the refresh");
+  }
+
   console.log("device-service.test.js OK");
 })();

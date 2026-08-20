@@ -43,6 +43,7 @@ function runUnitTests() {
   runNode("device-service.test.js");
   runNode("frontend-render.test.js");
   runNode("homeconnect-api.test.js");
+  runNode("retry-backoff.test.js");
   runNode("program-service.test.js");
 }
 

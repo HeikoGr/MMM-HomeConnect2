@@ -661,5 +661,104 @@ function registeredInstances() {
   );
   assert.strictEqual(helper.isAuthFlowInProgress(), false);
 
+  // The scheduled snapshot must stay off the API while a rate-limit backoff is
+  // active, and it must not stay disabled forever after a refresh that never
+  // settled (a single 429 used to latch deviceRefreshInFlight on true).
+  {
+    resetHelperState();
+    helper.hc = {};
+    helper.sessionAuthenticated = true;
+    // resetHelperState() does not touch programService, and earlier blocks leave
+    // a partial stub behind - install a complete one so nothing in this block
+    // trips over a missing method.
+    helper.programService = {
+      applyProgramResult: () => null,
+      broadcastProgramData: () => { },
+      handleActiveProgramFetchError: () => { }
+    };
+    let refreshes = 0;
+    helper.deviceService = {
+      getDevices(callback) {
+        refreshes += 1;
+        callback("DEVICES_UPDATE", []);
+      }
+    };
+    helper.sendSocketNotification = () => { };
+    helper.emitInitStatus = () => { };
+    const originalGetActivePrograms = helper.handleGetActivePrograms;
+    helper.handleGetActivePrograms = () => { };
+
+    const originalSetInterval = global.setInterval;
+    const originalClearInterval = global.clearInterval;
+    let tick = null;
+    global.setInterval = (callback) => {
+      tick = callback;
+      return { callback };
+    };
+    global.clearInterval = () => { };
+
+    try {
+      helper.schedulePeriodicFullSnapshotRefresh();
+      assert.ok(tick, "Expected the periodic snapshot to be scheduled");
+
+      helper.setRateLimitUntil(Date.now() + 120 * 1000);
+      tick();
+      assert.strictEqual(refreshes, 0, "Expected no snapshot while rate limited");
+
+      helper.setRateLimitUntil(0);
+      tick();
+      assert.strictEqual(refreshes, 1, "Expected the snapshot to run once the backoff expired");
+
+      // Simulate a refresh that started but never settled.
+      helper.deviceRefreshInFlight = true;
+      helper.deviceRefreshStartedAt = Date.now();
+      tick();
+      assert.strictEqual(refreshes, 1, "Expected a running refresh to suppress the snapshot");
+
+      helper.deviceRefreshStartedAt = Date.now() - 10 * 60 * 1000;
+      tick();
+      assert.strictEqual(refreshes, 2, "Expected a stuck in-flight flag to be cleared and recovered");
+    } finally {
+      helper.clearPeriodicFullSnapshotRefresh();
+      helper.handleGetActivePrograms = originalGetActivePrograms;
+      global.setInterval = originalSetInterval;
+      global.clearInterval = originalClearInterval;
+      helper.setRateLimitUntil(0);
+    }
+  }
+
+  // A 429 reported by the API client itself (token endpoint, SSE channels) must
+  // engage the shared backoff the REST side honours.
+  {
+    resetHelperState();
+    // resetHelperState() does not touch programService, and earlier blocks leave
+    // a partial stub behind - install a complete one so nothing in this block
+    // trips over a missing method.
+    helper.programService = {
+      applyProgramResult: () => null,
+      broadcastProgramData: () => { },
+      handleActiveProgramFetchError: () => { }
+    };
+    const listeners = new Map();
+    helper.hc = {
+      on: (event, cb) => listeners.set(event, cb)
+    };
+    helper.emitInitStatus = () => { };
+
+    helper.setupHomeConnectRateLimitReporting();
+    const before = Date.now();
+    listeners.get("rateLimit")({ source: "token", retryAfterSeconds: 300 });
+
+    assert.ok(helper.isRateLimited(), "Expected the client-side 429 to engage the backoff");
+    assert.ok(helper.getRateLimitUntil() >= before + 300 * 1000);
+
+    // A shorter window must not shorten an already longer backoff.
+    const longWindow = helper.getRateLimitUntil();
+    listeners.get("rateLimit")({ source: "sse:device:ha-1", retryAfterSeconds: 30 });
+    assert.strictEqual(helper.getRateLimitUntil(), longWindow);
+
+    helper.setRateLimitUntil(0);
+  }
+
   console.log("node-helper-session.test.js OK");
 })();

@@ -27,6 +27,7 @@ const ACTIVE_PROGRAM_MAX_RETRIES = 3; // Maximum number of retries for active pr
 // burst of SSE deltas on one device cannot turn into one API round per event.
 const FORCED_ACTIVE_PROGRAM_DEDUP_WINDOW_MS = 15000;
 const FULL_SNAPSHOT_INTERVAL_MS = 30 * 60 * 1000;
+const DEVICE_REFRESH_STUCK_TIMEOUT_MS = 5 * 60 * 1000;
 // clientInstances has no disconnect hook (MagicMirror's node_helper API doesn't
 // expose one), so entries only ever accumulate as browsers reload/change. Prune
 // any instance that hasn't sent a CONFIGURE in this long during the periodic
@@ -246,16 +247,12 @@ module.exports = NodeHelper.create({
     return this.authFlowInProgress;
   },
 
+  // Pure broadcast sink. The in-flight flag is released by DeviceService's
+  // onRefreshSettled hook instead: a failing fetch never sends a notification,
+  // so clearing the flag here left it stuck on true after a single 429 - which
+  // disabled the periodic snapshot until the next restart.
   makeDeviceRefreshCallback() {
-    const broadcast = this.broadcastToAllClients.bind(this);
-    let refreshCompleted = false;
-    return (notification, payload) => {
-      broadcast(notification, payload);
-      if (!refreshCompleted) {
-        refreshCompleted = true;
-        this.deviceRefreshInFlight = false;
-      }
-    };
+    return this.broadcastToAllClients.bind(this);
   },
 
   dispatchDeviceRefreshWithProgramSync({
@@ -270,6 +267,7 @@ module.exports = NodeHelper.create({
 
     moduleLog("debug", "Dispatching device refresh", { reason: reason || "device_refresh" });
     this.deviceRefreshInFlight = true;
+    this.deviceRefreshStartedAt = Date.now();
     const sendSocketNotification = this.makeDeviceRefreshCallback();
     let followUpRequested = false;
 
@@ -351,6 +349,10 @@ module.exports = NodeHelper.create({
       globalSession,
       onSseStale: this.handleSseStale.bind(this),
       onActiveProgramNeeded: this.handleActiveProgramNeededFromSse.bind(this),
+      onRefreshSettled: () => {
+        this.deviceRefreshInFlight = false;
+      },
+      setRateLimitUntil: this.setRateLimitUntil.bind(this),
       debugHooks: {
         recordApiCall: this.recordApiCall.bind(this),
         recordSseEvent: this.recordSseEvent.bind(this),
@@ -388,6 +390,22 @@ module.exports = NodeHelper.create({
     moduleLog("info", `Starting module helper: ${this.name}`);
   },
 
+  // Belt and braces for the in-flight guard: if a refresh somehow never settles,
+  // treat it as finished after DEVICE_REFRESH_STUCK_TIMEOUT_MS so the periodic
+  // snapshot recovers on its own instead of staying dead until a restart.
+  isDeviceRefreshInFlight() {
+    if (!this.deviceRefreshInFlight) {
+      return false;
+    }
+    const startedAt = this.deviceRefreshStartedAt || 0;
+    if (startedAt && Date.now() - startedAt > DEVICE_REFRESH_STUCK_TIMEOUT_MS) {
+      moduleLog("warn", "Device refresh never settled - clearing stale in-flight flag");
+      this.deviceRefreshInFlight = false;
+      return false;
+    }
+    return true;
+  },
+
   pruneStaleClientInstances() {
     const now = Date.now();
     globalSession.clientInstances.forEach((instanceId) => {
@@ -412,11 +430,21 @@ module.exports = NodeHelper.create({
         return;
       }
 
-      if (
-        !this.sessionAuthenticated ||
-        this.deviceRefreshInFlight ||
-        this.activeProgramFetchInFlight
-      ) {
+      if (!this.sessionAuthenticated || this.activeProgramFetchInFlight) {
+        return;
+      }
+
+      // The scheduled snapshot is the one caller that runs with nobody watching,
+      // so it must not spend quota while a backoff is active. Forced program
+      // fetches deliberately bypass the check downstream, hence the guard here.
+      if (this.isRateLimited()) {
+        const remainingSeconds = Math.ceil((this.getRateLimitUntil() - Date.now()) / 1000);
+        moduleLog("info", `Skipping scheduled snapshot - rate limited for another ${remainingSeconds}s`);
+        return;
+      }
+
+      if (this.isDeviceRefreshInFlight()) {
+        moduleLog("debug", "Skipping scheduled snapshot - a device refresh is still running");
         return;
       }
 
@@ -1092,6 +1120,27 @@ module.exports = NodeHelper.create({
     this.hcInitRetryAttempts = 0;
   },
 
+  // The API client reports 429s it hits on its own (token endpoint, SSE
+  // channels) - those never pass through the REST wrappers, so without this the
+  // REST side would keep spending quota during a penalty window it cannot see.
+  setupHomeConnectRateLimitReporting() {
+    this.hc.on("rateLimit", ({ source, retryAfterSeconds } = {}) => {
+      const seconds = Number.isFinite(retryAfterSeconds) ? Math.max(1, retryAfterSeconds) : 300;
+      const until = Date.now() + seconds * 1000;
+      if (until <= this.getRateLimitUntil()) {
+        return;
+      }
+      this.setRateLimitUntil(until);
+      moduleLog("warn", `Rate limit reported by ${source || "api client"} - backing off ${seconds}s`);
+      this.emitInitStatus("device_error", {
+        message: `Rate limit detected - wait ${seconds}s`,
+        rateLimitSeconds: seconds,
+        statusCode: 429,
+        isRateLimit: true
+      });
+    });
+  },
+
   setupHomeConnectRefreshToken() {
     this.hc.on("newRefreshToken", (refreshToken) => {
       persistRefreshToken(refreshToken);
@@ -1150,6 +1199,7 @@ module.exports = NodeHelper.create({
         });
 
       this.setupHomeConnectRefreshToken();
+      this.setupHomeConnectRateLimitReporting();
     });
   },
 
