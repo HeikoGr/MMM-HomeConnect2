@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.4.0...v1.4.1) (2026-09-19)
+
+
+### 🐛 Fixes
+
+* **device:** back off on per-appliance 429s and stop the snapshot burst ([967adcf](https://github.com/HeikoGr/MMM-HomeConnect2/commit/967adcfb2a0fa8c8b9da7fcda7e0000c758ddccd))
+
 ## [1.4.0](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.3.3...v1.4.0) (2026-08-20)
 
 
