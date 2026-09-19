@@ -594,5 +594,118 @@ function createDeviceService(overrides = {}) {
     assert.strictEqual(settled, 1, "Expected the hc-not-ready exit to settle the refresh");
   }
 
+  // A 429 on a per-appliance status fetch must engage the shared backoff as well.
+  // getStatus() resolves with success:false instead of rejecting, so this used to
+  // pass by unnoticed - no log, and no backoff to stop the next snapshot from
+  // repeating the burst that had just been throttled.
+  {
+    const rateLimitCalls = [];
+    const { service, logs } = createDeviceService({
+      setRateLimitUntil: (ts) => rateLimitCalls.push(ts)
+    });
+    service.attachClient({
+      getStatus: () =>
+        Promise.resolve({
+          success: false,
+          statusCode: 429,
+          retryAfterSeconds: 90,
+          error: "Too Many Requests"
+        })
+    });
+
+    const before = Date.now();
+    await service.fetchDeviceStatus({ haId: "ha-1", name: "Washer" });
+
+    assert.strictEqual(rateLimitCalls.length, 1, "Expected a 429 on /status to set the backoff");
+    assert.ok(
+      rateLimitCalls[0] >= before + 90 * 1000,
+      "Expected Retry-After to drive the backoff window"
+    );
+    assert.ok(
+      logs.some(
+        (entry) => entry.level === "warn" && entry.message.includes("Rate limit on status fetch")
+      ),
+      "Expected the rate limit to be logged"
+    );
+  }
+
+  // Same for /settings, and without Retry-After the fallback window applies. The
+  // appliance must stay unseeded so the settings fetch is retried later.
+  {
+    const rateLimitCalls = [];
+    const { service } = createDeviceService({
+      setRateLimitUntil: (ts) => rateLimitCalls.push(ts)
+    });
+    service.attachClient({
+      getSettings: () =>
+        Promise.resolve({ success: false, statusCode: 429, error: "Too Many Requests" })
+    });
+
+    const before = Date.now();
+    await service.fetchDeviceSettings({ haId: "ha-oven", name: "Oven" });
+
+    assert.strictEqual(rateLimitCalls.length, 1, "Expected a 429 on /settings to set the backoff");
+    assert.ok(
+      rateLimitCalls[0] >= before + 5 * 60 * 1000,
+      "Expected the fallback backoff without a Retry-After header"
+    );
+    assert.strictEqual(
+      service.shouldFetchInitialSettings({ haId: "ha-oven" }),
+      true,
+      "A rate limited settings fetch must stay retryable"
+    );
+  }
+
+  // A snapshot must not fire every appliance's detail fetches at once: that burst
+  // is what the Home Connect rate limiter answers with 429 in the first place.
+  {
+    const { service } = createDeviceService();
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const statusFetches = [];
+    service.setConfig({ enableSSEHeartbeat: false });
+    service.attachClient({
+      subscribeDevice: () => { },
+      refreshTokens: () => Promise.resolve(),
+      closeEventSources: () => { },
+      applyEventToDevice: () => { },
+      getStatus: async (haId) => {
+        statusFetches.push(haId);
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await wait(20);
+        inFlight -= 1;
+        return { success: true, data: { status: [] } };
+      },
+      getSettings: async () => {
+        await wait(20);
+        return { success: true, data: { settings: [] } };
+      }
+    });
+
+    service.handleGetDevicesSuccess(
+      {
+        data: {
+          homeappliances: [
+            { haId: "ha-1", name: "Washer", connected: true },
+            { haId: "ha-2", name: "Dryer", connected: true }
+          ]
+        }
+      },
+      () => { }
+    );
+
+    await wait(700);
+
+    assert.deepStrictEqual(
+      statusFetches,
+      ["ha-1", "ha-2"],
+      "Expected every appliance of the snapshot to be enriched"
+    );
+    assert.strictEqual(maxInFlight, 1, "Expected appliances to be enriched one at a time");
+
+    service.shutdown();
+  }
+
   console.log("device-service.test.js OK");
 })();
