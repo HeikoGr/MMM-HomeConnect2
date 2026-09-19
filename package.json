@@ -45,9 +45,9 @@
     "qrcode": "^1.5.4"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.13",
-    "@commitlint/cli": "^21.2.2",
-    "@commitlint/config-conventional": "^21.2.2",
+    "@biomejs/biome": "^2.5.14",
+    "@commitlint/cli": "^21.2.3",
+    "@commitlint/config-conventional": "^21.2.3",
     "lint-staged": "^17.5.1",
     "simple-git-hooks": "^2.14.0"
   },
