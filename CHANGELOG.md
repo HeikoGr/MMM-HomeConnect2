@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.2](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.4.1...v1.4.2) (2026-09-22)
+
+
+### 🐛 Fixes
+
+* render the module DOM without innerHTML and surface init failures ([387bca8](https://github.com/HeikoGr/MMM-HomeConnect2/commit/387bca81e2b50db66c249586c41c3e13dbfc3273))
+
 ## [1.4.1](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.4.0...v1.4.1) (2026-09-19)
 
 
