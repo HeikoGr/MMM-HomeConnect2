@@ -1,8 +1,11 @@
 "use strict";
 
 const assert = require("assert");
+const deviceCardRenderer = require("../lib/device-card-renderer");
 const deviceUtils = require("../lib/device-utils");
+const domBuilder = require("../lib/dom-builder");
 const shared = require("../lib/mmm-shared/mmm-shared");
+const { createFakeDocument } = require("./helpers/fake-dom");
 
 const modulePath = require.resolve("../MMM-HomeConnect2.js");
 
@@ -24,6 +27,8 @@ function installFrontendGlobals() {
 
   globalThis.config = { language: "en" };
   globalThis.window = {
+    HomeConnectDomBuilder: domBuilder,
+    HomeConnectDeviceCardRenderer: deviceCardRenderer,
     HomeConnectDeviceUtils: {
       parseRemainingSeconds: deviceUtils.parseRemainingSeconds,
       parseStartInRelativeSeconds: deviceUtils.parseStartInRelativeSeconds,
@@ -39,12 +44,7 @@ function installFrontendGlobals() {
       parseOperationState: deviceUtils.parseOperationState
     }
   };
-  globalThis.document = {
-    documentElement: { lang: "en" },
-    createElement() {
-      return { innerHTML: "" };
-    }
-  };
+  globalThis.document = createFakeDocument();
   Object.defineProperty(globalThis, "navigator", {
     configurable: true,
     writable: true,
@@ -108,6 +108,9 @@ function createInstance(overrides = {}) {
     },
     translate(key) {
       return key;
+    },
+    file(name) {
+      return `modules/MMM-HomeConnect2/${name}`;
     },
     updateDom() { },
     sendSocketNotification() { }
@@ -460,7 +463,6 @@ function createInstance(overrides = {}) {
 
     const delayedStartNotifications = [];
     const delayedStartRecoveryInstance = createInstance();
-    delayedStartRecoveryInstance.lastActiveProgramRequestTs = Date.now();
     delayedStartRecoveryInstance.sendSocketNotification = (notification, payload) => {
       delayedStartNotifications.push({ notification, payload });
     };
@@ -577,7 +579,7 @@ function createInstance(overrides = {}) {
       ]
     });
     const runningEstimateHtml = runningEstimateInstance.getDom().innerHTML;
-    assert.ok(runningEstimateHtml.includes("<progress value='90'"));
+    assert.ok(runningEstimateHtml.includes('<progress value="90"'));
     assert.ok(runningEstimateHtml.includes("90%"));
 
     // A running program whose remaining time reached 0 is reported as finished -
@@ -920,6 +922,35 @@ function createInstance(overrides = {}) {
     assert.ok(rateLimitDom.innerHTML.includes("HTTP 429"));
     assert.ok(rateLimitDom.innerHTML.includes("Rate limit active - please wait 120s"));
 
+    // A transient init failure (network not up yet) shows a banner with the
+    // retry delay above the loading spinner instead of spinning silently.
+    const initRetryInstance = createInstance({
+      lastInitStatus: {
+        status: "hc_error",
+        message: "HomeConnect error: getaddrinfo ENOTFOUND <api.home-connect.com>",
+        retryInSeconds: 20
+      }
+    });
+    const initRetryHtml = initRetryInstance.getDom().innerHTML;
+    assert.ok(initRetryHtml.includes("HC_INIT_FAILED_TITLE"));
+    assert.ok(initRetryHtml.includes("HC_INIT_RETRY_IN 20s"));
+    assert.ok(
+      initRetryHtml.includes("ENOTFOUND &lt;api.home-connect.com&gt;"),
+      "Expected the error text to be HTML-escaped"
+    );
+    assert.ok(initRetryHtml.includes("LOADING_APPLIANCES"), "Expected the spinner to stay below the banner");
+
+    const longInitRetryHtml = createInstance({
+      lastInitStatus: { status: "hc_error", message: "HomeConnect error: timeout", retryInSeconds: 300 }
+    }).getDom().innerHTML;
+    assert.ok(longInitRetryHtml.includes("HC_INIT_RETRY_IN 5 min"));
+
+    // An hc_error whose text happens to match a BSH pattern gets one banner, not two.
+    const bshInitErrorHtml = createInstance({
+      lastInitStatus: { status: "hc_error", message: "HomeConnect error: BSH.Common.Error.Foo", retryInSeconds: 5 }
+    }).getDom().innerHTML;
+    assert.strictEqual(bshInitErrorHtml.split("hc-status-banner-title").length - 1, 1);
+
     const configMismatchInstance = createInstance({
       lastInitStatus: {
         status: "device_error",
@@ -985,6 +1016,99 @@ function createInstance(overrides = {}) {
     assert.ok(debugSessionDom.innerHTML.includes("rate limit remaining:"));
     assert.ok(debugSessionDom.innerHTML.includes("API counts"));
     assert.ok(debugSessionDom.innerHTML.includes("homeappliances"));
+
+    // F1: every API- or server-provided value is rendered as text. Markup in any
+    // of them must come out escaped and must never become an element.
+    const payload = "<img src=x onerror=alert(1)>";
+    const findInjected = (root) =>
+      root.findAll(
+        (element) =>
+          element.tagName === "script" ||
+          (element.tagName === "img" && element.getAttribute("src") === "x")
+      );
+
+    const hostileDeviceDom = createInstance({
+      config: { showDeviceIcon: true },
+      devices: [
+        {
+          name: `Washer ${payload}`,
+          type: "Washer",
+          PowerState: "On",
+          OperationState: "BSH.Common.EnumType.OperationState.Run",
+          ActiveProgramName: `Cotton ${payload}`,
+          ActiveProgramDetails: [payload],
+          ActiveProgramSource: "active",
+          ProgramProgress: 40
+        }
+      ],
+      lastInitStatus: { status: "device_error", message: `Rate limit ${payload}`, isRateLimit: true }
+    }).getDom();
+    assert.deepStrictEqual(findInjected(hostileDeviceDom), [], "Device values must not create elements");
+    assert.ok(hostileDeviceDom.innerHTML.includes("Washer &lt;img src=x onerror=alert(1)&gt;"));
+    assert.ok(hostileDeviceDom.innerHTML.includes("Cotton &lt;img"));
+    assert.ok(hostileDeviceDom.innerHTML.includes("Rate limit &lt;img"));
+    const [nameLabel] = hostileDeviceDom.findByClass("deviceNameLabel");
+    assert.strictEqual(nameLabel.textContent, `Washer ${payload}`, "Device name must survive verbatim as text");
+    const [deviceIcon] = hostileDeviceDom.findByClass("device_img");
+    assert.strictEqual(deviceIcon.getAttribute("src"), "modules/MMM-HomeConnect2/icons/Washer.png");
+
+    const bannerDoms = [
+      { status: "hc_error", message: payload, retryInSeconds: 5 },
+      { status: "device_error", message: `BSH.Common.Error.X ${payload}` },
+      { status: "device_error", message: payload, isConfigMismatch: true }
+    ].map((lastInitStatus) =>
+      createInstance({ lastInitStatus, config: { logLevel: "debug" }, debugStats: { apiCounters: { [payload]: 1 } } }).getDom()
+    );
+    bannerDoms.forEach((dom) => {
+      assert.deepStrictEqual(findInjected(dom), [], "Banner and debug values must not create elements");
+      assert.ok(dom.innerHTML.includes("&lt;img src=x"));
+    });
+
+    const hostileAuthDom = createInstance({
+      authInfo: {
+        status: "waiting",
+        verification_uri: "javascript:alert(1)",
+        verification_uri_complete: "javascript:alert(2)",
+        user_code: payload,
+        expires_in_minutes: 10
+      }
+    }).getDom();
+    assert.deepStrictEqual(findInjected(hostileAuthDom), []);
+    assert.deepStrictEqual(
+      hostileAuthDom.findAll((element) => element.tagName === "a"),
+      [],
+      "Non-http(s) verification URLs must not become links"
+    );
+    assert.ok(hostileAuthDom.innerHTML.includes("javascript:alert(1)"), "The URL is still shown as text");
+
+    const qrAuthDom = createInstance({
+      authInfo: {
+        status: "waiting",
+        verification_uri: "https://api.home-connect.com/security/oauth/device_verify",
+        user_code: "ABCD-EFGH",
+        verification_qr_svg: `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`,
+        expires_in_minutes: 10
+      }
+    }).getDom();
+    const [verificationLink] = qrAuthDom.findAll((element) => element.tagName === "a");
+    assert.strictEqual(verificationLink.getAttribute("href"), "https://api.home-connect.com/security/oauth/device_verify");
+    const [qrImage] = qrAuthDom.findByClass("auth-qr")[0].children;
+    assert.strictEqual(qrImage.tagName, "img", "The QR code is rendered as an image, not inline SVG markup");
+    assert.ok(qrImage.getAttribute("src").startsWith("data:image/svg+xml;charset=utf-8,%3Csvg"));
+    assert.deepStrictEqual(qrAuthDom.findAll((element) => element.tagName === "svg" || element.tagName === "script"), []);
+
+    const hostileAuthStatusDoms = [
+      { status: "polling", message: payload, attempt: 1, maxAttempts: 4, interval: 5 },
+      { status: "error", message: payload }
+    ].map((authStatus) => createInstance({ authStatus }).getDom());
+    hostileAuthStatusDoms.forEach((dom) => {
+      assert.deepStrictEqual(findInjected(dom), []);
+      assert.ok(dom.innerHTML.includes("&lt;img src=x"));
+    });
+    assert.strictEqual(
+      hostileAuthStatusDoms[0].findByClass("progress-fill")[0].getAttribute("style"),
+      "width: 25%"
+    );
 
 
     console.log("frontend-render.test.js OK");

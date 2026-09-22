@@ -290,14 +290,12 @@ function computeProgramDisplayState({
 }
 
 Module.register("MMM-HomeConnect2", {
-  updated: 0,
   devices: [],
   config: null,
   authInfo: null,
   authStatus: null,
   instanceId: null,
   deviceRuntimeHints: {},
-  lastActiveProgramRequestTs: 0,
   debugStats: null,
   lifecycle: null,
 
@@ -370,15 +368,14 @@ Module.register("MMM-HomeConnect2", {
     this.lifecycle.start();
   },
 
-  loaded(callback) {
-    callback();
-  },
-
   getScripts() {
-    // Use full module-relative path so the MagicMirror loader can find the file
+    // The loader treats any name containing "/" as a path from the MagicMirror
+    // root, so subdirectory scripts need the module prefix this.file() adds.
     return [
-      "modules/MMM-HomeConnect2/lib/mmm-shared/mmm-shared.js",
-      "modules/MMM-HomeConnect2/lib/device-utils.js"
+      this.file("lib/mmm-shared/mmm-shared.js"),
+      this.file("lib/device-utils.js"),
+      this.file("lib/dom-builder.js"),
+      this.file("lib/device-card-renderer.js")
     ];
   },
 
@@ -858,28 +855,6 @@ Module.register("MMM-HomeConnect2", {
     };
   },
 
-  getDeviceProgressHtml(displayState) {
-    const { presentation, runtime } = displayState;
-
-    if (presentation.delayedStartText) {
-      return `<div class='hc-finished'>${presentation.delayedStartText}</div>`;
-    }
-    if (runtime.wrinkleProtectionActive) {
-      return `<div class='hc-finished'>${this.translate("WRINKLE_PROTECTION_ACTIVE")}</div>`;
-    }
-    if (runtime.isFinished) {
-      return `<div class='hc-finished'>${this.translate("PROGRAM_FINISHED")}</div>`;
-    }
-    if (runtime.isIndeterminate) {
-      return `<progress max='100' width='95%'></progress><span class='hc-progress-label'>${this.translate("IN_PROGRESS")}</span>`;
-    }
-    if (runtime.percent !== undefined) {
-      return `<progress value='${runtime.percent}' max='100' width='95%'></progress><span class='hc-progress-label'>${runtime.percent}%</span>`;
-    }
-
-    return "";
-  },
-
   getRateLimitNotice() {
     const status = this.lastInitStatus || this.authStatus;
     if (!status || typeof status !== "object") {
@@ -905,7 +880,8 @@ Module.register("MMM-HomeConnect2", {
 
   getHomeConnectErrorNotice() {
     const status = this.lastInitStatus || this.authStatus;
-    if (!status || typeof status !== "object") {
+    // hc_error belongs to the init retry banner.
+    if (!status || typeof status !== "object" || status.status === "hc_error") {
       return null;
     }
 
@@ -932,38 +908,56 @@ Module.register("MMM-HomeConnect2", {
     };
   },
 
-  getRateLimitNoticeHtml() {
+  getDomBuilder() {
+    return window.HomeConnectDomBuilder;
+  },
+
+  // All status banners share one shape: a title plus one or more message lines.
+  createStatusBanner(title, messages) {
+    const { h } = this.getDomBuilder();
+    return h("div", { class: "hc-status-banner hc-status-banner-warning" }, [
+      h("div", { class: "hc-status-banner-title" }, title),
+      messages
+        .filter(Boolean)
+        .map((message) => h("div", { class: "hc-status-banner-message" }, message))
+    ]);
+  },
+
+  getRateLimitNoticeElement() {
     const notice = this.getRateLimitNotice();
-    if (!notice) {
-      return "";
-    }
-
-    return [
-      "<div class='hc-status-banner hc-status-banner-warning'>",
-      `<div class='hc-status-banner-title'>${notice.title}</div>`,
-      `<div class='hc-status-banner-message'>${notice.message}</div>`,
-      "</div>"
-    ].join("");
+    return notice ? this.createStatusBanner(notice.title, [notice.message]) : null;
   },
 
-  getHomeConnectErrorNoticeHtml() {
+  getHomeConnectErrorNoticeElement() {
     const notice = this.getHomeConnectErrorNotice();
-    if (!notice) {
-      return "";
-    }
-
-    return [
-      "<div class='hc-status-banner hc-status-banner-warning'>",
-      `<div class='hc-status-banner-title'>${notice.title}</div>`,
-      `<div class='hc-status-banner-message'>${notice.message}</div>`,
-      "</div>"
-    ].join("");
+    return notice ? this.createStatusBanner(notice.title, [notice.message]) : null;
   },
 
-  getConfigMismatchNoticeHtml() {
+  // A failed HomeConnect init (typically network/DNS not up yet after a reboot)
+  // is retried by the backend with backoff. Without this banner the module would
+  // show "Loading appliances" for minutes with no hint that anything went wrong.
+  getInitRetryNoticeElement() {
+    const status = this.lastInitStatus;
+    if (!status || typeof status !== "object" || status.status !== "hc_error") {
+      return null;
+    }
+
+    const retryInSeconds = Math.round(Number(status.retryInSeconds));
+    let retryText = "";
+    if (Number.isFinite(retryInSeconds) && retryInSeconds > 0) {
+      const delayText =
+        retryInSeconds < 90 ? `${retryInSeconds}s` : `${Math.round(retryInSeconds / 60)} min`;
+      retryText = `${this.translate("HC_INIT_RETRY_IN")} ${delayText}`;
+    }
+    const errorText = typeof status.message === "string" ? status.message.trim() : "";
+
+    return this.createStatusBanner(this.translate("HC_INIT_FAILED_TITLE"), [errorText, retryText]);
+  },
+
+  getConfigMismatchNoticeElement() {
     const status = this.lastInitStatus;
     if (!status || typeof status !== "object" || status.isConfigMismatch !== true) {
-      return "";
+      return null;
     }
 
     const mismatchKeys = Array.isArray(status.mismatchKeys) ? status.mismatchKeys : [];
@@ -979,257 +973,187 @@ Module.register("MMM-HomeConnect2", {
         ? status.message.trim()
         : fallbackMessage;
 
-    return [
-      "<div class='hc-status-banner hc-status-banner-warning'>",
-      `<div class='hc-status-banner-title'>${this.translate("CONFIG_MISMATCH_TITLE")}</div>`,
-      `<div class='hc-status-banner-message'>${message}</div>`,
-      "</div>"
-    ].join("");
-  },
-
-  getStatusIconsHtml(device, displayState) {
-    const { runtime } = displayState;
-    let programIcon = "";
-    if (runtime.explicitlyDisconnected) {
-      programIcon =
-        "<i class='fa fa-chain-broken deviceStatusIcon deviceStatusIconOffline' title='Device not connected'></i>";
-    } else if (device.PowerState !== "Off" && runtime.operationStateDelayedStart) {
-      programIcon = "<i class='fa fa-clock-o deviceStatusIcon' title='Delayed start'></i>";
-    } else if (device.PowerState !== "Off" && runtime.operationStatePaused) {
-      programIcon = "<i class='fa fa-pause deviceStatusIcon' title='Program paused'></i>";
-    } else if (device.PowerState !== "Off" && runtime.programRunning) {
-      programIcon = "<i class='fa fa-play deviceStatusIcon' title='Program running'></i>";
-    }
-
-    const statusIcons = [];
-
-    if (programIcon) {
-      statusIcons.push(programIcon);
-    } else if (device.PowerState === "On" || device.PowerState === "Standby") {
-      statusIcons.push(
-        `<i class='fa fa-toggle-on deviceStatusIcon' title='${device.PowerState}'></i>`
-      );
-    } else if (device.PowerState === "Off") {
-      statusIcons.push("<i class='fa fa-toggle-off deviceStatusIcon' title='Power off'></i>");
-    }
-
-    if (device.DoorState === "Open") {
-      statusIcons.push("<i class='fa fa-door-open deviceStatusIcon' title='Door Open'></i>");
-    }
-
-    if (device.Lighting === true) {
-      statusIcons.push("<i class='fa fa-lightbulb-o deviceStatusIcon' title='Light On'></i>");
-    }
-
-    return statusIcons.join("");
+    return this.createStatusBanner(this.translate("CONFIG_MISMATCH_TITLE"), [message]);
   },
 
   renderDeviceCard(device, runtimeHints, deviceUtils) {
     if (!deviceUtils.shouldDisplayDevice(device, this.config)) {
-      return "";
+      return null;
     }
 
-    const displayState = this.buildDeviceDisplayState(device, runtimeHints, deviceUtils);
-    const { runtime, presentation } = displayState;
-    const progressBarHtml = this.getDeviceProgressHtml(displayState);
-    const containerClasses = ["deviceContainer"];
-    if (!this.config.showDeviceIcon) {
-      containerClasses.push("deviceContainerWithoutDeviceIcon");
-    }
-    if (runtime.explicitlyDisconnected) {
-      containerClasses.push("deviceOffline");
-    }
-
-    let container = `<div class='${containerClasses.join(" ")}'>`;
-    if (this.config.showDeviceIcon) {
-      if (displayState.imageName) {
-        container += `<img src='modules/MMM-HomeConnect2/icons/${displayState.imageName}' class='device_img'>`;
-      } else {
-        container += `<div class='device_img deviceIconFallback'><i class='fa ${displayState.fallbackIconClass}'></i></div>`;
-      }
-    }
-    container += `<div class='deviceStatusIcons'>${this.getStatusIconsHtml(device, displayState)}</div>`;
-    container += `<div class='deviceName bright small'><span class='deviceNameLabel'>${displayState.deviceName}</span>`;
-    if (presentation.programMeta) {
-      container += `<div class='deviceProgram dimmed xsmall'>${presentation.programMeta}</div>`;
-    }
-    if (presentation.programSupplement) {
-      container += `<div class='deviceProgramDetails dimmed xsmall'>${presentation.programSupplement}</div>`;
-    }
-    if (presentation.detailText) {
-      container += `<div class='deviceProgramDetails dimmed xsmall'>${presentation.detailText}</div>`;
-    }
-    if (presentation.alertText) {
-      container += `<div class='deviceAlert xsmall'>${presentation.alertText}</div>`;
-    }
-    container += "</div>";
-    container += `<div class='deviceStatus dimmed xsmall'>${presentation.statusText}</div>`;
-    container += `<div class='deviceProgressBar'>${progressBarHtml}</div>`;
-    if (presentation.showProgressDebug) {
-      container += `<div class='hc-device-debug'>${presentation.progressDebug}</div>`;
-    }
-    container += "</div>";
-
-    return container;
+    return window.HomeConnectDeviceCardRenderer.renderDeviceCard({
+      device,
+      displayState: this.buildDeviceDisplayState(device, runtimeHints, deviceUtils),
+      showDeviceIcon: Boolean(this.config.showDeviceIcon),
+      translate: (key) => this.translate(key),
+      iconUrl: (imageName) => this.file(`icons/${imageName}`)
+    });
   },
 
   getDom() {
+    const { h } = this.getDomBuilder();
     const div = document.createElement("div");
+    const append = (...nodes) => nodes.flat().forEach((node) => node && div.appendChild(node));
     const runtimeHints = this.deviceRuntimeHints || (this.deviceRuntimeHints = {});
     const deviceUtils = this.getDeviceUtils();
-    const rateLimitNoticeHtml = this.getRateLimitNoticeHtml();
-    const homeConnectErrorNoticeHtml = this.getHomeConnectErrorNoticeHtml();
-    const configMismatchNoticeHtml = this.getConfigMismatchNoticeHtml();
 
     // Show authentication info if available
     if (this.authInfo && this.authInfo.status === "waiting") {
-      div.innerHTML = this.getAuthHTML();
+      append(this.getAuthElement());
       return div;
     }
 
     // Show authentication status if available
     if (this.authStatus && this.authStatus.status === "polling") {
-      div.innerHTML = this.getAuthStatusHTML();
+      append(this.getAuthStatusElement());
       return div;
     }
 
     // Show error if authentication failed
     if (this.authStatus && this.authStatus.status === "error") {
-      div.innerHTML = this.getAuthErrorHTML();
+      append(this.getAuthErrorElement());
       return div;
     }
+
+    const notices = [
+      this.getRateLimitNoticeElement(),
+      this.getInitRetryNoticeElement(),
+      this.getHomeConnectErrorNoticeElement(),
+      this.getConfigMismatchNoticeElement()
+    ];
 
     // Show loading message if no devices yet
     if (!this.devices || this.devices.length === 0) {
-      const loadingHtml =
-        "<div class='small'>" +
-        `<i class='fa fa-cog fa-spin'></i> ${this.translate("SESSION_BASED_AUTH")}<br>` +
-        `<span class='dimmed'>${this.translate("LOADING_APPLIANCES")}...</span>` +
-        "</div>";
-      div.innerHTML = `${rateLimitNoticeHtml}${homeConnectErrorNoticeHtml}${configMismatchNoticeHtml}${loadingHtml}`;
+      append(
+        notices,
+        h("div", { class: "small" }, [
+          h("i", { class: "fa fa-cog fa-spin" }),
+          ` ${this.translate("SESSION_BASED_AUTH")}`,
+          h("br"),
+          h("span", { class: "dimmed" }, `${this.translate("LOADING_APPLIANCES")}...`)
+        ])
+      );
       return div;
     }
 
-    const wrapper = this.devices
+    const cards = this.devices
       .map((device) => this.renderDeviceCard(device, runtimeHints, deviceUtils))
-      .filter(Boolean)
-      .join("");
+      .filter(Boolean);
 
-    if (wrapper === "") {
-      div.innerHTML = `${rateLimitNoticeHtml}${homeConnectErrorNoticeHtml}${configMismatchNoticeHtml}<div class='dimmed small'>${this.translate("NO_ACTIVE_APPLIANCES")}</div>${this.getDebugPanel()}`;
+    if (cards.length === 0) {
+      append(
+        notices,
+        h("div", { class: "dimmed small" }, this.translate("NO_ACTIVE_APPLIANCES")),
+        this.getDebugPanel()
+      );
       return div;
     }
 
-    const debugPanel = this.getDebugPanel();
-    div.innerHTML = `${rateLimitNoticeHtml}${homeConnectErrorNoticeHtml}${configMismatchNoticeHtml}${wrapper}${debugPanel}`;
+    append(notices, cards, this.getDebugPanel());
     return div;
   },
 
-  getAuthHTML() {
-    let html = "";
-    html += "<div class='auth-container'>";
-    html += `<div class='auth-header'>🔐 ${this.translate("AUTH_TITLE")}</div>`;
-
-    html += "<div class='auth-step'>";
-    html += `<div class='auth-step-title'>📱 <strong>${this.translate("AUTH_STEP1")}</strong></div>`;
-    html += "<div class='auth-step-content'>";
-    html += `<div class='auth-url'><a href='${this.authInfo.verification_uri}'>${this.authInfo.verification_uri}</a></div>`;
-    html += "</div>";
-    html += "</div>";
-
-    html += "<div class='auth-step'>";
-    html += `<div class='auth-step-title'>🔑 <strong>${this.translate("AUTH_STEP2")}</strong></div>`;
-    html += "<div class='auth-step-content'>";
-    html += `<div class='auth-code'>${this.authInfo.user_code}</div>`;
-    html += "</div>";
-    html += "</div>";
-
-    html += "<div class='auth-step'>";
-    html += `<div class='auth-step-title'>🔗 <strong>${this.translate("AUTH_STEP_DIRECT")}</strong></div>`;
-    html += "<div class='auth-step-content'>";
-    // Prefer QR SVG if provided by the helper; fallback to direct link
-    if (this.authInfo.verification_qr_svg) {
-      html += `<div class='auth-qr'>${this.authInfo.verification_qr_svg}</div>`;
-    } else if (this.authInfo.verification_uri_complete) {
-      html += `<div class='auth-url'><a href='${this.authInfo.verification_uri_complete}'>${this.authInfo.verification_uri_complete}</a></div>`;
-    }
-    html += "</div>";
-    html += "</div>";
-
-    html += "<div class='auth-footer'>";
-    html += `<div class='auth-timer'>⏱️ ${this.translate("AUTH_CODE_EXPIRES")} ${this.authInfo.expires_in_minutes} ${this.translate("AUTH_MINUTES")}</div>`;
-    html += "</div>";
-
-    html += `<div class='auth-waiting'>${this.translate("AUTH_WAITING")}</div>`;
-    html += "</div>";
-
-    return html;
+  // Links from the OAuth server are only rendered as links when they are http(s).
+  createAuthLink(url) {
+    const { h, isSafeHttpUrl } = this.getDomBuilder();
+    const content = isSafeHttpUrl(url) ? h("a", { href: url }, url) : url;
+    return h("div", { class: "auth-url" }, content);
   },
 
-  getAuthStatusHTML() {
-    let html = "";
-    html += "<div class='auth-container'>";
-    html += `<div class='auth-header'>⏳ ${this.translate("AUTH_STATUS_WAITING")}</div>`;
+  createAuthStep(icon, titleKey, content) {
+    const { h } = this.getDomBuilder();
+    return h("div", { class: "auth-step" }, [
+      h("div", { class: "auth-step-title" }, [
+        `${icon} `,
+        h("strong", null, this.translate(titleKey))
+      ]),
+      h("div", { class: "auth-step-content" }, content)
+    ]);
+  },
 
-    // Progress bar
-    if (this.authStatus.attempt && this.authStatus.maxAttempts) {
-      const progress = Math.round((this.authStatus.attempt / this.authStatus.maxAttempts) * 100);
-      html += "<div class='progress-container'>";
-      html += "<div class='progress-bar'>";
-      html += `<div class='progress-fill' style='width: ${progress}%'></div>`;
-      html += "</div>";
-      html += "</div>";
+  getAuthElement() {
+    const { h } = this.getDomBuilder();
+    const authInfo = this.authInfo;
+
+    // The QR code SVG is generated by the helper. Rendering it as an image keeps
+    // it out of the document markup entirely - an <img> cannot run scripts.
+    let directContent = null;
+    if (authInfo.verification_qr_svg) {
+      directContent = h("div", { class: "auth-qr" }, [
+        h("img", {
+          src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(authInfo.verification_qr_svg)}`,
+          alt: "QR code"
+        })
+      ]);
+    } else if (authInfo.verification_uri_complete) {
+      directContent = this.createAuthLink(authInfo.verification_uri_complete);
     }
 
-    html += `<div class='auth-message'>${this.authStatus.message}</div>`;
+    return h("div", { class: "auth-container" }, [
+      h("div", { class: "auth-header" }, `🔐 ${this.translate("AUTH_TITLE")}`),
+      this.createAuthStep("📱", "AUTH_STEP1", this.createAuthLink(authInfo.verification_uri)),
+      this.createAuthStep("🔑", "AUTH_STEP2", h("div", { class: "auth-code" }, authInfo.user_code)),
+      this.createAuthStep("🔗", "AUTH_STEP_DIRECT", directContent),
+      h("div", { class: "auth-footer" }, [
+        h(
+          "div",
+          { class: "auth-timer" },
+          `⏱️ ${this.translate("AUTH_CODE_EXPIRES")} ${authInfo.expires_in_minutes} ${this.translate("AUTH_MINUTES")}`
+        )
+      ]),
+      h("div", { class: "auth-waiting" }, this.translate("AUTH_WAITING"))
+    ]);
+  },
 
-    if (this.authStatus.interval) {
-      html += `<div class='auth-info'>${this.translate("AUTH_POLL_INTERVAL")} ${this.authStatus.interval} ${this.translate("AUTH_SECONDS")}</div>`;
+  getAuthStatusElement() {
+    const { h } = this.getDomBuilder();
+    const authStatus = this.authStatus;
+
+    let progressBar = null;
+    if (authStatus.attempt && authStatus.maxAttempts) {
+      const progress = Math.round((authStatus.attempt / authStatus.maxAttempts) * 100);
+      progressBar = h("div", { class: "progress-container" }, [
+        h("div", { class: "progress-bar" }, [
+          h("div", { class: "progress-fill", style: `width: ${progress}%` })
+        ])
+      ]);
     }
 
-    html += "</div>";
-
-    return html;
+    return h("div", { class: "auth-container" }, [
+      h("div", { class: "auth-header" }, `⏳ ${this.translate("AUTH_STATUS_WAITING")}`),
+      progressBar,
+      h("div", { class: "auth-message" }, authStatus.message),
+      authStatus.interval
+        ? h(
+          "div",
+          { class: "auth-info" },
+          `${this.translate("AUTH_POLL_INTERVAL")} ${authStatus.interval} ${this.translate("AUTH_SECONDS")}`
+        )
+        : null
+    ]);
   },
 
   getDebugPanel() {
     const logLevel = (this.config?.logLevel || this.defaults.logLevel || "none").toLowerCase();
     if (logLevel !== "debug" || !this.debugStats) {
-      return "";
+      return null;
     }
+    const { h } = this.getDomBuilder();
     const formatTime = (ts) => (ts ? new Date(ts).toLocaleTimeString() : "n/a");
-    const escapeHtml = (str) =>
-      String(str)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
+    const row = (label, value) =>
+      h("div", { class: "hc-debug-row" }, [h("span", { class: "hc-debug-label" }, label), ` ${value}`]);
     const rows = [];
 
     // Status from INIT_STATUS gets rendered only in debug mode
     if (this.lastInitStatus && this.lastInitStatus.message) {
-      rows.push(
-        `<div class='hc-debug-row'><span class='hc-debug-label'>last init status:</span> ${this.lastInitStatus.message
-        }</div>`
-      );
+      rows.push(row("last init status:", this.lastInitStatus.message));
     }
 
     rows.push(
-      `<div class='hc-debug-row'><span class='hc-debug-label'>SSE traffic:</span> ${formatTime(
-        this.debugStats.lastSseTrafficTs || this.debugStats.lastSseEventTs
-      )}</div>`
+      row("SSE traffic:", formatTime(this.debugStats.lastSseTrafficTs || this.debugStats.lastSseEventTs))
     );
-    rows.push(
-      `<div class='hc-debug-row'><span class='hc-debug-label'>SSE event:</span> ${formatTime(
-        this.debugStats.lastSseEventTs
-      )}</div>`
-    );
-    rows.push(
-      `<div class='hc-debug-row'><span class='hc-debug-label'>API:</span> ${formatTime(
-        this.debugStats.lastApiCallTs
-      )}</div>`
-    );
+    rows.push(row("SSE event:", formatTime(this.debugStats.lastSseEventTs)));
+    rows.push(row("API:", formatTime(this.debugStats.lastApiCallTs)));
 
     const session = this.debugStats.session || null;
     if (session && typeof session === "object") {
@@ -1244,38 +1168,28 @@ Module.register("MMM-HomeConnect2", {
       ]
         .filter(Boolean)
         .join(", ");
-      rows.push(
-        `<div class='hc-debug-row'><span class='hc-debug-label'>session:</span> ${escapeHtml(
-          sessionFlags
-        )}</div>`
-      );
-      rows.push(
-        `<div class='hc-debug-row'><span class='hc-debug-label'>rate limit remaining:</span> ${rateLimitRemainingSec}s</div>`
-      );
+      rows.push(row("session:", sessionFlags));
+      rows.push(row("rate limit remaining:", `${rateLimitRemainingSec}s`));
     }
 
     const counters = this.debugStats.apiCounters || {};
     const counterEntries = Object.entries(counters);
     if (counterEntries.length) {
-      rows.push("<div class='hc-debug-subtitle'>API counts</div>");
+      rows.push(h("div", { class: "hc-debug-subtitle" }, "API counts"));
       counterEntries.sort(([a], [b]) => a.localeCompare(b));
       counterEntries.forEach(([name, value]) => {
-        rows.push(
-          `<div class='hc-debug-row'><span class='hc-debug-label'>${name}</span> ${value}</div>`
-        );
+        rows.push(row(name, value));
       });
     }
-    return `<div class='hc-debug-panel'>${rows.join("")}</div>`;
+    return h("div", { class: "hc-debug-panel" }, rows);
   },
 
-  getAuthErrorHTML() {
-    let html = "";
-    html += "<div class='auth-container error'>";
-    html += `<div class='auth-header'>❌ ${this.translate("AUTH_FAILED_TITLE")}</div>`;
-    html += `<div class='auth-message'>${this.authStatus.message}</div>`;
-    html += `<div class='auth-info'>${this.translate("AUTH_FAILED_INFO")}</div>`;
-    html += "</div>";
-
-    return html;
+  getAuthErrorElement() {
+    const { h } = this.getDomBuilder();
+    return h("div", { class: "auth-container error" }, [
+      h("div", { class: "auth-header" }, `❌ ${this.translate("AUTH_FAILED_TITLE")}`),
+      h("div", { class: "auth-message" }, this.authStatus.message),
+      h("div", { class: "auth-info" }, this.translate("AUTH_FAILED_INFO"))
+    ]);
   }
 }); // End Module

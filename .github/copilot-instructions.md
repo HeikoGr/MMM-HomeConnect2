@@ -26,4 +26,4 @@
 - MagicMirror² configuration reference: https://docs.magicmirror.builders/configuration/introduction.html
 - Node.js documentation: https://nodejs.org/en/docs
 - npm CLI documentation: https://docs.npmjs.com/cli/
-- PhotoPrism docs: https://docs.photoprism.app/
+- Home Connect Developer Portal (API reference, OAuth device flow): https://developer.home-connect.com/

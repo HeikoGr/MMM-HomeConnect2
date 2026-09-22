@@ -5,8 +5,8 @@ const Module = require("module");
 const os = require("os");
 const path = require("path");
 
-// retryAuthentication() deletes the refresh token file. Redirect that path into a
-// temp directory so running the tests never touches a real Home Connect session.
+// The auth paths persist and delete the refresh token file. Redirect that path into
+// a temp directory so running the tests never touches a real Home Connect session.
 const testRefreshTokenPath = path.join(os.tmpdir(), "mmm-homeconnect2-test-refresh-token.json");
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -613,54 +613,6 @@ function registeredInstances() {
   helper.emitInitStatus = originalEmitInitStatus;
   helper.warnAboutIgnoredSessionConfig = originalWarnAboutIgnoredSessionConfig;
 
-  // Manual auth retry must preserve all registered frontend instances.
-  resetHelperState();
-  helper.authService = {
-    setConfig() { }
-  };
-  helper.deviceService = {
-    devices: new Map(),
-    setConfig() { },
-    shutdown() { }
-  };
-  helper.activeProgramManager = {
-    clearAll() { }
-  };
-  helper.handleConfigNotificationFirstTime = () => {
-    helper.configReceived = true;
-  };
-  helper.handleConfigNotificationSubsequent = () => { };
-  helper.checkTokenAndInitialize = () => { };
-
-  helper.handleConfigNotification({ instanceId: "frontend-a" });
-  helper.handleConfigNotification({ instanceId: "frontend-b" });
-
-  const retryNotifications = [];
-  helper.sendSocketNotification = (notification, payload) => {
-    retryNotifications.push({ notification, payload });
-  };
-
-  helper.retryAuthentication();
-  helper.broadcastToAllClients("INIT_STATUS", {
-    status: "post_retry"
-  });
-
-  assert.strictEqual(
-    retryNotifications.filter((entry) => entry.payload?.instanceId === "frontend-a").length,
-    1
-  );
-  assert.strictEqual(
-    retryNotifications.filter((entry) => entry.payload?.instanceId === "frontend-b").length,
-    1
-  );
-
-  assert.strictEqual(
-    helper.isSessionAuthenticated(),
-    false,
-    "retryAuthentication() must drop the authenticated session"
-  );
-  assert.strictEqual(helper.isAuthFlowInProgress(), false);
-
   // The scheduled snapshot must stay off the API while a rate-limit backoff is
   // active, and it must not stay disabled forever after a refresh that never
   // settled (a single 429 used to latch deviceRefreshInFlight on true).
@@ -758,6 +710,119 @@ function registeredInstances() {
     assert.strictEqual(helper.getRateLimitUntil(), longWindow);
 
     helper.setRateLimitUntil(0);
+  }
+
+  // Init failures after a successful token (saved or freshly obtained) are owned
+  // by handleHomeConnectInitError: exactly one retry loop, no auth error on top,
+  // and no unhandled rejection escaping into MagicMirror's uncaughtException log.
+  {
+    const hcModulePath = require.resolve("../lib/homeconnect-api.js");
+    const originalHcModule = require.cache[hcModulePath];
+    let initBehaviour = () => Promise.reject(new Error("getaddrinfo ENOTFOUND api.home-connect.com"));
+    class FakeHomeConnect {
+      on() { }
+      init() {
+        return initBehaviour();
+      }
+    }
+    require.cache[hcModulePath] = { id: hcModulePath, filename: hcModulePath, loaded: true, exports: FakeHomeConnect };
+
+    const unhandled = [];
+    const onUnhandled = (reason) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+
+    const originalAuthService = helper.authService;
+    const originalReadRefreshToken = helper.readRefreshTokenFromFile;
+    const originalDeviceService = helper.deviceService;
+    const originalProgramService = helper.programService;
+    const originalEmitAuthStatus = helper.emitAuthStatus;
+    const originalEmitInitStatus = helper.emitInitStatus;
+    const authStatuses = [];
+    const initStatuses = [];
+
+    const settle = async () => {
+      await wait(0);
+      await wait(0);
+    };
+    const clearRetryTimers = () => {
+      helper.clearHomeConnectInitRetry();
+      if (helper.headlessAuthRetryTimer) {
+        clearTimeout(helper.headlessAuthRetryTimer);
+        helper.headlessAuthRetryTimer = null;
+      }
+    };
+
+    try {
+      resetHelperState();
+      helper.config = { clientId: "id", clientSecret: "secret" };
+      helper.deviceService = null;
+      helper.programService = null;
+      helper.emitAuthStatus = (status) => authStatuses.push(status);
+      helper.emitInitStatus = (status, payload) => initStatuses.push({ status, payload });
+
+      // Fresh device-flow token, then a transient init failure.
+      helper.initializationAttempts = 0;
+      helper.maxInitAttempts = 3;
+      helper.authService = {
+        headlessAuth: async () => ({ refresh_token: "fresh-refresh", access_token: "fresh-access" })
+      };
+      await helper.initWithHeadlessAuth();
+      await settle();
+
+      assert.ok(helper.hcInitRetryTimer, "Expected the transient init failure to schedule an init retry");
+      assert.strictEqual(
+        helper.headlessAuthRetryTimer || null,
+        null,
+        "A failed init after successful device flow must not also schedule a headless auth retry"
+      );
+      assert.ok(
+        !authStatuses.includes("error"),
+        `A network failure during init is not an authentication failure (auth statuses: ${authStatuses.join(",")})`
+      );
+      const hcErrorStatus = initStatuses.find((entry) => entry.status === "hc_error");
+      assert.ok(hcErrorStatus, "Expected the init failure to be reported as hc_error");
+      assert.strictEqual(hcErrorStatus.payload.retryInSeconds, 5, "Expected hc_error to carry the retry delay");
+      assert.ok(hcErrorStatus.payload.message.includes("ENOTFOUND"));
+      assert.strictEqual(helper.isAuthFlowInProgress(), false);
+      clearRetryTimers();
+
+      // A genuine device-flow failure still takes the headless retry path.
+      authStatuses.length = 0;
+      helper.initializationAttempts = 0;
+      helper.authService = {
+        headlessAuth: async () => {
+          throw new Error("expired_token");
+        }
+      };
+      await helper.initWithHeadlessAuth();
+      assert.ok(helper.headlessAuthRetryTimer, "Expected a device-flow failure to schedule a headless retry");
+      assert.ok(authStatuses.includes("error"), "Expected a device-flow failure to be reported as auth error");
+      clearRetryTimers();
+
+      // Saved token at boot, network not up yet: retry scheduled, nothing unhandled.
+      helper.authService = originalAuthService;
+      helper.readRefreshTokenFromFile = () => "saved-refresh";
+      helper.checkTokenAndInitialize();
+      await settle();
+      assert.ok(helper.hcInitRetryTimer, "Expected the boot-time init failure to schedule an init retry");
+      assert.deepStrictEqual(unhandled, [], "Init failures must not surface as unhandled rejections");
+      clearRetryTimers();
+    } finally {
+      helper.readRefreshTokenFromFile = originalReadRefreshToken;
+      helper.deviceService = originalDeviceService;
+      helper.programService = originalProgramService;
+      helper.authService = originalAuthService;
+      helper.emitAuthStatus = originalEmitAuthStatus;
+      helper.emitInitStatus = originalEmitInitStatus;
+      clearRetryTimers();
+      helper.hc = null;
+      process.removeListener("unhandledRejection", onUnhandled);
+      if (originalHcModule) {
+        require.cache[hcModulePath] = originalHcModule;
+      } else {
+        delete require.cache[hcModulePath];
+      }
+    }
   }
 
   console.log("node-helper-session.test.js OK");

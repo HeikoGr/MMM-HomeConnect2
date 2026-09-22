@@ -52,7 +52,7 @@ function createDeviceService(overrides = {}) {
     assert.deepStrictEqual(notifications[0].payload, [{ haId: "ha-1", name: "Washer" }]);
   }
 
-  // processDevice: API payload values overwrite stale local values for same appliance
+  // registerDevice: API payload values overwrite stale local values for same appliance
   {
     const { service } = createDeviceService();
     service.devices.set("ha-dryer", {
@@ -64,7 +64,7 @@ function createDeviceService(overrides = {}) {
       RemainingProgramTime: 1800
     });
 
-    await service.processDevice(
+    const registered = service.registerDevice(
       {
         haId: "ha-dryer",
         name: "Dryer",
@@ -73,6 +73,7 @@ function createDeviceService(overrides = {}) {
       },
       0
     );
+    await service.refreshDeviceDetails(registered);
 
     const updated = service.devices.get("ha-dryer");
     assert.ok(updated);
@@ -80,7 +81,7 @@ function createDeviceService(overrides = {}) {
     assert.strictEqual(updated.connected, false);
   }
 
-  // processDevice: settings are seeded once per appliance, for every type. They
+  // refreshDeviceDetails: settings are seeded once per appliance, for every type. They
   // carry BSH.Common.Setting.PowerState, which /status never returns.
   {
     const { service } = createDeviceService();
@@ -101,12 +102,12 @@ function createDeviceService(overrides = {}) {
       connected: true
     };
 
-    await service.processDevice(dishwasher, 0);
+    await service.refreshDeviceDetails(service.registerDevice(dishwasher, 0));
     assert.strictEqual(statusCalls, 1);
     assert.strictEqual(settingsCalls, 1);
 
     // A later refresh must not spend another call on the same appliance.
-    await service.processDevice(dishwasher, 0);
+    await service.refreshDeviceDetails(service.registerDevice(dishwasher, 0));
     assert.strictEqual(statusCalls, 2);
     assert.strictEqual(settingsCalls, 1);
   }
@@ -149,7 +150,7 @@ function createDeviceService(overrides = {}) {
 
   // fetchDeviceStatus: applies fetched events to the live device in the Map,
   // not the (possibly orphaned) object reference captured when the fetch
-  // started. processDevice() replaces the Map entry with a new merged object
+  // started. registerDevice() replaces the Map entry with a new merged object
   // on every refresh cycle, so a status fetch that resolves after a second,
   // overlapping refresh must not silently write into a discarded object.
   {

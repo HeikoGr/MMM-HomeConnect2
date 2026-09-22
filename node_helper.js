@@ -1,6 +1,5 @@
 let HomeConnect = null;
 const fs = require("fs");
-const util = require("util");
 const ActiveProgramManager = require("./lib/active-program-manager");
 const AuthService = require("./lib/auth-service");
 const DeviceService = require("./lib/device-service");
@@ -52,8 +51,7 @@ const INIT_STATUS_MESSAGES = Object.freeze({
   initializing_hc: "Initializing HomeConnect...",
   auth_failed: "Authentication failed - please check manually",
   success: "Successfully initialized",
-  reauth_required: "Stored HomeConnect token invalid - re-authentication required",
-  fetching_programs: "Fetching active programs..."
+  reauth_required: "Stored HomeConnect token invalid - re-authentication required"
 });
 
 const AUTH_STATUS_MESSAGES = Object.freeze({
@@ -630,11 +628,6 @@ module.exports = NodeHelper.create({
     }
   },
 
-  handleRetryAuth() {
-    moduleLog("info", "Manual retry requested");
-    this.retryAuthentication();
-  },
-
   handleGetActivePrograms(payload = {}) {
     const requester = payload.instanceId || null;
     const haIds = Array.isArray(payload.haIds) ? payload.haIds : null;
@@ -747,27 +740,12 @@ module.exports = NodeHelper.create({
     const safePayload = payload || {};
     const action = safePayload.action;
 
-    switch (action) {
-      case "CONFIGURE":
-        this.handleConfigNotification({
-          ...(safePayload?.data?.config || {}),
-          instanceId: safePayload.instanceId || safePayload.identifier || "default"
-        });
-        break;
-
-      case "RETRY_AUTH":
-        this.handleRetryAuth();
-        break;
-
-      case "GET_ACTIVE_PROGRAMS":
-        this.handleGetActivePrograms({
-          ...(safePayload?.data || {}),
-          instanceId: safePayload.instanceId || safePayload.identifier || "default"
-        });
-        break;
-
-      default:
-        break;
+    // CONFIGURE is the only action the frontend sends.
+    if (action === "CONFIGURE") {
+      this.handleConfigNotification({
+        ...(safePayload?.data?.config || {}),
+        instanceId: safePayload.instanceId || safePayload.identifier || "default"
+      });
     }
   },
 
@@ -915,7 +893,9 @@ module.exports = NodeHelper.create({
         targetInstanceId ? { broadcast: false, targetInstanceId } : {}
       );
 
-      this.initializeHomeConnect(token);
+      this.initializeHomeConnect(token).catch(() => {
+        // Handled by handleHomeConnectInitError, which schedules the retry.
+      });
       return;
     }
 
@@ -985,8 +965,9 @@ module.exports = NodeHelper.create({
       `Starting headless authentication (attempt ${this.initializationAttempts}/${this.maxInitAttempts})`
     );
 
+    let tokens;
     try {
-      const tokens = await this.authService.headlessAuth((notification, payload) => {
+      tokens = await this.authService.headlessAuth((notification, payload) => {
         if (notification === "AUTH_STATUS") {
           const status = payload && payload.status ? payload.status : "error";
           this.emitAuthStatus(status, payload || {});
@@ -995,11 +976,14 @@ module.exports = NodeHelper.create({
 
         this.broadcastToAllClients(notification, payload);
       });
-
-      await this.handleHeadlessAuthSuccess(tokens);
     } catch (error) {
       this.handleHeadlessAuthError(error);
+      return;
     }
+
+    // The device flow succeeded, so an init failure from here on is not an auth
+    // failure: handleHomeConnectInitError owns it and schedules its own retry.
+    await this.handleHeadlessAuthSuccess(tokens).catch(() => { });
   },
 
   handleHomeConnectInitSuccess() {
@@ -1067,26 +1051,30 @@ module.exports = NodeHelper.create({
       return;
     }
 
-    this.emitInitStatus("hc_error", {
-      message: `HomeConnect error: ${error.message}`
-    });
-
     // Not an invalid_grant - most likely a transient failure (e.g. network/DNS not
     // ready yet right after a device reboot). The refresh token itself is probably
     // still fine, so retry the same init with backoff instead of stranding the
     // session in ERROR forever.
-    this.scheduleHomeConnectInitRetry();
+    const retryDelayMs = this.scheduleHomeConnectInitRetry();
+
+    // The retry delay lets the frontend say "retrying in ..." instead of spinning
+    // on "Loading appliances" through a multi-minute backoff.
+    this.emitInitStatus("hc_error", {
+      message: `HomeConnect error: ${errorMessage}`,
+      retryInSeconds: retryDelayMs === null ? null : Math.round(retryDelayMs / 1000)
+    });
   },
 
+  // Returns the delay of the scheduled retry in ms, or null when none is pending.
   scheduleHomeConnectInitRetry() {
     const token = globalSession.refreshToken || this.refreshToken;
     if (!token) {
       moduleLog("debug", "No refresh token available - skipping automatic HomeConnect init retry");
-      return;
+      return null;
     }
 
     if (this.hcInitRetryTimer) {
-      return;
+      return null;
     }
 
     const attempt = this.hcInitRetryAttempts;
@@ -1110,6 +1098,8 @@ module.exports = NodeHelper.create({
         // handleHomeConnectInitError, which schedules the next retry.
       });
     }, delay);
+
+    return delay;
   },
 
   clearHomeConnectInitRetry() {
@@ -1203,34 +1193,6 @@ module.exports = NodeHelper.create({
     });
   },
 
-  retryAuthentication() {
-    moduleLog("info", "Manual authentication retry");
-    this.clearHomeConnectInitRetry();
-    this.sessionAuthenticated = false;
-    this.authFlowInProgress = false;
-    globalSession.accessToken = null;
-    globalSession.refreshToken = null;
-
-    this.configReceived = false;
-    this.initializationAttempts = 0;
-    this.hc = null;
-    if (this.deviceService) {
-      this.deviceService.devices.clear();
-      if (typeof this.deviceService.shutdown === "function") {
-        this.deviceService.shutdown();
-      }
-    }
-    if (this.activeProgramManager && typeof this.activeProgramManager.clearAll === "function") {
-      this.activeProgramManager.clearAll();
-    }
-
-    deleteRefreshTokenFile();
-
-    this.refreshToken = null;
-
-    this.checkTokenAndInitialize();
-  },
-
   broadcastDevices() {
     if (!this.deviceService) return;
     this.deviceService.broadcastDevices(this.broadcastToAllClients.bind(this));
@@ -1258,10 +1220,6 @@ module.exports = NodeHelper.create({
       }
 
       moduleLog("info", `Fetching active programs for ${deviceArray.length} device(s)`);
-
-      this.emitInitStatus("fetching_programs", {
-        instanceId: requestingInstanceId
-      });
 
       const results = [];
       const retryCandidates = [];
@@ -1294,20 +1252,14 @@ module.exports = NodeHelper.create({
             error: result.error || null
           });
           if (result && result.data) {
-            moduleLog(
-              "debug",
-              `Active program raw payload for ${device.name} (${result.source || "unknown"}):\n${util.inspect(
-                result.data,
-                {
-                  depth: null,
-                  colors: false,
-                  compact: false,
-                  breakLength: 120,
-                  maxArrayLength: null,
-                  maxStringLength: null
-                }
-              )}`
-            );
+            // Summary only: the old full-depth payload dump was rendered into the
+            // message string before moduleLog checked the level, on every fetch.
+            const options = Array.isArray(result.data.options) ? result.data.options : [];
+            moduleLog("debug", `Active program payload for ${device.name}:`, {
+              source: result.source || "unknown",
+              key: result.data.key || null,
+              optionKeys: options.map((option) => option && option.key).filter(Boolean)
+            });
           }
           results.push(result);
 

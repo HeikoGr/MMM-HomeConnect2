@@ -27,6 +27,8 @@
   "APPROX_PREFIX": "ca.",
   "ACTIVE_PROGRAM": "Aktives Programm",
   "SELECTED_PROGRAM": "Ausgewähltes Programm",
+  "HC_INIT_FAILED_TITLE": "Home Connect nicht erreichbar",
+  "HC_INIT_RETRY_IN": "Neuer Versuch in",
   "CONFIG_MISMATCH_TITLE": "Konfigurationskonflikt",
   "CONFIG_MISMATCH": "Dieses Display verwendet eine andere MMM-HomeConnect2-Konfiguration als die laufende Server-Instanz.",
   "CONFIG_MISMATCH_CREDENTIALS": "Dieses Display nutzt andere Home-Connect-Zugangsdaten als die laufende Server-Sitzung.",
