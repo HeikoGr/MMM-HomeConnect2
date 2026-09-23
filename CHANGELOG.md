@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.5.0](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.4.2...v1.5.0) (2026-09-23)
+
+
+### 🔌 Features
+
+* split the helper, track displays by socket, log through MagicMirror's Log ([4c57988](https://github.com/HeikoGr/MMM-HomeConnect2/commit/4c57988e112c81cce42f1ff326e9fc31147d4454))
+
+
+### 🧱 Refactoring
+
+* load backend-session.js from the mmm-shared submodule (S5) ([75353a1](https://github.com/HeikoGr/MMM-HomeConnect2/commit/75353a12260f5a2c11f8ce9aca988a5c7cc2a17e))
+
 ## [1.4.2](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.4.1...v1.4.2) (2026-09-22)
 
 
