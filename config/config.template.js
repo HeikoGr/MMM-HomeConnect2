@@ -1,4 +1,4 @@
-let config = {
+const config = {
   address: "0.0.0.0",
   port: 8080,
   basePath: "/",
@@ -12,8 +12,8 @@ let config = {
     {
       module: "MMM-Cursor",
       config: {
-        timeout: 1500
-      }
+        timeout: 1500,
+      },
     },
     { module: "clock", position: "top_left" },
 
@@ -31,10 +31,10 @@ let config = {
         sseHeartbeatStaleThresholdMs: 70 * 1000,
         sseRecoveryCooldownMs: 70 * 1000,
         progressRefreshIntervalMs: 30 * 1000,
-        minActiveProgramIntervalMs: 10 * 60 * 1000
-      }
-    }
-  ]
+        minActiveProgramIntervalMs: 10 * 60 * 1000,
+      },
+    },
+  ],
 };
 
 if (typeof module !== "undefined") {

@@ -7,7 +7,7 @@
 | `clientId` | Required Home Connect application client ID. |
 | `clientSecret` | Optional client secret when your developer app requires one. |
 | `apiLanguage` | Preferred Home Connect API language, for example `en`, `de`, or `da`. |
-| `logLevel` | Logging verbosity: `none`, `error`, `warn`, `info`, `debug`. |
+| `logLevel` | Optional: `none`, `error`, `warn`, `info`, `debug`. All output (browser console, `pm2 logs`, including the Home Connect client's SSE and token messages) goes through MagicMirror's `Log`, so the global `logLevel` in `config.js` decides; this option can only narrow it for this module (`none` silences it). Default: empty, the global level alone. `debug` also shows the debug panel. |
 
 ## Rendering Options
 
@@ -42,11 +42,16 @@ Config options fall into two groups:
 
 - **Session options** (`clientId`, `clientSecret`, `apiLanguage`, `logLevel`,
   `apiRequestTimeoutMs`, `minActiveProgramIntervalMs`, all `sse*` options) exist once
-  per server. The first display that connects establishes them; later displays are
-  told which values apply and show a short note if their own values differ.
+  per server. The first display that connects establishes them; if a later display
+  asks for different values, the session values still apply and the backend logs a
+  warning naming the differing keys. The later display itself shows nothing.
 - **Rendering options** (`showDeviceIcon`, `showDeviceIf*`, `showAlwaysAllDevices`,
   `header`, `progressRefreshIntervalMs`) are evaluated in the browser and may differ
   per display without any warning.
+
+A display stays registered as long as its browser is connected. When a browser closes,
+the backend stops addressing it after 10 minutes; after a server restart the open displays
+register again on their own, without a page reload.
 
 Only different credentials (`clientId` / `clientSecret`) are a hard conflict, because
 they point at a different Home Connect account. Such a display is rejected and shows

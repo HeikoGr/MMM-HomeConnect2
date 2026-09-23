@@ -2,7 +2,7 @@
 
 // Simple test runner for local unit tests and optional live API smoke test.
 
-const { spawnSync } = require("child_process");
+const { spawnSync } = require("node:child_process");
 const { refreshTokenPath } = require("../lib/module-paths");
 
 function shouldRunLiveSmokeTest() {
@@ -15,7 +15,7 @@ function shouldRunLiveSmokeTest() {
 function runNode(file) {
   const result = spawnSync(process.execPath, [file], {
     cwd: __dirname,
-    stdio: "inherit"
+    stdio: "inherit",
   });
 
   if (result.error) {
@@ -45,10 +45,14 @@ function runUnitTests() {
   runNode("homeconnect-api.test.js");
   runNode("retry-backoff.test.js");
   runNode("program-service.test.js");
+  runNode("client-liveness.test.js");
+  runNode("logger.test.js");
+  runNode("init-timeout.test.js");
+  runNode("backend-session.test.js");
 }
 
 async function runLiveSmokeTest() {
-  const fs = require("fs");
+  const fs = require("node:fs");
   if (!shouldRunLiveSmokeTest()) {
     console.log("Skipping live HomeConnect smoke test. Set HC_RUN_LIVE_SMOKE_TEST=1 to enable it.");
     return;
@@ -94,7 +98,7 @@ async function runLiveSmokeTest() {
     try {
       // Read global MagicMirror config (absolute path)
       const cfgPath = "/opt/magic_mirror/config/config.js";
-      const fs = require("fs");
+      const fs = require("node:fs");
       if (fs.existsSync(cfgPath)) {
         try {
           // Attempt to require the config file (common MagicMirror config exports)
@@ -106,12 +110,7 @@ async function runLiveSmokeTest() {
                 const modName = mod && (mod.module || mod.name);
                 if (modName === "MMM-HomeConnect2") {
                   const mconf = mod.config || {};
-                  clientId =
-                    clientId ||
-                    mconf.clientId ||
-                    mconf.client_ID ||
-                    mconf.client_ID ||
-                    mconf.client_Ident;
+                  clientId = clientId || mconf.clientId || mconf.client_ID || mconf.client_ID || mconf.client_Ident;
                   clientSecret = clientSecret || mconf.clientSecret || mconf.client_Secret;
                   break;
                 }
@@ -142,7 +141,7 @@ async function runLiveSmokeTest() {
 
   if (!clientId) {
     console.log(
-      "HC_CLIENT_ID not set and not found in ../config/config.js – skipping live test. Set HC_CLIENT_ID to run."
+      "HC_CLIENT_ID not set and not found in ../config/config.js – skipping live test. Set HC_CLIENT_ID to run.",
     );
     return;
   }
@@ -158,7 +157,7 @@ async function runLiveSmokeTest() {
 
     const res = await hc.getHomeAppliances();
     let appliances = [];
-    if (res && res.success && res.data) {
+    if (res?.success && res.data) {
       if (Array.isArray(res.data.homeappliances)) {
         appliances = res.data.homeappliances;
       } else if (Array.isArray(res.data)) {
@@ -175,21 +174,11 @@ async function runLiveSmokeTest() {
 
     // helper to add a timeout to API calls to avoid hanging the runner
     const callWithTimeout = async (fn, ms = 5000) => {
-      return Promise.race([
-        fn(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("api timeout")), ms))
-      ]);
+      return Promise.race([fn(), new Promise((_, reject) => setTimeout(() => reject(new Error("api timeout")), ms))]);
     };
 
     for (const device of appliances) {
-      const haId =
-        device.haId ||
-        device.haid ||
-        device.id ||
-        device.deviceId ||
-        device.uuid ||
-        device.serial ||
-        null;
+      const haId = device.haId || device.haid || device.id || device.deviceId || device.uuid || device.serial || null;
       console.log("\n--- Appliance ---");
       console.log("Name:", device.name || device.nameShort || device.model || "<unknown>");
       console.log("haId:", haId || "<no haId>");
@@ -201,7 +190,7 @@ async function runLiveSmokeTest() {
         const status = await callWithTimeout(() => hc.getStatus(haId), 7000);
         console.log("Status:", JSON.stringify(status, null, 2));
       } catch (e) {
-        console.warn("Status fetch error for", haId, e && e.message ? e.message : e);
+        console.warn("Status fetch error for", haId, e?.message ? e.message : e);
       }
 
       // Fetch settings
@@ -209,7 +198,7 @@ async function runLiveSmokeTest() {
         const settings = await callWithTimeout(() => hc.getSettings(haId), 7000);
         console.log("Settings:", JSON.stringify(settings, null, 2));
       } catch (e) {
-        console.warn("Settings fetch error for", haId, e && e.message ? e.message : e);
+        console.warn("Settings fetch error for", haId, e?.message ? e.message : e);
       }
 
       // Fetch active program
@@ -217,14 +206,14 @@ async function runLiveSmokeTest() {
         const program = await callWithTimeout(() => hc.getActiveProgram(haId), 7000);
         console.log("ActiveProgram:", JSON.stringify(program, null, 2));
       } catch (e) {
-        console.warn("ActiveProgram fetch error for", haId, e && e.message ? e.message : e);
+        console.warn("ActiveProgram fetch error for", haId, e?.message ? e.message : e);
       }
 
       // Small pause between devices to avoid rate limits
       await new Promise((r) => setTimeout(r, 300));
     }
   } catch (err) {
-    console.error("Live smoke test error:", err && err.message ? err.message : err);
+    console.error("Live smoke test error:", err?.message ? err.message : err);
     process.exitCode = 1;
   } finally {
     // Cleanup: clear token refresh timer and close EventSource connections
@@ -255,10 +244,7 @@ async function runLiveSmokeTest() {
         }
       }
     } catch (cleanupErr) {
-      console.warn(
-        "Live smoke test cleanup error",
-        cleanupErr && cleanupErr.message ? cleanupErr.message : cleanupErr
-      );
+      console.warn("Live smoke test cleanup error", cleanupErr?.message ? cleanupErr.message : cleanupErr);
     }
   }
 }
@@ -268,7 +254,7 @@ async function runLiveSmokeTest() {
     runUnitTests();
     await runLiveSmokeTest();
   } catch (error) {
-    console.error(error && error.message ? error.message : error);
-    process.exitCode = error && error.exitCode ? error.exitCode : 1;
+    console.error(error?.message ? error.message : error);
+    process.exitCode = error?.exitCode ? error.exitCode : 1;
   }
 })();

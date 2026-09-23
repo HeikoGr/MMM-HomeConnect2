@@ -1,9 +1,9 @@
 "use strict";
 
-const assert = require("assert");
-const Module = require("module");
-const os = require("os");
-const path = require("path");
+const assert = require("node:assert");
+const Module = require("node:module");
+const os = require("node:os");
+const path = require("node:path");
 
 // The auth paths persist and delete the refresh token file. Redirect that path into
 // a temp directory so running the tests never touches a real Home Connect session.
@@ -17,7 +17,7 @@ Module._load = function patchedLoad(request, parent, isMain) {
     return {
       create(definition) {
         return definition;
-      }
+      },
     };
   }
   if (request.endsWith("module-paths")) {
@@ -36,22 +36,18 @@ function resetHelperState() {
   helper.sessionAuthenticated = false;
   helper.authFlowInProgress = false;
   helper.deviceRefreshInFlight = false;
-  helper.programFetchInFlight = false;
   helper.debugStats = {
     lastApiCallTs: null,
     lastSseEventTs: null,
     lastSseTrafficTs: null,
-    apiCounters: {}
+    apiCounters: {},
   };
   helper.lastDebugStatsBroadcastTs = 0;
   helper.hc = null;
   helper.instanceId = null;
   helper.sharedConfigOwnerInstanceId = null;
   helper.sessionOwnerConfig = null;
-  helper.activeProgramFetchInFlight = false;
-  helper.inFlightActiveProgramHaIds.clear();
-  helper.pendingActiveProgramHaIds.clear();
-  helper.lastForcedProgramFetchAt.clear();
+  helper.programFetchCoordinator().reset();
   if (helper.fullSnapshotTimer) {
     clearInterval(helper.fullSnapshotTimer);
     helper.fullSnapshotTimer = null;
@@ -59,7 +55,7 @@ function resetHelperState() {
   helper.setRateLimitUntil(0);
   helper.notifications = {
     REQUEST: "MMM-HomeConnect2_REQUEST",
-    EVENT: "MMM-HomeConnect2_EVENT"
+    EVENT: "MMM-HomeConnect2_EVENT",
   };
   helper.config = null;
   helper.configReceived = false;
@@ -82,8 +78,8 @@ function registeredInstances() {
   resetHelperState();
 
   // Session lifecycle flags: a fresh helper is neither authenticated nor busy.
-  assert.strictEqual(helper.isSessionAuthenticated(), false);
-  assert.strictEqual(helper.isAuthFlowInProgress(), false);
+  assert.strictEqual(helper.sessionAuthenticated, false);
+  assert.strictEqual(helper.authFlowInProgress, false);
 
   // Rate limiting is derived from the deadline alone - no state to get out of sync.
   assert.strictEqual(helper.isRateLimited(), false);
@@ -92,11 +88,7 @@ function registeredInstances() {
   assert.strictEqual(helper.isRateLimited(), true);
 
   await wait(40);
-  assert.strictEqual(
-    helper.isRateLimited(),
-    false,
-    "An elapsed rate limit must clear itself without a release timer"
-  );
+  assert.strictEqual(helper.isRateLimited(), false, "An elapsed rate limit must clear itself without a release timer");
 
   helper.setRateLimitUntil(Date.now() + 30);
   assert.strictEqual(helper.isRateLimited(), true);
@@ -109,7 +101,7 @@ function registeredInstances() {
   const originalBroadcastDebugStats = helper.broadcastDebugStats;
   const fakeTimes = [1000, 1600, 2200, 2300];
   Date.now = () => fakeTimes.shift();
-  helper.broadcastDebugStats = () => { };
+  helper.broadcastDebugStats = () => {};
 
   helper.recordSseEvent();
   helper.recordSseKeepAlive();
@@ -158,7 +150,7 @@ function registeredInstances() {
     getDevices(callback) {
       staleSequence.push("device_refresh_start");
       callback("DEVICES_UPDATE", [{ haId: "ha-1", name: "Washer" }]);
-    }
+    },
   };
   helper.sendSocketNotification = (notification, payload) => {
     if (notification === "MMM-HomeConnect2_EVENT" && payload?.action === "DEVICES_UPDATE") {
@@ -173,11 +165,7 @@ function registeredInstances() {
   helper.handleSseStale({ silenceMs: 71000 });
   await wait(0);
 
-  assert.deepStrictEqual(staleSequence, [
-    "rebuild",
-    "device_refresh_start",
-    "program_fetch:sse_watchdog:true"
-  ]);
+  assert.deepStrictEqual(staleSequence, ["rebuild", "device_refresh_start", "program_fetch:sse_watchdog:true"]);
 
   helper.handleGetActivePrograms = staleOriginalHandleGetActivePrograms;
 
@@ -189,10 +177,10 @@ function registeredInstances() {
   helper.deviceService = {
     getDevices() {
       immediateGetDevicesCalls += 1;
-    }
+    },
   };
-  helper.sendSocketNotification = () => { };
-  helper.emitInitStatus = () => { };
+  helper.sendSocketNotification = () => {};
+  helper.emitInitStatus = () => {};
 
   helper.handleSessionAlreadyActive();
 
@@ -207,14 +195,14 @@ function registeredInstances() {
       immediateGetDevicesCalls += 1;
       initSequence.push("device_refresh_start");
       callback("DEVICES_UPDATE", []);
-    }
+    },
   };
   helper.sendSocketNotification = (notification, payload) => {
     if (notification === "MMM-HomeConnect2_EVENT" && payload?.action === "DEVICES_UPDATE") {
       initSequence.push("device_update_sent");
     }
   };
-  helper.emitInitStatus = () => { };
+  helper.emitInitStatus = () => {};
   immediateGetDevicesCalls = 0;
   const originalInitHandleGetActivePrograms = helper.handleGetActivePrograms;
   helper.handleGetActivePrograms = (payload = {}) => {
@@ -224,10 +212,7 @@ function registeredInstances() {
   helper.handleHomeConnectInitSuccess();
 
   assert.strictEqual(immediateGetDevicesCalls, 1);
-  assert.deepStrictEqual(initSequence, [
-    "device_refresh_start",
-    "program_fetch:initial_sync:false"
-  ]);
+  assert.deepStrictEqual(initSequence, ["device_refresh_start", "program_fetch:initial_sync:false"]);
 
   helper.handleGetActivePrograms = originalInitHandleGetActivePrograms;
 
@@ -237,7 +222,7 @@ function registeredInstances() {
   helper.deviceService = {
     getDevices(callback) {
       callback("DEVICES_UPDATE", []);
-    }
+    },
   };
   helper.sessionAuthenticated = true;
   const originalSetInterval = global.setInterval;
@@ -249,8 +234,8 @@ function registeredInstances() {
     scheduledIntervals.push(timer);
     return timer;
   };
-  global.clearInterval = () => { };
-  helper.handleGetActivePrograms = () => { };
+  global.clearInterval = () => {};
+  helper.handleGetActivePrograms = () => {};
 
   try {
     helper.handleHomeConnectInitSuccess();
@@ -277,29 +262,29 @@ function registeredInstances() {
     type: "Washer",
     connected: true,
     OperationState: "BSH.Common.EnumType.OperationState.Run",
-    RemainingProgramTime: { value: "PT10M" }
+    RemainingProgramTime: { value: "PT10M" },
   };
   helper.deviceService = {
-    devices: new Map([["ha-washer", washerDevice]])
+    devices: new Map([["ha-washer", washerDevice]]),
   };
   const scheduledRetries = [];
   helper.activeProgramManager = {
     schedule(devices) {
       scheduledRetries.push(...devices);
     },
-    clear() { }
+    clear() {},
   };
   helper.programService = {
     applyProgramResult() {
       return null;
-    }
+    },
   };
   helper.fetchActiveProgramForDevice = async () => ({
     haId: "ha-washer",
     success: false,
-    error: "No active program"
+    error: "No active program",
   });
-  helper.broadcastProgramData = () => { };
+  helper.broadcastProgramData = () => {};
 
   await helper.fetchActiveProgramsForDevices([washerDevice], "frontend-a");
 
@@ -310,7 +295,7 @@ function registeredInstances() {
   helper.hc = {};
   helper.sessionAuthenticated = true;
   helper.deviceService = {
-    devices: new Map([["ha-1", { haId: "ha-1", name: "Washer" }]])
+    devices: new Map([["ha-1", { haId: "ha-1", name: "Washer" }]]),
   };
   let fetchCalls = 0;
   helper.fetchActiveProgramsForDevices = () => {
@@ -320,16 +305,16 @@ function registeredInstances() {
   helper.handleGetActivePrograms({
     instanceId: "resume-followup",
     haIds: ["ha-1"],
-    force: true
+    force: true,
   });
   helper.handleGetActivePrograms({
     instanceId: "resume-followup",
     haIds: ["ha-1"],
-    force: true
+    force: true,
   });
 
   assert.strictEqual(fetchCalls, 1);
-  assert.strictEqual(helper.activeProgramFetchInFlight, true);
+  assert.strictEqual(helper.programFetchCoordinator().state.inFlight, true);
 
   // A request for a *different* device arriving while another fetch is in
   // flight is dropped for timing reasons only, not because anything failed -
@@ -342,15 +327,15 @@ function registeredInstances() {
   helper.deviceService = {
     devices: new Map([
       ["ha-1", { haId: "ha-1", name: "Washer", connected: true }],
-      ["ha-2", { haId: "ha-2", name: "Dryer", connected: true }]
-    ])
+      ["ha-2", { haId: "ha-2", name: "Dryer", connected: true }],
+    ]),
   };
   helper.programService = { applyProgramResult: () => null };
   helper.activeProgramManager = {
-    clear() { },
-    schedule() { }
+    clear() {},
+    schedule() {},
   };
-  helper.broadcastProgramData = () => { };
+  helper.broadcastProgramData = () => {};
 
   const overlapFetchOrder = [];
   let releaseWasherFetch;
@@ -367,34 +352,30 @@ function registeredInstances() {
   helper.handleGetActivePrograms({
     instanceId: "resume-followup",
     haIds: ["ha-1"],
-    force: true
+    force: true,
   });
   await wait(10); // let the ha-1 fetch start and block on releaseWasherFetch
 
   helper.handleGetActivePrograms({
     instanceId: "sse_program_detected",
     haIds: ["ha-2"],
-    force: true
+    force: true,
   });
   await wait(10);
 
-  assert.deepStrictEqual(
-    overlapFetchOrder,
-    ["ha-1"],
-    "ha-2 must not be fetched while ha-1's fetch is in flight"
-  );
-  assert.strictEqual(helper.pendingActiveProgramHaIds.has("ha-2"), true);
+  assert.deepStrictEqual(overlapFetchOrder, ["ha-1"], "ha-2 must not be fetched while ha-1's fetch is in flight");
+  assert.strictEqual(helper.programFetchCoordinator().state.pendingHaIds.has("ha-2"), true);
 
   // A device the running fetch already covers needs nothing queued: its data is
   // on its way, so re-requesting it must not schedule a second round.
   helper.handleGetActivePrograms({
     instanceId: "sse_program_detected",
     haIds: ["ha-1"],
-    force: true
+    force: true,
   });
   await wait(10);
-  assert.strictEqual(helper.pendingActiveProgramHaIds.has("ha-1"), false);
-  assert.strictEqual(helper.pendingActiveProgramHaIds.size, 1);
+  assert.strictEqual(helper.programFetchCoordinator().state.pendingHaIds.has("ha-1"), false);
+  assert.strictEqual(helper.programFetchCoordinator().state.pendingHaIds.size, 1);
 
   releaseWasherFetch();
   // fetchActiveProgramsForDevices waits 500ms between devices to avoid
@@ -405,11 +386,11 @@ function registeredInstances() {
   assert.deepStrictEqual(
     overlapFetchOrder,
     ["ha-1", "ha-2"],
-    "ha-2 must be retried automatically once ha-1's fetch finishes"
+    "ha-2 must be retried automatically once ha-1's fetch finishes",
   );
-  assert.strictEqual(helper.pendingActiveProgramHaIds.size, 0);
+  assert.strictEqual(helper.programFetchCoordinator().state.pendingHaIds.size, 0);
 
-  helper.fetchActiveProgramsForDevices = () => { };
+  helper.fetchActiveProgramsForDevices = () => {};
 
   // Recently completed forced requests for the same devices should be deduplicated
   // across different frontend instances for a short window.
@@ -417,27 +398,29 @@ function registeredInstances() {
   helper.hc = {};
   helper.sessionAuthenticated = true;
   helper.deviceService = {
-    devices: new Map([["ha-1", { haId: "ha-1", name: "Washer" }]])
+    devices: new Map([["ha-1", { haId: "ha-1", name: "Washer" }]]),
   };
   fetchCalls = 0;
   helper.fetchActiveProgramsForDevices = (devices, _instanceId, requestMeta = {}) => {
     fetchCalls += 1;
     if (requestMeta.force) {
-      devices.forEach((device) => helper.lastForcedProgramFetchAt.set(device.haId, Date.now()));
+      for (const device of devices) {
+        helper.programFetchCoordinator().state.lastForcedAt.set(device.haId, Date.now());
+      }
     }
-    helper.activeProgramFetchInFlight = false;
-    helper.inFlightActiveProgramHaIds.clear();
+    helper.programFetchCoordinator().state.inFlight = false;
+    helper.programFetchCoordinator().state.inFlightHaIds.clear();
   };
 
   helper.handleGetActivePrograms({
     instanceId: "frontend-a",
     haIds: ["ha-1"],
-    force: true
+    force: true,
   });
   helper.handleGetActivePrograms({
     instanceId: "frontend-b",
     haIds: ["ha-1"],
-    force: true
+    force: true,
   });
 
   assert.strictEqual(fetchCalls, 1);
@@ -465,17 +448,17 @@ function registeredInstances() {
   helper.authService = {
     setConfig(config) {
       authConfigs.push(config);
-    }
+    },
   };
   helper.deviceService = {
     setConfig(config) {
       deviceConfigs.push(config);
-    }
+    },
   };
   helper.hc = {
     setAcceptLanguage(language) {
       acceptLanguages.push(language);
-    }
+    },
   };
   helper.handleConfigNotificationFirstTime = (instanceId) => {
     configuredInstances.push(`first:${instanceId}`);
@@ -491,7 +474,7 @@ function registeredInstances() {
     apiLanguage: "de",
     minActiveProgramIntervalMs: 1111,
     enableSSEHeartbeat: true,
-    showDeviceIcon: true
+    showDeviceIcon: true,
   });
 
   // Display-only options must not be reported as ignored session settings.
@@ -503,7 +486,7 @@ function registeredInstances() {
     enableSSEHeartbeat: true,
     showDeviceIcon: false,
     showAlwaysAllDevices: true,
-    header: "Another header"
+    header: "Another header",
   });
 
   // Session-relevant difference: the client stays registered, its values are ignored.
@@ -512,7 +495,7 @@ function registeredInstances() {
     clientId: "client-1",
     apiLanguage: "de",
     minActiveProgramIntervalMs: 9999,
-    enableSSEHeartbeat: false
+    enableSSEHeartbeat: false,
   });
 
   // Foreign credentials cannot be served by this session.
@@ -521,7 +504,7 @@ function registeredInstances() {
     clientId: "client-2",
     apiLanguage: "de",
     minActiveProgramIntervalMs: 1111,
-    enableSSEHeartbeat: true
+    enableSSEHeartbeat: true,
   });
 
   assert.strictEqual(helper.instanceId, "frontend-a");
@@ -529,11 +512,7 @@ function registeredInstances() {
   assert.strictEqual(helper.config.apiLanguage, "de");
   assert.strictEqual(helper.config.minActiveProgramIntervalMs, 1111);
   assert.strictEqual(helper.sessionOwnerConfig.minActiveProgramIntervalMs, 1111);
-  assert.deepStrictEqual(configuredInstances, [
-    "first:frontend-a",
-    "next:frontend-b",
-    "next:frontend-c"
-  ]);
+  assert.deepStrictEqual(configuredInstances, ["first:frontend-a", "next:frontend-b", "next:frontend-c"]);
   assert.strictEqual(authConfigs.length, 1);
   assert.strictEqual(deviceConfigs.length, 3);
   assert.deepStrictEqual(acceptLanguages, ["de", "de", "de"]);
@@ -541,10 +520,7 @@ function registeredInstances() {
   ["frontend-a", "frontend-b", "frontend-c"].forEach((instanceId) => {
     assert.ok(registeredAfterDrift.includes(instanceId), `${instanceId} must stay registered`);
   });
-  assert.ok(
-    !registeredAfterDrift.includes("frontend-d"),
-    "The rejected client must not receive broadcasts"
-  );
+  assert.ok(!registeredAfterDrift.includes("frontend-d"), "The rejected client must not receive broadcasts");
 
   // Exactly one hard rejection, and only for the credential mismatch.
   assert.strictEqual(configMismatchStatuses.length, 1);
@@ -553,8 +529,8 @@ function registeredInstances() {
   assert.deepStrictEqual(configMismatchStatuses[0].payload.mismatchKeys, ["clientId"]);
   assert.strictEqual(
     typeof configMismatchStatuses[0].payload.message === "string" &&
-    configMismatchStatuses[0].payload.message.length > 0,
-    false
+      configMismatchStatuses[0].payload.message.length > 0,
+    false,
   );
 
   // Every accepted late client is checked, and only real differences are logged.
@@ -562,26 +538,26 @@ function registeredInstances() {
 
   // A browser-derived language only fills the gap when nothing is configured.
   resetHelperState();
-  helper.emitInitStatus = () => { };
-  helper.authService = { setConfig() { } };
-  helper.deviceService = { setConfig() { } };
+  helper.emitInitStatus = () => {};
+  helper.authService = { setConfig() {} };
+  helper.deviceService = { setConfig() {} };
   helper.hc = null;
   helper.handleConfigNotificationFirstTime = () => {
     helper.configReceived = true;
   };
-  helper.handleConfigNotificationSubsequent = () => { };
+  helper.handleConfigNotificationSubsequent = () => {};
 
   helper.handleConfigNotification({
     instanceId: "kiosk",
     clientId: "client-1",
     apiLanguage: "",
-    preferredApiLanguage: "de-DE"
+    preferredApiLanguage: "de-DE",
   });
   helper.handleConfigNotification({
     instanceId: "phone",
     clientId: "client-1",
     apiLanguage: "",
-    preferredApiLanguage: "en-GB"
+    preferredApiLanguage: "en-GB",
   });
 
   assert.strictEqual(helper.config.apiLanguage, "de-DE");
@@ -595,9 +571,7 @@ function registeredInstances() {
   const languageDriftKeys = [];
   helper.warnAboutIgnoredSessionConfig = function patched(_instanceId, clientSessionConfig) {
     languageDriftKeys.push(
-      Object.keys(clientSessionConfig).filter(
-        (key) => this.sessionOwnerConfig[key] !== clientSessionConfig[key]
-      )
+      Object.keys(clientSessionConfig).filter((key) => this.sessionOwnerConfig[key] !== clientSessionConfig[key]),
     );
   };
   helper.handleConfigNotification({
@@ -605,7 +579,7 @@ function registeredInstances() {
     clientId: "client-1",
     apiLanguage: "",
     preferredApiLanguage: "de-DE",
-    enableSSEHeartbeat: false
+    enableSSEHeartbeat: false,
   });
 
   assert.deepStrictEqual(languageDriftKeys[0], ["instanceId", "enableSSEHeartbeat"]);
@@ -625,20 +599,20 @@ function registeredInstances() {
     // trips over a missing method.
     helper.programService = {
       applyProgramResult: () => null,
-      broadcastProgramData: () => { },
-      handleActiveProgramFetchError: () => { }
+      broadcastProgramData: () => {},
+      handleActiveProgramFetchError: () => {},
     };
     let refreshes = 0;
     helper.deviceService = {
       getDevices(callback) {
         refreshes += 1;
         callback("DEVICES_UPDATE", []);
-      }
+      },
     };
-    helper.sendSocketNotification = () => { };
-    helper.emitInitStatus = () => { };
+    helper.sendSocketNotification = () => {};
+    helper.emitInitStatus = () => {};
     const originalGetActivePrograms = helper.handleGetActivePrograms;
-    helper.handleGetActivePrograms = () => { };
+    helper.handleGetActivePrograms = () => {};
 
     const originalSetInterval = global.setInterval;
     const originalClearInterval = global.clearInterval;
@@ -647,7 +621,7 @@ function registeredInstances() {
       tick = callback;
       return { callback };
     };
-    global.clearInterval = () => { };
+    global.clearInterval = () => {};
 
     try {
       helper.schedulePeriodicFullSnapshotRefresh();
@@ -688,14 +662,14 @@ function registeredInstances() {
     // trips over a missing method.
     helper.programService = {
       applyProgramResult: () => null,
-      broadcastProgramData: () => { },
-      handleActiveProgramFetchError: () => { }
+      broadcastProgramData: () => {},
+      handleActiveProgramFetchError: () => {},
     };
     const listeners = new Map();
     helper.hc = {
-      on: (event, cb) => listeners.set(event, cb)
+      on: (event, cb) => listeners.set(event, cb),
     };
-    helper.emitInitStatus = () => { };
+    helper.emitInitStatus = () => {};
 
     helper.setupHomeConnectRateLimitReporting();
     const before = Date.now();
@@ -718,9 +692,9 @@ function registeredInstances() {
   {
     const hcModulePath = require.resolve("../lib/homeconnect-api.js");
     const originalHcModule = require.cache[hcModulePath];
-    let initBehaviour = () => Promise.reject(new Error("getaddrinfo ENOTFOUND api.home-connect.com"));
+    const initBehaviour = () => Promise.reject(new Error("getaddrinfo ENOTFOUND api.home-connect.com"));
     class FakeHomeConnect {
-      on() { }
+      on() {}
       init() {
         return initBehaviour();
       }
@@ -732,7 +706,6 @@ function registeredInstances() {
     process.on("unhandledRejection", onUnhandled);
 
     const originalAuthService = helper.authService;
-    const originalReadRefreshToken = helper.readRefreshTokenFromFile;
     const originalDeviceService = helper.deviceService;
     const originalProgramService = helper.programService;
     const originalEmitAuthStatus = helper.emitAuthStatus;
@@ -764,7 +737,7 @@ function registeredInstances() {
       helper.initializationAttempts = 0;
       helper.maxInitAttempts = 3;
       helper.authService = {
-        headlessAuth: async () => ({ refresh_token: "fresh-refresh", access_token: "fresh-access" })
+        headlessAuth: async () => ({ refresh_token: "fresh-refresh", access_token: "fresh-access" }),
       };
       await helper.initWithHeadlessAuth();
       await settle();
@@ -773,17 +746,17 @@ function registeredInstances() {
       assert.strictEqual(
         helper.headlessAuthRetryTimer || null,
         null,
-        "A failed init after successful device flow must not also schedule a headless auth retry"
+        "A failed init after successful device flow must not also schedule a headless auth retry",
       );
       assert.ok(
         !authStatuses.includes("error"),
-        `A network failure during init is not an authentication failure (auth statuses: ${authStatuses.join(",")})`
+        `A network failure during init is not an authentication failure (auth statuses: ${authStatuses.join(",")})`,
       );
       const hcErrorStatus = initStatuses.find((entry) => entry.status === "hc_error");
       assert.ok(hcErrorStatus, "Expected the init failure to be reported as hc_error");
       assert.strictEqual(hcErrorStatus.payload.retryInSeconds, 5, "Expected hc_error to carry the retry delay");
       assert.ok(hcErrorStatus.payload.message.includes("ENOTFOUND"));
-      assert.strictEqual(helper.isAuthFlowInProgress(), false);
+      assert.strictEqual(helper.authFlowInProgress, false);
       clearRetryTimers();
 
       // A genuine device-flow failure still takes the headless retry path.
@@ -792,7 +765,7 @@ function registeredInstances() {
       helper.authService = {
         headlessAuth: async () => {
           throw new Error("expired_token");
-        }
+        },
       };
       await helper.initWithHeadlessAuth();
       assert.ok(helper.headlessAuthRetryTimer, "Expected a device-flow failure to schedule a headless retry");
@@ -800,15 +773,15 @@ function registeredInstances() {
       clearRetryTimers();
 
       // Saved token at boot, network not up yet: retry scheduled, nothing unhandled.
-      helper.authService = originalAuthService;
-      helper.readRefreshTokenFromFile = () => "saved-refresh";
+      helper.authService = Object.assign(Object.create(originalAuthService), {
+        readRefreshTokenFromFile: () => "saved-refresh",
+      });
       helper.checkTokenAndInitialize();
       await settle();
       assert.ok(helper.hcInitRetryTimer, "Expected the boot-time init failure to schedule an init retry");
       assert.deepStrictEqual(unhandled, [], "Init failures must not surface as unhandled rejections");
       clearRetryTimers();
     } finally {
-      helper.readRefreshTokenFromFile = originalReadRefreshToken;
       helper.deviceService = originalDeviceService;
       helper.programService = originalProgramService;
       helper.authService = originalAuthService;

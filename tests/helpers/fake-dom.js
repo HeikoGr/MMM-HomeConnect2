@@ -8,8 +8,7 @@
 
 const VOID_ELEMENTS = new Set(["br", "img", "input", "hr", "meta", "link"]);
 
-const escapeText = (value) =>
-  String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const escapeText = (value) => String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const escapeAttribute = (value) => String(value).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
 
 class FakeTextNode {
@@ -77,9 +76,7 @@ class FakeElement {
   }
 
   get outerHTML() {
-    const attributes = [...this.attributes]
-      .map(([name, value]) => ` ${name}="${escapeAttribute(value)}"`)
-      .join("");
+    const attributes = [...this.attributes].map(([name, value]) => ` ${name}="${escapeAttribute(value)}"`).join("");
     if (VOID_ELEMENTS.has(this.tagName)) {
       return `<${this.tagName}${attributes}>`;
     }
@@ -110,7 +107,7 @@ function createFakeDocument() {
   return {
     documentElement: { lang: "en" },
     createElement: (tagName) => new FakeElement(tagName),
-    createTextNode: (text) => new FakeTextNode(text)
+    createTextNode: (text) => new FakeTextNode(text),
   };
 }
 

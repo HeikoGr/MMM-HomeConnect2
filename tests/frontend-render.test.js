@@ -1,8 +1,10 @@
 "use strict";
 
-const assert = require("assert");
+const assert = require("node:assert");
 const deviceCardRenderer = require("../lib/device-card-renderer");
 const deviceUtils = require("../lib/device-utils");
+const displayState = require("../lib/display-state");
+const statusViews = require("../lib/status-views");
 const domBuilder = require("../lib/dom-builder");
 const shared = require("../lib/mmm-shared/mmm-shared");
 const { createFakeDocument } = require("./helpers/fake-dom");
@@ -16,18 +18,22 @@ function installFrontendGlobals() {
     config: globalThis.config,
     window: globalThis.window,
     document: globalThis.document,
-    navigator: Reflect.get(globalThis, "navigator")
+    navigator: Reflect.get(globalThis, "navigator"),
   };
 
   globalThis.Log = {
-    log() { },
-    warn() { },
-    error() { }
+    log() {},
+    debug() {},
+    info() {},
+    warn() {},
+    error() {},
   };
 
   globalThis.config = { language: "en" };
   globalThis.window = {
     HomeConnectDomBuilder: domBuilder,
+    HomeConnectDisplayState: displayState,
+    HomeConnectStatusViews: statusViews,
     HomeConnectDeviceCardRenderer: deviceCardRenderer,
     HomeConnectDeviceUtils: {
       parseRemainingSeconds: deviceUtils.parseRemainingSeconds,
@@ -41,8 +47,8 @@ function installFrontendGlobals() {
       isDeviceConnected: deviceUtils.isDeviceConnected,
       isDeviceExplicitlyDisconnected: deviceUtils.isDeviceExplicitlyDisconnected,
       shouldDisplayDevice: deviceUtils.shouldDisplayDevice,
-      parseOperationState: deviceUtils.parseOperationState
-    }
+      parseOperationState: deviceUtils.parseOperationState,
+    },
   };
   globalThis.document = createFakeDocument();
   Object.defineProperty(globalThis, "navigator", {
@@ -50,8 +56,8 @@ function installFrontendGlobals() {
     writable: true,
     value: {
       language: "en-US",
-      languages: ["en-US", "en"]
-    }
+      languages: ["en-US", "en"],
+    },
   });
 
   return () => {
@@ -63,7 +69,7 @@ function installFrontendGlobals() {
     Object.defineProperty(globalThis, "navigator", {
       configurable: true,
       writable: true,
-      value: originals.navigator
+      value: originals.navigator,
     });
   };
 }
@@ -75,7 +81,7 @@ function loadModuleDefinition() {
     register(_name, moduleDefinition) {
       definition = moduleDefinition;
       return moduleDefinition;
-    }
+    },
   };
 
   delete require.cache[modulePath];
@@ -104,7 +110,7 @@ function createInstance(overrides = {}) {
     deviceRuntimeHints: overrides.deviceRuntimeHints || {},
     instanceId: "test-instance",
     notifications: {
-      EVENT: "MMM-HomeConnect2_EVENT"
+      EVENT: "MMM-HomeConnect2_EVENT",
     },
     translate(key) {
       return key;
@@ -112,8 +118,8 @@ function createInstance(overrides = {}) {
     file(name) {
       return `modules/MMM-HomeConnect2/${name}`;
     },
-    updateDom() { },
-    sendSocketNotification() { }
+    updateDom() {},
+    sendSocketNotification() {},
   };
 
   // The module renders through the shared lifecycle, which start() would set up.
@@ -135,9 +141,9 @@ function createInstance(overrides = {}) {
           ActiveProgramName: "Eco 40-60",
           ActiveProgramDetails: ["Silent", "varioSpeed"],
           ProgramProgress: 35,
-          RemainingProgramTime: 1800
-        }
-      ]
+          RemainingProgramTime: 1800,
+        },
+      ],
     });
     const runningDom = runningInstance.getDom();
     assert.ok(runningDom.innerHTML.includes("ACTIVE_PROGRAM: Eco 40-60"));
@@ -150,35 +156,32 @@ function createInstance(overrides = {}) {
     const runningDisplayState = runningInstance.buildDeviceDisplayState(
       runningInstance.devices[0],
       {},
-      runningInstance.getDeviceUtils()
+      runningInstance.getDeviceUtils(),
     );
     assert.ok(runningDisplayState.runtime);
     assert.ok(runningDisplayState.presentation);
     assert.strictEqual(runningDisplayState.runtime.percent, 35);
-    assert.strictEqual(
-      runningDisplayState.presentation.programMeta,
-      "ACTIVE_PROGRAM: Eco 40-60"
-    );
+    assert.strictEqual(runningDisplayState.presentation.programMeta, "ACTIVE_PROGRAM: Eco 40-60");
 
     const configuredLanguageInstance = createInstance({
       config: {
-        apiLanguage: "da"
-      }
+        apiLanguage: "da",
+      },
     });
     assert.strictEqual(configuredLanguageInstance.getPreferredApiLanguage(), "da");
 
     const magicMirrorLanguageInstance = createInstance({
       config: {
-        apiLanguage: ""
-      }
+        apiLanguage: "",
+      },
     });
     globalThis.config.language = "de";
     assert.strictEqual(magicMirrorLanguageInstance.getPreferredApiLanguage(), "de");
 
     const browserLanguageInstance = createInstance({
       config: {
-        apiLanguage: ""
-      }
+        apiLanguage: "",
+      },
     });
     globalThis.config.language = "";
     const browserNavigator = Reflect.get(globalThis, "navigator");
@@ -194,9 +197,9 @@ function createInstance(overrides = {}) {
           PowerState: "On",
           ActiveProgramName: "Cotton",
           ActiveProgramDetails: ["Temperatur: 40 °C"],
-          RemainingProgramTime: { value: "PT20M" }
-        }
-      ]
+          RemainingProgramTime: { value: "PT20M" },
+        },
+      ],
     });
     // No usable OperationState means we cannot know whether a program runs. The
     // remaining time still renders, but no play icon claims something we cannot prove.
@@ -218,7 +221,7 @@ function createInstance(overrides = {}) {
       ["Finished", "fa-toggle-on", "fa-play"],
       ["ActionRequired", "fa-toggle-on", "fa-play"],
       ["Aborting", "fa-toggle-on", "fa-play"],
-      ["SomeFutureState", "fa-toggle-on", "fa-play"]
+      ["SomeFutureState", "fa-toggle-on", "fa-play"],
     ];
 
     iconMatrix.forEach(([label, expectedIcon, forbiddenIcon]) => {
@@ -232,9 +235,9 @@ function createInstance(overrides = {}) {
             OperationState: `BSH.Common.EnumType.OperationState.${label}`,
             ActiveProgramName: "Eco 40-60",
             RemainingProgramTime: 1800,
-            ProgramProgress: 35
-          }
-        ]
+            ProgramProgress: 35,
+          },
+        ],
       });
       const html = instance.getDom().innerHTML;
       assert.ok(html.includes(expectedIcon), `${label} should render ${expectedIcon}`);
@@ -249,9 +252,9 @@ function createInstance(overrides = {}) {
           name: "Washer",
           type: "Washer",
           PowerState: "Off",
-          OperationState: "BSH.Common.EnumType.OperationState.Run"
-        }
-      ]
+          OperationState: "BSH.Common.EnumType.OperationState.Run",
+        },
+      ],
     });
     const poweredOffHtml = poweredOffInstance.getDom().innerHTML;
     assert.ok(!poweredOffHtml.includes("fa-play"));
@@ -265,7 +268,7 @@ function createInstance(overrides = {}) {
       ["Finished", false],
       ["Pause", false],
       ["Run", true],
-      ["DelayedStart", true]
+      ["DelayedStart", true],
     ];
 
     selectedProgramStates.forEach(([label, shouldShow]) => {
@@ -280,20 +283,20 @@ function createInstance(overrides = {}) {
             ActiveProgramName: "Synthetics",
             ActiveProgramSource: "selected",
             ActiveProgramDetails: ["Low Heat"],
-            StartInRelative: label === "DelayedStart" ? 3600 : undefined
-          }
-        ]
+            StartInRelative: label === "DelayedStart" ? 3600 : undefined,
+          },
+        ],
       });
       const html = instance.getDom().innerHTML;
       assert.strictEqual(
         html.includes("SELECTED_PROGRAM: Synthetics"),
         shouldShow,
-        `${label}: selected program shown should be ${shouldShow}`
+        `${label}: selected program shown should be ${shouldShow}`,
       );
       assert.strictEqual(
         html.includes("Low Heat"),
         shouldShow,
-        `${label}: program details shown should be ${shouldShow}`
+        `${label}: program details shown should be ${shouldShow}`,
       );
       assert.ok(!html.includes(">Synthetics<"), `${label}: no bare program name leaks through`);
     });
@@ -303,7 +306,7 @@ function createInstance(overrides = {}) {
         showDeviceIcon: false,
         showDeviceIfInfoIsAvailable: true,
         showDeviceIfDoorIsOpen: false,
-        showDeviceIfFailure: false
+        showDeviceIfFailure: false,
       },
       devices: [
         {
@@ -312,9 +315,9 @@ function createInstance(overrides = {}) {
           PowerState: "Off",
           ActiveProgramName: "Synthetics",
           ActiveProgramSource: "selected",
-          ActiveProgramDetails: ["Cupboard Dry Plus", "Low Heat"]
-        }
-      ]
+          ActiveProgramDetails: ["Cupboard Dry Plus", "Low Heat"],
+        },
+      ],
     });
     // A selected program is just the dial position - it says nothing about what the
     // appliance is doing, so it stays hidden until the program actually runs.
@@ -335,9 +338,9 @@ function createInstance(overrides = {}) {
           ActiveProgramSource: "selected",
           ActiveProgramDetails: ["Cupboard Dry Plus", "Low Heat"],
           ProgramProgress: 15,
-          RemainingProgramTime: 1500
-        }
-      ]
+          RemainingProgramTime: 1500,
+        },
+      ],
     });
     const runningSelectedDom = runningSelectedProgramInstance.getDom();
     assert.ok(runningSelectedDom.innerHTML.includes("Dryer"));
@@ -350,7 +353,7 @@ function createInstance(overrides = {}) {
         showDeviceIcon: false,
         showDeviceIfInfoIsAvailable: true,
         showDeviceIfDoorIsOpen: false,
-        showDeviceIfFailure: false
+        showDeviceIfFailure: false,
       },
       devices: [
         {
@@ -359,9 +362,9 @@ function createInstance(overrides = {}) {
           PowerState: "Off",
           ActiveProgramName: "Eco 50°",
           ActiveProgramSource: "selected",
-          ActiveProgramDetails: ["varioSpeed Plus"]
-        }
-      ]
+          ActiveProgramDetails: ["varioSpeed Plus"],
+        },
+      ],
     });
     const selectedDishwasherDom = selectedDishwasherInstance.getDom();
     assert.ok(selectedDishwasherDom.innerHTML.includes("Dishwasher"));
@@ -378,9 +381,9 @@ function createInstance(overrides = {}) {
           OperationState: "BSH.Common.EnumType.OperationState.Run",
           RemainingProgramTime: { value: "PT33M" },
           _initialRemaining: 1980,
-          _remainingObservedAt: Date.now()
-        }
-      ]
+          _remainingObservedAt: Date.now(),
+        },
+      ],
     });
     const secondCycleDryerDom = secondCycleDryerInstance.getDom();
     assert.ok(secondCycleDryerDom.innerHTML.includes("fa-play"));
@@ -406,9 +409,9 @@ function createInstance(overrides = {}) {
           OperationState: "BSH.Common.EnumType.OperationState.Run",
           ActiveProgramName: "Synthetics",
           ActiveProgramSource: "selected",
-          RemainingProgramTime: 1500
-        }
-      ]
+          RemainingProgramTime: 1500,
+        },
+      ],
     });
 
     assert.strictEqual(recoveryNotifications.length, 0);
@@ -426,15 +429,15 @@ function createInstance(overrides = {}) {
           OperationState: "BSH.Common.EnumType.OperationState.Run",
           ActiveProgramName: "Synthetics",
           ActiveProgramSource: "selected",
-          RemainingProgramTime: 1400
-        }
-      ]
+          RemainingProgramTime: 1400,
+        },
+      ],
     });
 
     assert.strictEqual(
       recoveryNotifications.length,
       0,
-      "Expected no frontend-induced recovery request during active program cycle"
+      "Expected no frontend-induced recovery request during active program cycle",
     );
 
     recoveryInstance.socketNotificationReceived("MMM-HomeConnect2_EVENT", {
@@ -450,15 +453,15 @@ function createInstance(overrides = {}) {
           OperationState: "BSH.Common.EnumType.OperationState.Run",
           ActiveProgramName: "Mixed Load",
           ActiveProgramSource: "selected",
-          RemainingProgramTime: 1200
-        }
-      ]
+          RemainingProgramTime: 1200,
+        },
+      ],
     });
 
     assert.strictEqual(
       recoveryNotifications.length,
       0,
-      "Expected no frontend-induced recovery request when the active program cycle changes"
+      "Expected no frontend-induced recovery request when the active program cycle changes",
     );
 
     const delayedStartNotifications = [];
@@ -480,15 +483,15 @@ function createInstance(overrides = {}) {
           OperationState: "BSH.Common.EnumType.OperationState.DelayedStart",
           ActiveProgramName: "Synthetics",
           ActiveProgramSource: "selected",
-          "BSH.Common.Option.StartInRelative": { value: "PT30M" }
-        }
-      ]
+          "BSH.Common.Option.StartInRelative": { value: "PT30M" },
+        },
+      ],
     });
 
     assert.strictEqual(
       delayedStartNotifications.length,
       0,
-      "Expected no recovery request for delayed start with selected program"
+      "Expected no recovery request for delayed start with selected program",
     );
 
     const selectedDoorOpenInstance = createInstance({
@@ -502,9 +505,9 @@ function createInstance(overrides = {}) {
           ActiveProgramSource: "selected",
           EstimatedTotalProgramTime: 4560,
           RemainingProgramTime: 4560,
-          RemainingProgramTimeIsEstimated: true
-        }
-      ]
+          RemainingProgramTimeIsEstimated: true,
+        },
+      ],
     });
     const selectedDoorOpenDom = selectedDoorOpenInstance.getDom();
     assert.ok(selectedDoorOpenDom.innerHTML.includes("Dryer"));
@@ -525,9 +528,9 @@ function createInstance(overrides = {}) {
           OperationState: "BSH.Common.EnumType.OperationState.Ready",
           DoorState: "Open",
           ProgramProgress: 0,
-          RemainingProgramTime: 0
-        }
-      ]
+          RemainingProgramTime: 0,
+        },
+      ],
     });
     const staleZeroProgressDom = staleZeroProgressInstance.getDom();
     assert.ok(staleZeroProgressDom.innerHTML.includes("fa-door-open"));
@@ -551,9 +554,9 @@ function createInstance(overrides = {}) {
           DoorState: "Open",
           RemainingProgramTime: 0,
           EstimatedTotalProgramTime: 8940,
-          RemainingProgramTimeIsEstimated: true
-        }
-      ]
+          RemainingProgramTimeIsEstimated: true,
+        },
+      ],
     });
     const staleFullBarDom = staleFullBarInstance.getDom();
     assert.ok(staleFullBarDom.innerHTML.includes("fa-door-open"));
@@ -574,9 +577,9 @@ function createInstance(overrides = {}) {
           ActiveProgramName: "Easy Care",
           ActiveProgramSource: "active",
           RemainingProgramTime: 894,
-          EstimatedTotalProgramTime: 8940
-        }
-      ]
+          EstimatedTotalProgramTime: 8940,
+        },
+      ],
     });
     const runningEstimateHtml = runningEstimateInstance.getDom().innerHTML;
     assert.ok(runningEstimateHtml.includes('<progress value="90"'));
@@ -595,9 +598,9 @@ function createInstance(overrides = {}) {
           ActiveProgramName: "Easy Care",
           ActiveProgramSource: "active",
           RemainingProgramTime: 0,
-          EstimatedTotalProgramTime: 8940
-        }
-      ]
+          EstimatedTotalProgramTime: 8940,
+        },
+      ],
     });
     const runningAtEndHtml = runningAtEndInstance.getDom().innerHTML;
     assert.ok(runningAtEndHtml.includes("PROGRAM_FINISHED"));
@@ -615,9 +618,9 @@ function createInstance(overrides = {}) {
           OperationState: "BSH.Common.EnumType.OperationState.Run",
           ActiveProgramName: "Easy Care",
           ActiveProgramSource: "active",
-          EstimatedTotalProgramTime: 8940
-        }
-      ]
+          EstimatedTotalProgramTime: 8940,
+        },
+      ],
     });
     const plannedDurationHtml = plannedDurationInstance.getDom().innerHTML;
     assert.ok(plannedDurationHtml.includes("ACTIVE_PROGRAM: Easy Care"));
@@ -628,7 +631,7 @@ function createInstance(overrides = {}) {
         showDeviceIcon: false,
         showDeviceIfInfoIsAvailable: true,
         showDeviceIfDoorIsOpen: false,
-        showDeviceIfFailure: false
+        showDeviceIfFailure: false,
       },
       devices: [
         {
@@ -638,9 +641,9 @@ function createInstance(overrides = {}) {
           OperationState: "BSH.Common.EnumType.OperationState.Finished",
           ActiveProgramName: "Cotton",
           ActiveProgramSource: "active",
-          ActiveProgramDetails: ["Silent Wash", "varioSpeed"]
-        }
-      ]
+          ActiveProgramDetails: ["Silent Wash", "varioSpeed"],
+        },
+      ],
     });
     const finishedProgramDom = finishedProgramInstance.getDom();
     assert.ok(finishedProgramDom.innerHTML.includes("Cotton"));
@@ -662,9 +665,9 @@ function createInstance(overrides = {}) {
           ActiveProgramSource: "active",
           ActiveProgramDetails: ["Drying target: Extra Dry", "Wrinkle Block: 120 min"],
           RemainingProgramTime: 0,
-          FinishInRelative: 4560
-        }
-      ]
+          FinishInRelative: 4560,
+        },
+      ],
     });
     const staleActiveClaimHtml = staleActiveClaimInstance.getDom().innerHTML;
     assert.ok(staleActiveClaimHtml.includes("fa-door-open"));
@@ -686,9 +689,9 @@ function createInstance(overrides = {}) {
           ActiveProgramName: "Synthetics",
           ActiveProgramSource: "active",
           ActiveProgramDetails: ["Drying target: Extra Dry"],
-          RemainingProgramTime: 1800
-        }
-      ]
+          RemainingProgramTime: 1800,
+        },
+      ],
     });
     const genuinelyActiveHtml = genuinelyActiveInstance.getDom().innerHTML;
     assert.ok(genuinelyActiveHtml.includes("ACTIVE_PROGRAM: Synthetics"));
@@ -704,17 +707,14 @@ function createInstance(overrides = {}) {
           ActiveProgramName: "Synthetics",
           ProgramProgress: 100,
           RemainingProgramTime: 0,
-          ActiveProgramDetails: ["Wrinkle Block: 120 min"]
-        }
-      ]
+          ActiveProgramDetails: ["Wrinkle Block: 120 min"],
+        },
+      ],
     });
     const wrinkleGuardDom = wrinkleGuardInstance.getDom();
     assert.ok(wrinkleGuardDom.innerHTML.includes("WRINKLE_PROTECTION_ACTIVE"));
     assert.ok(!wrinkleGuardDom.innerHTML.includes("fa-play"));
-    assert.strictEqual(
-      (wrinkleGuardDom.innerHTML.match(/WRINKLE_PROTECTION_ACTIVE/g) || []).length,
-      1
-    );
+    assert.strictEqual((wrinkleGuardDom.innerHTML.match(/WRINKLE_PROTECTION_ACTIVE/g) || []).length, 1);
 
     const localizedWrinkleGuardInstance = createInstance({
       devices: [
@@ -725,17 +725,14 @@ function createInstance(overrides = {}) {
           OperationState: "BSH.Common.EnumType.OperationState.Finished",
           ActiveProgramName: "Pflegeleicht",
           ActiveProgramSource: "active",
-          ActiveProgramDetails: ["Trockenziel: Schranktrocken Plus", "Knitterschutz: 120 min"]
-        }
-      ]
+          ActiveProgramDetails: ["Trockenziel: Schranktrocken Plus", "Knitterschutz: 120 min"],
+        },
+      ],
     });
     const localizedWrinkleGuardDom = localizedWrinkleGuardInstance.getDom();
     assert.ok(localizedWrinkleGuardDom.innerHTML.includes("WRINKLE_PROTECTION_ACTIVE"));
     assert.ok(!localizedWrinkleGuardDom.innerHTML.includes("PROGRAM_FINISHED"));
-    assert.strictEqual(
-      (localizedWrinkleGuardDom.innerHTML.match(/WRINKLE_PROTECTION_ACTIVE/g) || []).length,
-      1
-    );
+    assert.strictEqual((localizedWrinkleGuardDom.innerHTML.match(/WRINKLE_PROTECTION_ACTIVE/g) || []).length, 1);
 
     const delayedStartInstance = createInstance({
       devices: [
@@ -747,9 +744,9 @@ function createInstance(overrides = {}) {
           ActiveProgramName: "Easy Care",
           RemainingProgramTimeIsEstimated: true,
           "BSH.Common.Option.StartInRelative": { value: "PT2H29M" },
-          FinishInRelative: { value: "PT4H10M" }
-        }
-      ]
+          FinishInRelative: { value: "PT4H10M" },
+        },
+      ],
     });
     const originalDateNow = Date.now;
     Date.now = () => new Date("2026-04-04T10:00:00Z").getTime();
@@ -772,9 +769,9 @@ function createInstance(overrides = {}) {
           OperationState: "BSH.Common.EnumType.OperationState.DelayedStart",
           ActiveProgramName: "Cottons",
           EstimatedTotalProgramTime: 11760,
-          FinishInRelative: { value: 39309 }
-        }
-      ]
+          FinishInRelative: { value: 39309 },
+        },
+      ],
     });
     Date.now = () => new Date("2026-04-04T10:00:00Z").getTime();
     const delayedStartFinishOnlyDom = delayedStartFinishOnlyInstance.getDom();
@@ -787,16 +784,16 @@ function createInstance(overrides = {}) {
         showDeviceIcon: false,
         showDeviceIfInfoIsAvailable: false,
         showDeviceIfDoorIsOpen: false,
-        showDeviceIfFailure: false
+        showDeviceIfFailure: false,
       },
       devices: [
         {
           name: "Washer",
           type: "Washer",
           PowerState: "Off",
-          connected: false
-        }
-      ]
+          connected: false,
+        },
+      ],
     });
     const offlineDom = offlineDeviceInstance.getDom();
     assert.ok(offlineDom.innerHTML.includes("Washer"));
@@ -809,7 +806,7 @@ function createInstance(overrides = {}) {
         showDeviceIcon: true,
         showDeviceIfInfoIsAvailable: true,
         showDeviceIfDoorIsOpen: false,
-        showDeviceIfFailure: false
+        showDeviceIfFailure: false,
       },
       devices: [
         {
@@ -819,10 +816,10 @@ function createInstance(overrides = {}) {
           AvailablePrograms: ["Coffee", "Espresso"],
           AvailableOptionDetails: ["Bean Amount", "Fill Quantity: 60-260 ml"],
           DeviceAlertsByKey: {
-            tank: "Water tank empty"
-          }
-        }
-      ]
+            tank: "Water tank empty",
+          },
+        },
+      ],
     });
     const capabilityDom = capabilityInstance.getDom();
     assert.ok(capabilityDom.innerHTML.includes("deviceIconFallback"));
@@ -833,7 +830,7 @@ function createInstance(overrides = {}) {
         showDeviceIcon: true,
         showDeviceIfInfoIsAvailable: true,
         showDeviceIfDoorIsOpen: false,
-        showDeviceIfFailure: false
+        showDeviceIfFailure: false,
       },
       devices: [
         {
@@ -841,9 +838,9 @@ function createInstance(overrides = {}) {
           type: "Washer",
           PowerState: "Off",
           AvailablePrograms: ["Cotton", "Easy Care"],
-          AvailableOptionDetails: ["Temperature", "Spin Speed"]
-        }
-      ]
+          AvailableOptionDetails: ["Temperature", "Spin Speed"],
+        },
+      ],
     });
     const washerAvailableProgramsDom = washerAvailableProgramsInstance.getDom();
     assert.ok(!washerAvailableProgramsDom.innerHTML.includes("AVAILABLE_PROGRAMS"));
@@ -855,15 +852,15 @@ function createInstance(overrides = {}) {
         showAlwaysAllDevices: false,
         showDeviceIfDoorIsOpen: false,
         showDeviceIfFailure: false,
-        showDeviceIfInfoIsAvailable: false
+        showDeviceIfInfoIsAvailable: false,
       },
       devices: [
         {
           name: "Idle fridge",
           type: "FridgeFreezer",
-          PowerState: "Off"
-        }
-      ]
+          PowerState: "Off",
+        },
+      ],
     });
     const emptyDom = emptyInstance.getDom();
     assert.ok(emptyDom.innerHTML.includes("NO_ACTIVE_APPLIANCES"));
@@ -873,8 +870,8 @@ function createInstance(overrides = {}) {
         status: "waiting",
         verification_uri: "https://example.invalid/device",
         user_code: "ABCD-EFGH",
-        expires_in_minutes: 10
-      }
+        expires_in_minutes: 10,
+      },
     });
     const authDom = authInstance.getDom();
     assert.ok(authDom.innerHTML.includes("AUTH_TITLE"));
@@ -888,13 +885,13 @@ function createInstance(overrides = {}) {
           type: "Washer",
           PowerState: "On",
           ActiveProgramName: "Eco 40-60",
-          ActiveProgramSource: "active"
-        }
+          ActiveProgramSource: "active",
+        },
       ],
       lastInitStatus: {
         status: "device_error",
-        message: "BSH.Common.Error.RemoteControlNotActive: Remote control is not enabled"
-      }
+        message: "BSH.Common.Error.RemoteControlNotActive: Remote control is not enabled",
+      },
     });
     const homeConnectErrorDom = homeConnectErrorInstance.getDom();
     assert.ok(homeConnectErrorDom.innerHTML.includes("Home Connect"));
@@ -907,16 +904,16 @@ function createInstance(overrides = {}) {
           type: "Washer",
           PowerState: "On",
           ActiveProgramName: "Eco 40-60",
-          ActiveProgramSource: "active"
-        }
+          ActiveProgramSource: "active",
+        },
       ],
       lastInitStatus: {
         status: "device_error",
         message: "Rate limit active - please wait 120s",
         statusCode: 429,
         isRateLimit: true,
-        rateLimitSeconds: 120
-      }
+        rateLimitSeconds: 120,
+      },
     });
     const rateLimitDom = rateLimitInstance.getDom();
     assert.ok(rateLimitDom.innerHTML.includes("HTTP 429"));
@@ -928,26 +925,26 @@ function createInstance(overrides = {}) {
       lastInitStatus: {
         status: "hc_error",
         message: "HomeConnect error: getaddrinfo ENOTFOUND <api.home-connect.com>",
-        retryInSeconds: 20
-      }
+        retryInSeconds: 20,
+      },
     });
     const initRetryHtml = initRetryInstance.getDom().innerHTML;
     assert.ok(initRetryHtml.includes("HC_INIT_FAILED_TITLE"));
     assert.ok(initRetryHtml.includes("HC_INIT_RETRY_IN 20s"));
     assert.ok(
       initRetryHtml.includes("ENOTFOUND &lt;api.home-connect.com&gt;"),
-      "Expected the error text to be HTML-escaped"
+      "Expected the error text to be HTML-escaped",
     );
     assert.ok(initRetryHtml.includes("LOADING_APPLIANCES"), "Expected the spinner to stay below the banner");
 
     const longInitRetryHtml = createInstance({
-      lastInitStatus: { status: "hc_error", message: "HomeConnect error: timeout", retryInSeconds: 300 }
+      lastInitStatus: { status: "hc_error", message: "HomeConnect error: timeout", retryInSeconds: 300 },
     }).getDom().innerHTML;
     assert.ok(longInitRetryHtml.includes("HC_INIT_RETRY_IN 5 min"));
 
     // An hc_error whose text happens to match a BSH pattern gets one banner, not two.
     const bshInitErrorHtml = createInstance({
-      lastInitStatus: { status: "hc_error", message: "HomeConnect error: BSH.Common.Error.Foo", retryInSeconds: 5 }
+      lastInitStatus: { status: "hc_error", message: "HomeConnect error: BSH.Common.Error.Foo", retryInSeconds: 5 },
     }).getDom().innerHTML;
     assert.strictEqual(bshInitErrorHtml.split("hc-status-banner-title").length - 1, 1);
 
@@ -955,15 +952,13 @@ function createInstance(overrides = {}) {
       lastInitStatus: {
         status: "device_error",
         message: "Konfigurationskonflikt: Dieses Display nutzt eine andere Konfiguration.",
-        isConfigMismatch: true
-      }
+        isConfigMismatch: true,
+      },
     });
     const configMismatchDom = configMismatchInstance.getDom();
     assert.ok(configMismatchDom.innerHTML.includes("CONFIG_MISMATCH_TITLE"));
     assert.ok(
-      configMismatchDom.innerHTML.includes(
-        "Konfigurationskonflikt: Dieses Display nutzt eine andere Konfiguration."
-      )
+      configMismatchDom.innerHTML.includes("Konfigurationskonflikt: Dieses Display nutzt eine andere Konfiguration."),
     );
     assert.ok(configMismatchDom.innerHTML.includes("LOADING_APPLIANCES"));
 
@@ -973,15 +968,15 @@ function createInstance(overrides = {}) {
       lastInitStatus: {
         status: "device_error",
         isConfigMismatch: true,
-        mismatchKeys: ["clientId"]
-      }
+        mismatchKeys: ["clientId"],
+      },
     });
     const credentialMismatchDom = credentialMismatchInstance.getDom();
     assert.ok(credentialMismatchDom.innerHTML.includes("CONFIG_MISMATCH_CREDENTIALS"));
 
     const debugSessionInstance = createInstance({
       config: {
-        logLevel: "debug"
+        logLevel: "debug",
       },
       devices: [
         {
@@ -989,8 +984,8 @@ function createInstance(overrides = {}) {
           type: "Washer",
           PowerState: "On",
           ActiveProgramName: "Eco 40-60",
-          ActiveProgramSource: "active"
-        }
+          ActiveProgramSource: "active",
+        },
       ],
       debugStats: {
         lastApiCallTs: Date.now(),
@@ -1002,9 +997,9 @@ function createInstance(overrides = {}) {
           authFlowInProgress: false,
           deviceRefreshInFlight: false,
           programFetchInFlight: true,
-          rateLimitRemainingMs: 120000
-        }
-      }
+          rateLimitRemainingMs: 120000,
+        },
+      },
     });
     const debugSessionDom = debugSessionInstance.getDom();
     assert.ok(debugSessionDom.innerHTML.includes("SSE traffic:"));
@@ -1022,9 +1017,7 @@ function createInstance(overrides = {}) {
     const payload = "<img src=x onerror=alert(1)>";
     const findInjected = (root) =>
       root.findAll(
-        (element) =>
-          element.tagName === "script" ||
-          (element.tagName === "img" && element.getAttribute("src") === "x")
+        (element) => element.tagName === "script" || (element.tagName === "img" && element.getAttribute("src") === "x"),
       );
 
     const hostileDeviceDom = createInstance({
@@ -1038,10 +1031,10 @@ function createInstance(overrides = {}) {
           ActiveProgramName: `Cotton ${payload}`,
           ActiveProgramDetails: [payload],
           ActiveProgramSource: "active",
-          ProgramProgress: 40
-        }
+          ProgramProgress: 40,
+        },
       ],
-      lastInitStatus: { status: "device_error", message: `Rate limit ${payload}`, isRateLimit: true }
+      lastInitStatus: { status: "device_error", message: `Rate limit ${payload}`, isRateLimit: true },
     }).getDom();
     assert.deepStrictEqual(findInjected(hostileDeviceDom), [], "Device values must not create elements");
     assert.ok(hostileDeviceDom.innerHTML.includes("Washer &lt;img src=x onerror=alert(1)&gt;"));
@@ -1055,9 +1048,13 @@ function createInstance(overrides = {}) {
     const bannerDoms = [
       { status: "hc_error", message: payload, retryInSeconds: 5 },
       { status: "device_error", message: `BSH.Common.Error.X ${payload}` },
-      { status: "device_error", message: payload, isConfigMismatch: true }
+      { status: "device_error", message: payload, isConfigMismatch: true },
     ].map((lastInitStatus) =>
-      createInstance({ lastInitStatus, config: { logLevel: "debug" }, debugStats: { apiCounters: { [payload]: 1 } } }).getDom()
+      createInstance({
+        lastInitStatus,
+        config: { logLevel: "debug" },
+        debugStats: { apiCounters: { [payload]: 1 } },
+      }).getDom(),
     );
     bannerDoms.forEach((dom) => {
       assert.deepStrictEqual(findInjected(dom), [], "Banner and debug values must not create elements");
@@ -1070,14 +1067,14 @@ function createInstance(overrides = {}) {
         verification_uri: "javascript:alert(1)",
         verification_uri_complete: "javascript:alert(2)",
         user_code: payload,
-        expires_in_minutes: 10
-      }
+        expires_in_minutes: 10,
+      },
     }).getDom();
     assert.deepStrictEqual(findInjected(hostileAuthDom), []);
     assert.deepStrictEqual(
       hostileAuthDom.findAll((element) => element.tagName === "a"),
       [],
-      "Non-http(s) verification URLs must not become links"
+      "Non-http(s) verification URLs must not become links",
     );
     assert.ok(hostileAuthDom.innerHTML.includes("javascript:alert(1)"), "The URL is still shown as text");
 
@@ -1087,29 +1084,68 @@ function createInstance(overrides = {}) {
         verification_uri: "https://api.home-connect.com/security/oauth/device_verify",
         user_code: "ABCD-EFGH",
         verification_qr_svg: `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`,
-        expires_in_minutes: 10
-      }
+        expires_in_minutes: 10,
+      },
     }).getDom();
     const [verificationLink] = qrAuthDom.findAll((element) => element.tagName === "a");
-    assert.strictEqual(verificationLink.getAttribute("href"), "https://api.home-connect.com/security/oauth/device_verify");
+    assert.strictEqual(
+      verificationLink.getAttribute("href"),
+      "https://api.home-connect.com/security/oauth/device_verify",
+    );
     const [qrImage] = qrAuthDom.findByClass("auth-qr")[0].children;
     assert.strictEqual(qrImage.tagName, "img", "The QR code is rendered as an image, not inline SVG markup");
     assert.ok(qrImage.getAttribute("src").startsWith("data:image/svg+xml;charset=utf-8,%3Csvg"));
-    assert.deepStrictEqual(qrAuthDom.findAll((element) => element.tagName === "svg" || element.tagName === "script"), []);
+    assert.deepStrictEqual(
+      qrAuthDom.findAll((element) => element.tagName === "svg" || element.tagName === "script"),
+      [],
+    );
 
     const hostileAuthStatusDoms = [
       { status: "polling", message: payload, attempt: 1, maxAttempts: 4, interval: 5 },
-      { status: "error", message: payload }
+      { status: "error", message: payload },
     ].map((authStatus) => createInstance({ authStatus }).getDom());
     hostileAuthStatusDoms.forEach((dom) => {
       assert.deepStrictEqual(findInjected(dom), []);
       assert.ok(dom.innerHTML.includes("&lt;img src=x"));
     });
-    assert.strictEqual(
-      hostileAuthStatusDoms[0].findByClass("progress-fill")[0].getAttribute("style"),
-      "width: 25%"
-    );
+    assert.strictEqual(hostileAuthStatusDoms[0].findByClass("progress-fill")[0].getAttribute("style"), "width: 25%");
 
+    // A rate-limit banner with a known length expires on its own; no further
+    // INIT_STATUS may arrive to clear it until the next snapshot.
+    const expiredRateLimitInstance = createInstance({
+      devices: [{ name: "Washer", type: "Washer", PowerState: "On" }],
+      lastInitStatus: {
+        status: "device_error",
+        message: "Rate limit detected - wait 120s",
+        statusCode: 429,
+        isRateLimit: true,
+        rateLimitSeconds: 120,
+      },
+    });
+    expiredRateLimitInstance.lastInitStatusReceivedAt = Date.now() - 60 * 1000;
+    assert.ok(expiredRateLimitInstance.getDom().innerHTML.includes("HTTP 429"), "still inside the limit");
+    expiredRateLimitInstance.lastInitStatusReceivedAt = Date.now() - 121 * 1000;
+    assert.ok(!expiredRateLimitInstance.getDom().innerHTML.includes("HTTP 429"), "expired after 120s");
+
+    // DEBUG_STATS arrive with every API call and keep-alive; they only cost a
+    // re-render when the debug panel actually shows them.
+    const countRenders = (logLevel) => {
+      const instance = createInstance({ config: { logLevel } });
+      let renders = 0;
+      instance.updateDom = () => {
+        renders += 1;
+      };
+      instance.socketNotificationReceived("MMM-HomeConnect2_EVENT", {
+        instanceId: "test-instance",
+        action: "DEBUG_STATS",
+        data: { lastApiCallTs: Date.now() },
+      });
+      return { renders, stats: instance.debugStats };
+    };
+    const quiet = countRenders("");
+    assert.strictEqual(quiet.renders, 0, "no re-render without the debug panel");
+    assert.ok(quiet.stats, "the stats are still kept for a later switch to debug");
+    assert.strictEqual(countRenders("debug").renders, 1);
 
     console.log("frontend-render.test.js OK");
   } finally {

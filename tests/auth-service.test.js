@@ -1,19 +1,22 @@
 "use strict";
 
-const assert = require("assert");
-const path = require("path");
+const assert = require("node:assert");
+const path = require("node:path");
 const AuthService = require("../lib/auth-service");
 
 function createAuthService(overrides = {}) {
   const globalSession = {
     lastAuthAttempt: 0,
     MIN_AUTH_INTERVAL: 60000,
-    refreshToken: null
+    refreshToken: null,
   };
   const logs = [];
-  const logger = (level, ...args) => {
-    logs.push({ level, message: args.join(" ") });
-  };
+  const logger = Object.fromEntries(
+    ["debug", "info", "warn", "error"].map((level) => [
+      level,
+      (...args) => logs.push({ level, message: args.join(" ") }),
+    ]),
+  );
   const broadcasts = [];
   const service = new AuthService({
     logger,
@@ -22,7 +25,7 @@ function createAuthService(overrides = {}) {
     globalSession,
     refreshTokenPath: path.join(__dirname, "fixtures", "missing-refresh-token.json"),
     maxInitAttempts: 1,
-    ...overrides
+    ...overrides,
   });
   return { service, globalSession, logs, broadcasts };
 }

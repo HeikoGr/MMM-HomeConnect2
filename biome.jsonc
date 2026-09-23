@@ -1,3 +1,6 @@
+// Shared Biome configuration of the MagicMirror modules (mmm-shared, MMM-CalDAV-Tasks,
+// MMM-HomeConnect2, MMM-LibraryMonitor, MMM-Photoprism2, MMM-Webuntis). Keep it identical across the repos;
+// only defaultBranch, the asset ignores and module-specific globals differ.
 {
   "$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
   "vcs": {
@@ -11,28 +14,51 @@
     "includes": [
       "**",
       "!**/node_modules",
-      "!**/icons",
-      "!**/sounds",
       "!**/.mm-module-checker",
-      "!lib/mmm-shared"
+      "!lib/mmm-shared",
+      "!**/*.md",
+      "!**/*.png",
+      "!**/icons",
+      "!**/img",
+      "!**/sounds"
     ]
   },
   "formatter": {
-    "enabled": false,
+    "enabled": true,
     "indentStyle": "space",
     "indentWidth": 2,
-    "lineWidth": 100,
+    "lineWidth": 120,
     "lineEnding": "lf",
     "useEditorconfig": false
   },
   "linter": {
     "enabled": true,
     "rules": {
-      "preset": "none",
+      "preset": "recommended",
+      "complexity": {
+        "noArguments": "error",
+        "noImportantStyles": "warn",
+        "useDateNow": "warn",
+        "useOptionalChain": "warn"
+      },
       "correctness": {
         "noUndeclaredVariables": "error",
         "noUnusedFunctionParameters": "warn",
         "noUnusedVariables": "error"
+      },
+      "style": {
+        "noDescendingSpecificity": "warn",
+        "useNodejsImportProtocol": "error",
+        "useConst": "error",
+        "useTemplate": "warn"
+      },
+      "suspicious": {
+        "noAssignInExpressions": "error",
+        "noDuplicateProperties": "error",
+        "noConsole": "off",
+        "noGlobalIsFinite": "error",
+        "noGlobalIsNan": "error",
+        "useIterableCallbackReturn": "error"
       }
     }
   },
@@ -48,19 +74,11 @@
     "formatter": {
       "quoteStyle": "double",
       "jsxQuoteStyle": "double",
-      "trailingCommas": "none",
+      "trailingCommas": "all",
       "semicolons": "always",
       "arrowParentheses": "always",
       "bracketSameLine": false
     },
     "globals": ["Log", "Module", "config"]
-  },
-  "overrides": [
-    {
-      "includes": ["tests/**/*.js"],
-      "javascript": {
-        "globals": ["describe", "it", "before", "after", "beforeEach", "afterEach"]
-      }
-    }
-  ]
+  }
 }

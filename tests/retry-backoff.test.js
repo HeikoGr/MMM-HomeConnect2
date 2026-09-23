@@ -4,7 +4,7 @@
 // the token endpoint and the SSE channels. Both used to retry at a fixed
 // interval, which turns a 429 into a self-sustaining penalty.
 
-const assert = require("assert");
+const assert = require("node:assert");
 const modulePath = require.resolve("../lib/homeconnect-api");
 
 function makeFakeEventSource() {
@@ -14,10 +14,10 @@ function makeFakeEventSource() {
     addEventListener(type, cb) {
       this.listeners.push([type, cb]);
     },
-    removeEventListener() { },
+    removeEventListener() {},
     close() {
       this.closed = true;
-    }
+    },
   };
 }
 
@@ -31,7 +31,7 @@ function makeFakeEventSource() {
         status: 429,
         statusText: "Too Many Requests",
         headers: { get: () => null },
-        text: async () => "rate limited"
+        text: async () => "rate limited",
       });
 
     delete require.cache[modulePath];
@@ -44,10 +44,7 @@ function makeFakeEventSource() {
       await hc.refreshTokens();
 
       const firstBackoffMs = hc.tokenRefreshBackoffRemainingMs();
-      assert.ok(
-        firstBackoffMs >= 60 * 1000,
-        `Expected the first retry to wait at least 60s, got ${firstBackoffMs}ms`
-      );
+      assert.ok(firstBackoffMs >= 60 * 1000, `Expected the first retry to wait at least 60s, got ${firstBackoffMs}ms`);
       assert.strictEqual(rateLimitEvents.length, 1, "Expected a rateLimit report on 429");
       assert.strictEqual(rateLimitEvents[0].source, "token");
 
@@ -57,7 +54,7 @@ function makeFakeEventSource() {
       assert.strictEqual(
         hc._tokenRefreshFailures,
         failuresBefore,
-        "Expected a suppressed refresh not to hit the token endpoint"
+        "Expected a suppressed refresh not to hit the token endpoint",
       );
 
       // A retry firing after the window escalates instead of repeating 60s.
@@ -66,7 +63,7 @@ function makeFakeEventSource() {
       const secondBackoffMs = hc.tokenRefreshBackoffRemainingMs();
       assert.ok(
         secondBackoffMs > firstBackoffMs,
-        `Expected escalating backoff, got ${firstBackoffMs}ms then ${secondBackoffMs}ms`
+        `Expected escalating backoff, got ${firstBackoffMs}ms then ${secondBackoffMs}ms`,
       );
 
       // ...but the escalation is capped rather than growing without bound.
@@ -76,7 +73,7 @@ function makeFakeEventSource() {
       }
       assert.ok(
         hc.tokenRefreshBackoffRemainingMs() <= 60 * 60 * 1000 * 1.2,
-        `Expected the backoff to stay capped, got ${hc.tokenRefreshBackoffRemainingMs()}ms`
+        `Expected the backoff to stay capped, got ${hc.tokenRefreshBackoffRemainingMs()}ms`,
       );
     } finally {
       clearTimeout(hc.tokenRefreshTimeout);
@@ -97,7 +94,7 @@ function makeFakeEventSource() {
           status: 429,
           statusText: "Too Many Requests",
           headers: { get: () => "30" },
-          text: async () => "rate limited"
+          text: async () => "rate limited",
         });
       }
       return Promise.resolve({
@@ -105,16 +102,16 @@ function makeFakeEventSource() {
         json: async () => ({
           access_token: "at",
           refresh_token: "rt",
-          expires_in: 3600
+          expires_in: 3600,
         }),
-        text: async () => ""
+        text: async () => "",
       });
     };
 
     delete require.cache[modulePath];
     const HomeConnect = require(modulePath);
     const hc = new HomeConnect("client", "secret", "refresh");
-    hc.recreateEventSources = () => { };
+    hc.recreateEventSources = () => {};
 
     try {
       await hc.refreshTokens();
@@ -122,7 +119,7 @@ function makeFakeEventSource() {
       const backoffMs = hc.tokenRefreshBackoffRemainingMs();
       assert.ok(
         backoffMs > 25 * 1000 && backoffMs <= 30 * 1000,
-        `Expected Retry-After=30s to drive the backoff, got ${backoffMs}ms`
+        `Expected Retry-After=30s to drive the backoff, got ${backoffMs}ms`,
       );
 
       failNext = false;
@@ -130,11 +127,7 @@ function makeFakeEventSource() {
       await hc.refreshTokens();
 
       assert.strictEqual(hc._tokenRefreshFailures, 0, "Expected success to reset the failure count");
-      assert.strictEqual(
-        hc.tokenRefreshBackoffRemainingMs(),
-        0,
-        "Expected success to clear the backoff window"
-      );
+      assert.strictEqual(hc.tokenRefreshBackoffRemainingMs(), 0, "Expected success to clear the backoff window");
     } finally {
       clearTimeout(hc.tokenRefreshTimeout);
       hc.tokenRefreshTimeout = null;
@@ -164,11 +157,11 @@ function makeFakeEventSource() {
     assert.deepStrictEqual(
       recreates.map((entry) => entry.delayMs),
       [5000, 10000, 20000],
-      "Expected the per-channel delay to double on consecutive failures"
+      "Expected the per-channel delay to double on consecutive failures",
     );
     assert.ok(
       recreates.every((entry) => entry.label === "device:ha-1"),
-      "Expected only the failing channel to be scheduled for a rebuild"
+      "Expected only the failing channel to be scheduled for a rebuild",
     );
 
     // A different channel starts from the base delay - one bad appliance must
@@ -215,12 +208,15 @@ function makeFakeEventSource() {
     const survivor = makeFakeEventSource();
     hc.eventSources = { "ha-1": makeFakeEventSource(), "ha-2": survivor };
     hc.eventListeners = {
-      "ha-1": new Map([["NOTIFY", () => { }], ["STATUS", () => { }]]),
-      "ha-2": new Map([["NOTIFY", () => { }]])
+      "ha-1": new Map([
+        ["NOTIFY", () => {}],
+        ["STATUS", () => {}],
+      ]),
+      "ha-2": new Map([["NOTIFY", () => {}]]),
     };
     hc._deviceEventMonitors = {
       "ha-1": { attached: true, openListener: null, errorListener: null },
-      "ha-2": { attached: true, openListener: null, errorListener: null }
+      "ha-2": { attached: true, openListener: null, errorListener: null },
     };
 
     hc.closeEventSourceByLabel("device:ha-1");
@@ -233,7 +229,7 @@ function makeFakeEventSource() {
     assert.strictEqual(
       hc.eventSources["ha-1"].listeners.filter(([type]) => type === "NOTIFY").length,
       1,
-      "Expected the rebuilt channel to carry its listeners again"
+      "Expected the rebuilt channel to carry its listeners again",
     );
   }
 

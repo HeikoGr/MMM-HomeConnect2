@@ -1,12 +1,17 @@
 "use strict";
 
-const assert = require("assert");
+const assert = require("node:assert");
 const ProgramService = require("../lib/program-service");
 
 function createProgramService(overrides = {}) {
   const globalSession = { rateLimitUntil: 0 };
   const logs = [];
-  const logger = (level, ...args) => logs.push({ level, message: args.join(" ") });
+  const logger = Object.fromEntries(
+    ["debug", "info", "warn", "error"].map((level) => [
+      level,
+      (...args) => logs.push({ level, message: args.join(" ") }),
+    ]),
+  );
   const devices = new Map([
     [
       "ha-1",
@@ -15,9 +20,9 @@ function createProgramService(overrides = {}) {
         name: "Washer",
         type: "Washer",
         connected: false,
-        optionsApplied: []
-      }
-    ]
+        optionsApplied: [],
+      },
+    ],
   ]);
   const service = new ProgramService({
     logger,
@@ -27,12 +32,12 @@ function createProgramService(overrides = {}) {
     setRateLimitUntil: (untilTs) => {
       globalSession.rateLimitUntil = Math.max(0, Number(untilTs || 0));
     },
-    ...overrides
+    ...overrides,
   });
   service.attachClient({
     applyEventToDevice(device, option) {
       device.optionsApplied.push(option);
-    }
+    },
   });
   return { service, globalSession, logs, devices };
 }
@@ -47,11 +52,8 @@ function createProgramService(overrides = {}) {
       data: {
         key: "LaundryCare.Washer.Program.EasyCare",
         name: "Easy Care",
-        options: [
-          { key: "op1" },
-          { key: "BSH.Common.Option.EstimatedTotalProgramTime", value: 4200 }
-        ]
-      }
+        options: [{ key: "op1" }, { key: "BSH.Common.Option.EstimatedTotalProgramTime", value: 4200 }],
+      },
     };
     const payload = service.applyProgramResult(result);
     assert.ok(payload);
@@ -78,25 +80,25 @@ function createProgramService(overrides = {}) {
           {
             key: "LaundryCare.Dryer.Option.DryingTarget",
             value: "LaundryCare.Dryer.EnumType.DryingTarget.CupboardDryPlus",
-            displayvalue: "Cupboard Dry Plus"
+            displayvalue: "Cupboard Dry Plus",
           },
           {
             key: "LaundryCare.Dryer.Option.WrinkleGuard",
             value: "LaundryCare.Dryer.EnumType.WrinkleGuard.Min60",
             name: "Less Ironing",
-            displayvalue: "60 min"
+            displayvalue: "60 min",
           },
           {
             key: "LaundryCare.Dryer.Option.Gentle",
             value: true,
-            name: "Gentle Dry"
+            name: "Gentle Dry",
           },
           {
             key: "LaundryCare.Dryer.Option.ProcessPhase",
             value: "LaundryCare.Dryer.EnumType.ProcessPhase.CupboardDryReached",
-            displayvalue: "Cupboard-dry reached"
-          }
-        ]
+            displayvalue: "Cupboard-dry reached",
+          },
+        ],
       },
       availableProgram: {
         key: "LaundryCare.Dryer.Program.Synthetic",
@@ -104,11 +106,11 @@ function createProgramService(overrides = {}) {
           {
             key: "LaundryCare.Dryer.Option.DryingTarget",
             constraints: {
-              allowedvalues: ["LaundryCare.Dryer.EnumType.DryingTarget.CupboardDryPlus"]
-            }
-          }
-        ]
-      }
+              allowedvalues: ["LaundryCare.Dryer.EnumType.DryingTarget.CupboardDryPlus"],
+            },
+          },
+        ],
+      },
     };
     service.applyProgramResult(result);
     const device = devices.get("ha-1");
@@ -117,7 +119,7 @@ function createProgramService(overrides = {}) {
     assert.deepStrictEqual(device.ActiveProgramDetails, [
       "Drying Target: Cupboard Dry Plus",
       "Less Ironing: 60 min",
-      "Gentle Dry"
+      "Gentle Dry",
     ]);
     assert.deepStrictEqual(device.AvailableOptionDetails, ["Drying Target"]);
   }
@@ -131,7 +133,7 @@ function createProgramService(overrides = {}) {
       data: {
         programs: [
           { key: "ConsumerProducts.CoffeeMaker.Program.Beverage.Coffee", name: "Coffee" },
-          { key: "ConsumerProducts.CoffeeMaker.Program.Beverage.Espresso", name: "Espresso" }
+          { key: "ConsumerProducts.CoffeeMaker.Program.Beverage.Espresso", name: "Espresso" },
         ],
         programDefinition: {
           key: "ConsumerProducts.CoffeeMaker.Program.Beverage.Coffee",
@@ -139,11 +141,11 @@ function createProgramService(overrides = {}) {
             {
               key: "ConsumerProducts.CoffeeMaker.Option.FillQuantity",
               unit: "ml",
-              constraints: { min: 60, max: 260 }
-            }
-          ]
-        }
-      }
+              constraints: { min: 60, max: 260 },
+            },
+          ],
+        },
+      },
     };
 
     service.applyProgramResult(result);
@@ -161,11 +163,11 @@ function createProgramService(overrides = {}) {
       getActiveProgram: async () => ({
         success: false,
         statusCode: 404,
-        error: "No active program"
+        error: "No active program",
       }),
       getSelectedProgram: async () => ({
         success: true,
-        data: { key: "LaundryCare.Dryer.Program.Synthetic", name: "Synthetics", options: [] }
+        data: { key: "LaundryCare.Dryer.Program.Synthetic", name: "Synthetics", options: [] },
       }),
       getAvailableProgram: async () => {
         availableProgramCalls += 1;
@@ -173,11 +175,11 @@ function createProgramService(overrides = {}) {
           success: true,
           data: {
             key: "LaundryCare.Dryer.Program.Synthetic",
-            options: []
-          }
+            options: [],
+          },
         };
       },
-      applyEventToDevice() { }
+      applyEventToDevice() {},
     });
 
     const result = await service.fetchActiveProgramForDevice("ha-1", "Washer");
@@ -201,9 +203,9 @@ function createProgramService(overrides = {}) {
         data: {
           programs: [
             { key: "Cooking.Common.Program.Hood.Venting", name: "Fan setting" },
-            { key: "Cooking.Common.Program.Hood.Automatic", name: "Automatic" }
-          ]
-        }
+            { key: "Cooking.Common.Program.Hood.Automatic", name: "Automatic" },
+          ],
+        },
       }),
       getAvailableProgram: async () => ({
         success: true,
@@ -213,13 +215,13 @@ function createProgramService(overrides = {}) {
             {
               key: "Cooking.Common.Option.Hood.VentingLevel",
               constraints: {
-                allowedvalues: ["Cooking.Hood.EnumType.Stage.FanStage01"]
-              }
-            }
-          ]
-        }
+                allowedvalues: ["Cooking.Hood.EnumType.Stage.FanStage01"],
+              },
+            },
+          ],
+        },
       }),
-      applyEventToDevice() { }
+      applyEventToDevice() {},
     });
 
     const result = await service.fetchActiveProgramForDevice("ha-1", "Washer");
@@ -237,9 +239,9 @@ function createProgramService(overrides = {}) {
           haId: "ha-hood",
           name: "Hood",
           type: "Cooktop",
-          optionsApplied: []
-        }
-      ]
+          optionsApplied: [],
+        },
+      ],
     ]);
     const { service } = createProgramService({ devices });
     service.attachClient({
@@ -250,9 +252,9 @@ function createProgramService(overrides = {}) {
         data: {
           programs: [
             { key: "Cooking.Common.Program.Hood.Venting", name: "Fan setting" },
-            { key: "Cooking.Common.Program.Hood.Automatic", name: "Automatic" }
-          ]
-        }
+            { key: "Cooking.Common.Program.Hood.Automatic", name: "Automatic" },
+          ],
+        },
       }),
       getAvailableProgram: async () => ({
         success: true,
@@ -262,13 +264,13 @@ function createProgramService(overrides = {}) {
             {
               key: "Cooking.Common.Option.Hood.VentingLevel",
               constraints: {
-                allowedvalues: ["Cooking.Hood.EnumType.Stage.FanStage01"]
-              }
-            }
-          ]
-        }
+                allowedvalues: ["Cooking.Hood.EnumType.Stage.FanStage01"],
+              },
+            },
+          ],
+        },
       }),
-      applyEventToDevice() { }
+      applyEventToDevice() {},
     });
 
     const result = await service.fetchActiveProgramForDevice("ha-hood", "Hood");
@@ -283,7 +285,7 @@ function createProgramService(overrides = {}) {
     const events = [];
     service.handleActiveProgramFetchError(
       Object.assign(new Error("429 too many requests"), { statusCode: 429 }),
-      (n, p) => events.push({ n, p })
+      (n, p) => events.push({ n, p }),
     );
     assert.ok(globalSession.rateLimitUntil > Date.now());
     const evt = events.find((e) => e.n === "INIT_STATUS");

@@ -153,3 +153,7 @@ sequenceDiagram
 - The frontend only renders backend-provided state; it does not trigger standalone API refresh loops.
 - Program label semantics are explicit: ACTIVE_PROGRAM, SELECTED_PROGRAM, and AVAILABLE_PROGRAMS.
 - Rate-limit handling uses server metadata (`Retry-After`) when available.
+- Registered displays follow their browser sockets: a display whose socket is gone for 10 minutes
+  is dropped from `clientInstances`, and every new socket connection is answered with
+  `INIT_REQUIRED`, which makes the frontend send `CONFIGURE` again (e.g. after a server restart
+  without a page reload).

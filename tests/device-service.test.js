@@ -1,6 +1,6 @@
 "use strict";
 
-const assert = require("assert");
+const assert = require("node:assert");
 const DeviceService = require("../lib/device-service");
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -8,14 +8,19 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function createDeviceService(overrides = {}) {
   const globalSession = { clientInstances: new Set(["test"]) };
   const logs = [];
-  const logger = (level, ...args) => logs.push({ level, message: args.join(" ") });
+  const logger = Object.fromEntries(
+    ["debug", "info", "warn", "error"].map((level) => [
+      level,
+      (...args) => logs.push({ level, message: args.join(" ") }),
+    ]),
+  );
   const notifications = [];
   const broadcastToAllClients = (n, p) => notifications.push({ n, p });
   const service = new DeviceService({
     logger,
     broadcastToAllClients,
     globalSession,
-    ...overrides
+    ...overrides,
   });
   return { service, logs, notifications };
 }
@@ -37,9 +42,9 @@ function createDeviceService(overrides = {}) {
     const globalSession = { clientInstances: new Set(["frontend-a", "frontend-b", "frontend-c"]) };
     const notifications = [];
     const service = new DeviceService({
-      logger: () => { },
-      broadcastToAllClients: () => { },
-      globalSession
+      logger: { debug() {}, info() {}, warn() {}, error() {} },
+      broadcastToAllClients: () => {},
+      globalSession,
     });
     service.devices.set("ha-1", { haId: "ha-1", name: "Washer" });
 
@@ -61,7 +66,7 @@ function createDeviceService(overrides = {}) {
       PowerState: "On",
       connected: true,
       ProgramProgress: 55,
-      RemainingProgramTime: 1800
+      RemainingProgramTime: 1800,
     });
 
     const registered = service.registerDevice(
@@ -69,9 +74,9 @@ function createDeviceService(overrides = {}) {
         haId: "ha-dryer",
         name: "Dryer",
         PowerState: "Off",
-        connected: false
+        connected: false,
       },
-      0
+      0,
     );
     await service.refreshDeviceDetails(registered);
 
@@ -99,7 +104,7 @@ function createDeviceService(overrides = {}) {
       haId: "ha-dishwasher",
       name: "Dishwasher",
       type: "Dishwasher",
-      connected: true
+      connected: true,
     };
 
     await service.refreshDeviceDetails(service.registerDevice(dishwasher, 0));
@@ -116,14 +121,14 @@ function createDeviceService(overrides = {}) {
   {
     const { service } = createDeviceService();
     service.attachClient({
-      getSettings: async () => ({ success: false, error: "boom" })
+      getSettings: async () => ({ success: false, error: "boom" }),
     });
 
     await service.fetchDeviceSettings({ haId: "ha-oven", name: "Oven" });
     assert.strictEqual(
       service.shouldFetchInitialSettings({ haId: "ha-oven" }),
       true,
-      "A failed settings fetch must not mark the appliance as seeded"
+      "A failed settings fetch must not mark the appliance as seeded",
     );
   }
 
@@ -133,14 +138,14 @@ function createDeviceService(overrides = {}) {
     const device = {
       haId: "ha-status",
       name: "Washer",
-      connected: false
+      connected: false,
     };
     service.attachClient({
       getStatus: async () => ({
         success: true,
-        data: { status: [] }
+        data: { status: [] },
       }),
-      applyEventToDevice() { }
+      applyEventToDevice() {},
     });
 
     await service.fetchDeviceStatus(device);
@@ -167,7 +172,7 @@ function createDeviceService(overrides = {}) {
         }),
       applyEventToDevice(device) {
         device.sawEvent = true;
-      }
+      },
     });
 
     const statusPromise = service.fetchDeviceStatus(originalDevice);
@@ -183,13 +188,9 @@ function createDeviceService(overrides = {}) {
     assert.strictEqual(
       replacementDevice.sawEvent,
       true,
-      "status update must land on the live device, not the orphaned reference"
+      "status update must land on the live device, not the orphaned reference",
     );
-    assert.strictEqual(
-      originalDevice.sawEvent,
-      undefined,
-      "the orphaned reference must not be the one mutated"
-    );
+    assert.strictEqual(originalDevice.sawEvent, undefined, "the orphaned reference must not be the one mutated");
   }
 
   // handleGetDevicesSuccess: broadcasts the base device list immediately before slow enrichment settles
@@ -197,9 +198,9 @@ function createDeviceService(overrides = {}) {
     const { service, notifications } = createDeviceService();
     const sendSocketNotificationCalls = [];
     service.attachClient({
-      subscribe: () => { },
+      subscribe: () => {},
       refreshTokens: () => Promise.resolve(),
-      closeEventSources: () => { }
+      closeEventSources: () => {},
     });
     service.setConfig({ enableSSEHeartbeat: false });
     service.fetchDeviceStatus = () => wait(40);
@@ -208,29 +209,29 @@ function createDeviceService(overrides = {}) {
     service.handleGetDevicesSuccess(
       {
         data: {
-          homeappliances: [{ haId: "ha-1", name: "Washer", connected: true }]
-        }
+          homeappliances: [{ haId: "ha-1", name: "Washer", connected: true }],
+        },
       },
       (n, payload) => {
         sendSocketNotificationCalls.push({ n, payload });
-      }
+      },
     );
 
     assert.ok(
       sendSocketNotificationCalls.some((entry) => entry.n === "DEVICES_UPDATE"),
-      "Expected an immediate device broadcast"
+      "Expected an immediate device broadcast",
     );
     assert.strictEqual(
       notifications.some((entry) => entry.n === "INIT_STATUS" && entry.p.status === "complete"),
       false,
-      "Expected device enrichment to still be pending immediately after the first broadcast"
+      "Expected device enrichment to still be pending immediately after the first broadcast",
     );
 
     await wait(70);
 
     assert.ok(
       notifications.some((entry) => entry.n === "INIT_STATUS" && entry.p.status === "complete"),
-      "Expected completion status after slow enrichment settles"
+      "Expected completion status after slow enrichment settles",
     );
   }
 
@@ -241,7 +242,7 @@ function createDeviceService(overrides = {}) {
     service.attachClient({
       refreshTokens: async () => {
         refreshCalls += 1;
-      }
+      },
     });
     service.noteTokenRefreshed(Date.now());
 
@@ -262,9 +263,7 @@ function createDeviceService(overrides = {}) {
   // handleGetDevicesError: marks HTTP 429 for the frontend
   {
     const { service, notifications } = createDeviceService();
-    service.handleGetDevicesError(
-      Object.assign(new Error("Too many requests"), { statusCode: 429 })
-    );
+    service.handleGetDevicesError(Object.assign(new Error("Too many requests"), { statusCode: 429 }));
     const errEvent = notifications.find((e) => e.n === "INIT_STATUS");
     assert.ok(errEvent);
     assert.strictEqual(errEvent.p.statusCode, 429);
@@ -279,20 +278,20 @@ function createDeviceService(overrides = {}) {
     const hcMock = {
       subscribeDevice: (haId, type) => subscribeCalls.push(`${haId}:${type}`),
       refreshTokens: () => Promise.resolve(),
-      closeEventSources: () => { }
+      closeEventSources: () => {},
     };
     sseService.attachClient(hcMock);
     sseService.devices.set("ha-1", { haId: "ha-1", name: "Washer" });
     sseService.setConfig({ enableSSEHeartbeat: false });
 
-    const handler = () => { };
+    const handler = () => {};
 
     sseService.subscribeToDeviceEvents(handler);
     await wait(0);
     assert.strictEqual(
       JSON.stringify(subscribeCalls),
       JSON.stringify(["ha-1:KEEP-ALIVE", "ha-1:NOTIFY", "ha-1:STATUS", "ha-1:EVENT"]),
-      "Expected one device channel subscription for KEEP-ALIVE/NOTIFY/STATUS/EVENT"
+      "Expected one device channel subscription for KEEP-ALIVE/NOTIFY/STATUS/EVENT",
     );
 
     // Calling subscribeToDeviceEvents again with the same handler should not
@@ -302,7 +301,7 @@ function createDeviceService(overrides = {}) {
     assert.strictEqual(
       JSON.stringify(subscribeCalls),
       JSON.stringify(["ha-1:KEEP-ALIVE", "ha-1:NOTIFY", "ha-1:STATUS", "ha-1:EVENT"]),
-      "Expected no additional subscriptions when reusing same handler"
+      "Expected no additional subscriptions when reusing same handler",
     );
   }
 
@@ -315,13 +314,9 @@ function createDeviceService(overrides = {}) {
 
     assert.strictEqual(service.heartbeatArmed, true);
     assert.ok(Number.isFinite(service.lastKeepAliveTimestamp));
-    assert.ok(
-      logs.some((entry) => entry.level === "debug" && entry.message.includes("SSE KEEP-ALIVE received"))
-    );
+    assert.ok(logs.some((entry) => entry.level === "debug" && entry.message.includes("SSE KEEP-ALIVE received")));
     assert.ok(!logs.some((entry) => entry.message.includes("undefined")));
-    assert.ok(
-      notifications.some((entry) => entry.n === "INIT_STATUS" && entry.p.status === "sse_recovered")
-    );
+    assert.ok(notifications.some((entry) => entry.n === "INIT_STATUS" && entry.p.status === "sse_recovered"));
   }
 
   // Attaching a new HomeConnect client closes previous event sources
@@ -329,22 +324,18 @@ function createDeviceService(overrides = {}) {
     const { service } = createDeviceService();
     const closeCalls = [];
     const oldClient = {
-      setEventSourceRetryConfig: () => { },
-      closeEventSources: (opts) => closeCalls.push(opts)
+      setEventSourceRetryConfig: () => {},
+      closeEventSources: (opts) => closeCalls.push(opts),
     };
     const newClient = {
-      setEventSourceRetryConfig: () => { },
-      closeEventSources: () => { }
+      setEventSourceRetryConfig: () => {},
+      closeEventSources: () => {},
     };
 
     service.attachClient(oldClient);
     service.attachClient(newClient);
 
-    assert.strictEqual(
-      closeCalls.length,
-      1,
-      "Previous client should be closed when new client attached"
-    );
+    assert.strictEqual(closeCalls.length, 1, "Previous client should be closed when new client attached");
     assert.deepStrictEqual(closeCalls[0], { devices: true, global: true });
   }
 
@@ -354,13 +345,13 @@ function createDeviceService(overrides = {}) {
     const { service, notifications } = createDeviceService({
       onSseStale: () => {
         staleRecoveries += 1;
-      }
+      },
     });
     const subscribeCalls = [];
     const hcMock = {
       subscribeDevice: (haId, type) => subscribeCalls.push(`${haId}:${type}`),
       refreshTokens: () => Promise.resolve(),
-      closeEventSources: () => { }
+      closeEventSources: () => {},
     };
 
     service.attachClient(hcMock);
@@ -369,20 +360,18 @@ function createDeviceService(overrides = {}) {
       enableSSEHeartbeat: true,
       sseHeartbeatCheckIntervalMs: 10,
       sseHeartbeatStaleThresholdMs: 20,
-      sseRecoveryCooldownMs: 1000
+      sseRecoveryCooldownMs: 1000,
     });
 
-    service.subscribeToDeviceEvents(() => { });
+    service.subscribeToDeviceEvents(() => {});
     await wait(80);
 
-    const staleEvent = notifications.find(
-      (entry) => entry.n === "INIT_STATUS" && entry.p.status === "sse_stale"
-    );
+    const staleEvent = notifications.find((entry) => entry.n === "INIT_STATUS" && entry.p.status === "sse_stale");
     assert.strictEqual(staleEvent, undefined);
     assert.strictEqual(staleRecoveries, 0);
     assert.strictEqual(
       JSON.stringify(subscribeCalls),
-      JSON.stringify(["ha-1:KEEP-ALIVE", "ha-1:NOTIFY", "ha-1:STATUS", "ha-1:EVENT"])
+      JSON.stringify(["ha-1:KEEP-ALIVE", "ha-1:NOTIFY", "ha-1:STATUS", "ha-1:EVENT"]),
     );
 
     service.shutdown();
@@ -394,15 +383,15 @@ function createDeviceService(overrides = {}) {
     const { service, notifications } = createDeviceService({
       onSseStale: () => {
         staleRecoveries += 1;
-      }
+      },
     });
     const hcMock = {
-      subscribe: () => { },
+      subscribe: () => {},
       refreshTokens: () => Promise.resolve(),
-      closeEventSources: () => { },
+      closeEventSources: () => {},
       applyEventToDevice: (device, item) => {
         device[item.key] = item.value;
-      }
+      },
     };
 
     service.attachClient(hcMock);
@@ -411,13 +400,15 @@ function createDeviceService(overrides = {}) {
       enableSSEHeartbeat: true,
       sseHeartbeatCheckIntervalMs: 10,
       sseHeartbeatStaleThresholdMs: 20,
-      sseRecoveryCooldownMs: 1000
+      sseRecoveryCooldownMs: 1000,
     });
 
     const socketNotifications = [];
-    service.subscribeToDeviceEvents((payload) => service.deviceEvent(payload, (n, data) => {
-      socketNotifications.push({ n, data });
-    }));
+    service.subscribeToDeviceEvents((payload) =>
+      service.deviceEvent(payload, (n, data) => {
+        socketNotifications.push({ n, data });
+      }),
+    );
     await wait(0);
 
     service.deviceEvent(
@@ -427,26 +418,24 @@ function createDeviceService(overrides = {}) {
             {
               key: "BSH.Common.Option.ProgramProgress",
               value: 42,
-              uri: "/api/homeappliances/ha-1/events"
-            }
-          ]
-        })
+              uri: "/api/homeappliances/ha-1/events",
+            },
+          ],
+        }),
       },
       (n, data) => {
         socketNotifications.push({ n, data });
-      }
+      },
     );
 
     await wait(80);
 
-    const staleEvent = notifications.find(
-      (entry) => entry.n === "INIT_STATUS" && entry.p.status === "sse_stale"
-    );
+    const staleEvent = notifications.find((entry) => entry.n === "INIT_STATUS" && entry.p.status === "sse_stale");
     assert.ok(staleEvent);
     assert.strictEqual(staleRecoveries, 1);
     assert.ok(
       socketNotifications.some((entry) => entry.n === "DEVICES_UPDATE"),
-      "Expected the incoming SSE event to update the frontend cache"
+      "Expected the incoming SSE event to update the frontend cache",
     );
 
     service.shutdown();
@@ -474,16 +463,16 @@ function createDeviceService(overrides = {}) {
         settingsFetches += 1;
         return Promise.resolve({ success: true, data: { settings: [] } });
       },
-      applyEventToDevice: () => { }
+      applyEventToDevice: () => {},
     };
     service.attachClient(hcMock);
     service.setConfig({ enableSSEHeartbeat: false });
 
     const apiResult = {
-      data: { homeappliances: [{ haId: "ha-1", name: "Washer", connected: true }] }
+      data: { homeappliances: [{ haId: "ha-1", name: "Washer", connected: true }] },
     };
 
-    service.handleGetDevicesSuccess(apiResult, () => { });
+    service.handleGetDevicesSuccess(apiResult, () => {});
     await wait(10);
 
     const subscribesAfterFirst = subscribeCalls.length;
@@ -492,19 +481,15 @@ function createDeviceService(overrides = {}) {
     assert.strictEqual(settingsFetches, 1, "Expected settings to be seeded once");
 
     // Second snapshot with a brand new callback - the SSE session must survive.
-    service.handleGetDevicesSuccess(apiResult, () => { });
+    service.handleGetDevicesSuccess(apiResult, () => {});
     await wait(10);
 
     assert.strictEqual(
       subscribeCalls.length,
       subscribesAfterFirst,
-      "Expected no re-subscription on a follow-up device snapshot"
+      "Expected no re-subscription on a follow-up device snapshot",
     );
-    assert.strictEqual(
-      closeCalls,
-      closesAfterFirst,
-      "Expected no SSE teardown on a follow-up device snapshot"
-    );
+    assert.strictEqual(closeCalls, closesAfterFirst, "Expected no SSE teardown on a follow-up device snapshot");
     assert.strictEqual(tokenRefreshes, 1, "Expected no extra token refresh per snapshot");
     assert.strictEqual(settingsFetches, 1, "Expected /settings not to be refetched per snapshot");
 
@@ -517,36 +502,32 @@ function createDeviceService(overrides = {}) {
     const { service } = createDeviceService();
     let settingsFetches = 0;
     service.attachClient({
-      subscribeDevice: () => { },
+      subscribeDevice: () => {},
       refreshTokens: () => Promise.resolve(),
-      closeEventSources: () => { },
+      closeEventSources: () => {},
       getStatus: () => Promise.resolve({ success: true, data: { status: [] } }),
       getSettings: () => {
         settingsFetches += 1;
         return Promise.resolve({ success: true, data: { settings: [] } });
       },
-      applyEventToDevice: () => { }
+      applyEventToDevice: () => {},
     });
     service.setConfig({ enableSSEHeartbeat: false });
 
     const apiResult = {
-      data: { homeappliances: [{ haId: "ha-1", name: "Washer", connected: true }] }
+      data: { homeappliances: [{ haId: "ha-1", name: "Washer", connected: true }] },
     };
-    service.handleGetDevicesSuccess(apiResult, () => { });
+    service.handleGetDevicesSuccess(apiResult, () => {});
     await wait(10);
     assert.strictEqual(settingsFetches, 1);
 
     await service.reconnectEventSubscriptions();
     await wait(10);
 
-    service.handleGetDevicesSuccess(apiResult, () => { });
+    service.handleGetDevicesSuccess(apiResult, () => {});
     await wait(10);
 
-    assert.strictEqual(
-      settingsFetches,
-      1,
-      "Expected the settings cache to survive an SSE channel rebuild"
-    );
+    assert.strictEqual(settingsFetches, 1, "Expected the settings cache to survive an SSE channel rebuild");
 
     service.shutdown();
   }
@@ -559,7 +540,7 @@ function createDeviceService(overrides = {}) {
       setRateLimitUntil: (ts) => rateLimitCalls.push(ts),
       onRefreshSettled: () => {
         settled += 1;
-      }
+      },
     });
     service.attachClient({
       getHomeAppliances: () =>
@@ -567,19 +548,16 @@ function createDeviceService(overrides = {}) {
           success: false,
           statusCode: 429,
           retryAfterSeconds: 120,
-          error: "Too Many Requests"
-        })
+          error: "Too Many Requests",
+        }),
     });
 
     const before = Date.now();
-    service.getDevices(() => { });
+    service.getDevices(() => {});
     await wait(10);
 
     assert.strictEqual(rateLimitCalls.length, 1, "Expected the global rate limit to be set");
-    assert.ok(
-      rateLimitCalls[0] >= before + 120 * 1000,
-      "Expected Retry-After to drive the backoff window"
-    );
+    assert.ok(rateLimitCalls[0] >= before + 120 * 1000, "Expected Retry-After to drive the backoff window");
     assert.strictEqual(settled, 1, "Expected the failed refresh to settle exactly once");
   }
 
@@ -589,9 +567,9 @@ function createDeviceService(overrides = {}) {
     const { service } = createDeviceService({
       onRefreshSettled: () => {
         settled += 1;
-      }
+      },
     });
-    service.getDevices(() => { });
+    service.getDevices(() => {});
     assert.strictEqual(settled, 1, "Expected the hc-not-ready exit to settle the refresh");
   }
 
@@ -602,7 +580,7 @@ function createDeviceService(overrides = {}) {
   {
     const rateLimitCalls = [];
     const { service, logs } = createDeviceService({
-      setRateLimitUntil: (ts) => rateLimitCalls.push(ts)
+      setRateLimitUntil: (ts) => rateLimitCalls.push(ts),
     });
     service.attachClient({
       getStatus: () =>
@@ -610,23 +588,18 @@ function createDeviceService(overrides = {}) {
           success: false,
           statusCode: 429,
           retryAfterSeconds: 90,
-          error: "Too Many Requests"
-        })
+          error: "Too Many Requests",
+        }),
     });
 
     const before = Date.now();
     await service.fetchDeviceStatus({ haId: "ha-1", name: "Washer" });
 
     assert.strictEqual(rateLimitCalls.length, 1, "Expected a 429 on /status to set the backoff");
+    assert.ok(rateLimitCalls[0] >= before + 90 * 1000, "Expected Retry-After to drive the backoff window");
     assert.ok(
-      rateLimitCalls[0] >= before + 90 * 1000,
-      "Expected Retry-After to drive the backoff window"
-    );
-    assert.ok(
-      logs.some(
-        (entry) => entry.level === "warn" && entry.message.includes("Rate limit on status fetch")
-      ),
-      "Expected the rate limit to be logged"
+      logs.some((entry) => entry.level === "warn" && entry.message.includes("Rate limit on status fetch")),
+      "Expected the rate limit to be logged",
     );
   }
 
@@ -635,11 +608,10 @@ function createDeviceService(overrides = {}) {
   {
     const rateLimitCalls = [];
     const { service } = createDeviceService({
-      setRateLimitUntil: (ts) => rateLimitCalls.push(ts)
+      setRateLimitUntil: (ts) => rateLimitCalls.push(ts),
     });
     service.attachClient({
-      getSettings: () =>
-        Promise.resolve({ success: false, statusCode: 429, error: "Too Many Requests" })
+      getSettings: () => Promise.resolve({ success: false, statusCode: 429, error: "Too Many Requests" }),
     });
 
     const before = Date.now();
@@ -648,12 +620,12 @@ function createDeviceService(overrides = {}) {
     assert.strictEqual(rateLimitCalls.length, 1, "Expected a 429 on /settings to set the backoff");
     assert.ok(
       rateLimitCalls[0] >= before + 5 * 60 * 1000,
-      "Expected the fallback backoff without a Retry-After header"
+      "Expected the fallback backoff without a Retry-After header",
     );
     assert.strictEqual(
       service.shouldFetchInitialSettings({ haId: "ha-oven" }),
       true,
-      "A rate limited settings fetch must stay retryable"
+      "A rate limited settings fetch must stay retryable",
     );
   }
 
@@ -666,10 +638,10 @@ function createDeviceService(overrides = {}) {
     const statusFetches = [];
     service.setConfig({ enableSSEHeartbeat: false });
     service.attachClient({
-      subscribeDevice: () => { },
+      subscribeDevice: () => {},
       refreshTokens: () => Promise.resolve(),
-      closeEventSources: () => { },
-      applyEventToDevice: () => { },
+      closeEventSources: () => {},
+      applyEventToDevice: () => {},
       getStatus: async (haId) => {
         statusFetches.push(haId);
         inFlight += 1;
@@ -681,7 +653,7 @@ function createDeviceService(overrides = {}) {
       getSettings: async () => {
         await wait(20);
         return { success: true, data: { settings: [] } };
-      }
+      },
     });
 
     service.handleGetDevicesSuccess(
@@ -689,20 +661,16 @@ function createDeviceService(overrides = {}) {
         data: {
           homeappliances: [
             { haId: "ha-1", name: "Washer", connected: true },
-            { haId: "ha-2", name: "Dryer", connected: true }
-          ]
-        }
+            { haId: "ha-2", name: "Dryer", connected: true },
+          ],
+        },
       },
-      () => { }
+      () => {},
     );
 
     await wait(700);
 
-    assert.deepStrictEqual(
-      statusFetches,
-      ["ha-1", "ha-2"],
-      "Expected every appliance of the snapshot to be enriched"
-    );
+    assert.deepStrictEqual(statusFetches, ["ha-1", "ha-2"], "Expected every appliance of the snapshot to be enriched");
     assert.strictEqual(maxInFlight, 1, "Expected appliances to be enriched one at a time");
 
     service.shutdown();

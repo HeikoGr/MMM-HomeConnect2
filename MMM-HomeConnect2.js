@@ -1,294 +1,3 @@
-
-function generateInstanceId(prefix = "hc") {
-  return `${prefix}_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e6).toString(36)}`;
-}
-
-// The helper tracks clients by instance id and has no disconnect hook, so a fresh
-// id per page load would grow that registry forever. Persisting it per browser
-// keeps the set bounded by the number of displays and lets a reload rejoin as the
-// same client.
-function resolveInstanceId(identifier) {
-  const storageKey = `MMM-HomeConnect2.instanceId.${identifier || "default"}`;
-
-  try {
-    const storage = globalThis.localStorage;
-    if (!storage) {
-      return generateInstanceId();
-    }
-
-    const stored = storage.getItem(storageKey);
-    if (typeof stored === "string" && stored.trim()) {
-      return stored.trim();
-    }
-
-    const created = generateInstanceId();
-    storage.setItem(storageKey, created);
-    return created;
-  } catch {
-    // Private mode or blocked storage - a volatile id still works.
-    return generateInstanceId();
-  }
-}
-
-function computeProgressDisplayState({
-  device,
-  effectiveRemainingSeconds,
-  estimatedTotalSeconds,
-  progressNumeric,
-  suppressSelectedProgramRuntime,
-  effectiveOperationStateActive,
-  observedPercent
-}) {
-  // A remaining time of exactly 0 turns this formula into a constant 100 %, which
-  // is only meaningful while a program actually runs. Appliances keep reporting a
-  // stale 0 next to the planned duration once a cycle is over, so without this
-  // proof an idle appliance would paint a permanently full bar.
-  const hasRunningProgramEvidence =
-    effectiveRemainingSeconds > 0 || effectiveOperationStateActive === true;
-
-  let estimatedTotalPercent;
-  if (
-    hasRunningProgramEvidence &&
-    Number.isFinite(estimatedTotalSeconds) &&
-    estimatedTotalSeconds > 0 &&
-    Number.isFinite(effectiveRemainingSeconds) &&
-    effectiveRemainingSeconds >= 0 &&
-    effectiveRemainingSeconds <= estimatedTotalSeconds
-  ) {
-    estimatedTotalPercent = Math.max(
-      0,
-      Math.min(
-        100,
-        Math.round(
-          ((estimatedTotalSeconds - effectiveRemainingSeconds) / estimatedTotalSeconds) * 100
-        )
-      )
-    );
-  }
-
-  let initialPercent;
-  if (
-    device._initialRemaining &&
-    Number.isFinite(Number(device._initialRemaining)) &&
-    Number(device._initialRemaining) > 0 &&
-    effectiveRemainingSeconds > 0
-  ) {
-    const initialRemaining = Number(device._initialRemaining);
-    initialPercent = Math.max(
-      0,
-      Math.min(
-        100,
-        Math.round(((initialRemaining - effectiveRemainingSeconds) / initialRemaining) * 100)
-      )
-    );
-  }
-
-  // A reported 0 % is only meaningful while a program actually runs. Appliances
-  // reset progress to 0 when a cycle ends and then stop updating it, so an idle
-  // appliance carrying that leftover value must fall back to the other sources
-  // (or show no bar at all) instead of claiming a program is at 0 %.
-  const canTrustExplicitProgress =
-    !suppressSelectedProgramRuntime &&
-    progressNumeric !== undefined &&
-    (progressNumeric > 0 ||
-      (effectiveOperationStateActive && !(effectiveRemainingSeconds > 0)));
-
-  let percent;
-  let progressSource = "none";
-  if (canTrustExplicitProgress) {
-    percent = progressNumeric;
-    progressSource = "programProgress";
-  } else if (estimatedTotalPercent !== undefined) {
-    percent = estimatedTotalPercent;
-    progressSource = "estimatedTotalProgramTime";
-  } else if (
-    observedPercent !== undefined &&
-    (initialPercent === undefined || observedPercent > initialPercent)
-  ) {
-    percent = observedPercent;
-    progressSource = "observedElapsed+remaining";
-  } else if (initialPercent !== undefined) {
-    percent = initialPercent;
-    progressSource = "initialRemaining";
-  } else if (observedPercent !== undefined) {
-    percent = observedPercent;
-    progressSource = "observedElapsed+remaining";
-  }
-
-  if (suppressSelectedProgramRuntime) {
-    percent = undefined;
-  }
-
-  const visibleRemainingSeconds = suppressSelectedProgramRuntime ? null : effectiveRemainingSeconds;
-  const isIndeterminate = percent === undefined && visibleRemainingSeconds > 0;
-  if (isIndeterminate) {
-    progressSource = "indeterminate";
-  }
-
-  return {
-    percent,
-    progressSource,
-    visibleRemainingSeconds,
-    isIndeterminate,
-    estimatedTotalPercent,
-    initialPercent
-  };
-}
-
-function normalizeProgressValue(progressValue) {
-  if (progressValue === undefined || progressValue === null) {
-    return undefined;
-  }
-
-  const parsed = Number(progressValue);
-  if (!Number.isFinite(parsed)) {
-    return undefined;
-  }
-
-  return Math.max(0, Math.min(100, Math.round(parsed)));
-}
-
-// Thin adapter over the shared state parser. `isActive` deliberately means "Run"
-// and nothing else: delayed start and pause carry their own icons, and an
-// unrecognised state must never be interpreted as running.
-function getOperationStateInfo(device, deviceUtils) {
-  const state = deviceUtils.parseOperationState(device);
-
-  return {
-    known: state.known,
-    isFinished: state.isFinished,
-    isActive: state.isRun,
-    isDelayedStart: state.isDelayedStart,
-    isPaused: state.isPaused,
-    hasNoProgram: state.hasNoProgram
-  };
-}
-
-function isWrinkleProtectionLabel(value) {
-  return (
-    typeof value === "string" && /(Wrinkle|Less\s+Ironing|Knitterschutz|Kr[oø]lle)/i.test(value)
-  );
-}
-
-function computeProgramDisplayState({
-  device,
-  operationStateHasNoProgram,
-  operationStateDelayedStart,
-  programRunning,
-  suppressSelectedProgramRuntime,
-  visibleRemainingSeconds,
-  estimatedTotalSeconds,
-  hasEstimatedDuration,
-  startInRelativeSeconds,
-  finishInRelativeSeconds,
-  isFinished,
-  nowMs,
-  translate,
-  formatDuration,
-  formatClockTime
-}) {
-  const plannedDurationLabel =
-    Number.isFinite(estimatedTotalSeconds) && estimatedTotalSeconds > 0
-      ? `${hasEstimatedDuration ? `${translate("APPROX_PREFIX")} ` : ""}${formatDuration(estimatedTotalSeconds)}`
-      : "";
-  const visiblePlannedDurationLabel = suppressSelectedProgramRuntime ? "" : plannedDurationLabel;
-  const showPlannedDurationInTitle = !(visibleRemainingSeconds > 0);
-  const rawProgramName = typeof device.ActiveProgramName === "string" ? device.ActiveProgramName : "";
-  const rawSource = device.ActiveProgramSource || (rawProgramName ? "active" : "");
-  // "active" claims that this program is running right now. An appliance reporting
-  // Inactive or Ready contradicts that, and the operation state is the more
-  // reliable of the two: it keeps being reported, while the program data lingers
-  // from the run that just ended. What remains is the program on the dial, which
-  // is exactly what "selected" means. A finished program is left alone - it is not
-  // running either, but it is still worth naming. The backend demotes the same
-  // way; this also catches a device object that has not been refreshed since.
-  const source =
-    rawSource === "active" && operationStateHasNoProgram ? "selected" : rawSource;
-  // A merely selected program says nothing about what the appliance is doing - the
-  // dial can sit on "Synthetics" for days. It is only worth showing once that
-  // program is actually running or scheduled to start.
-  const showSelectedProgram = programRunning || operationStateDelayedStart;
-  let programName;
-  if (source === "active" && rawProgramName) {
-    programName = `${translate("ACTIVE_PROGRAM")}: ${rawProgramName}`;
-  } else if (source === "selected" && rawProgramName) {
-    programName = showSelectedProgram ? `${translate("SELECTED_PROGRAM")}: ${rawProgramName}` : "";
-  } else if (
-    source === "available" &&
-    Array.isArray(device.AvailablePrograms) &&
-    device.AvailablePrograms.length
-  ) {
-    programName = `${translate("AVAILABLE_PROGRAMS")}: ${device.AvailablePrograms.join(", ")}`;
-  } else {
-    programName = rawProgramName;
-  }
-  const showProgramDetails =
-    source === "active" || (source === "selected" && showSelectedProgram);
-  const programPhase =
-    showProgramDetails && typeof device.ActiveProgramPhase === "string"
-      ? device.ActiveProgramPhase
-      : "";
-  const programDetails =
-    showProgramDetails && Array.isArray(device.ActiveProgramDetails)
-      ? device.ActiveProgramDetails.filter((value) => typeof value === "string" && value)
-      : [];
-  const programSupplementParts = [];
-
-  if (programPhase) {
-    programSupplementParts.push(programPhase);
-  }
-  if (programDetails.length > 0) {
-    programSupplementParts.push(programDetails.join(" • "));
-  }
-
-  const wrinkleProtectionActive =
-    isFinished &&
-    [programPhase, ...programDetails].some((value) => isWrinkleProtectionLabel(value));
-  const effectiveStartInRelativeSeconds =
-    startInRelativeSeconds > 0
-      ? startInRelativeSeconds
-      : finishInRelativeSeconds > 0 && estimatedTotalSeconds > 0
-        ? Math.max(0, finishInRelativeSeconds - estimatedTotalSeconds)
-        : null;
-  const effectiveFinishInRelativeSeconds =
-    finishInRelativeSeconds > 0
-      ? finishInRelativeSeconds
-      : effectiveStartInRelativeSeconds > 0 && estimatedTotalSeconds > 0
-        ? effectiveStartInRelativeSeconds + estimatedTotalSeconds
-        : null;
-  const delayedStartScheduleParts = [];
-  if (effectiveFinishInRelativeSeconds > 0) {
-    delayedStartScheduleParts.push(
-      `${translate("ENDS_AT")} ${translate("APPROX_PREFIX")} ${formatClockTime(
-        nowMs + effectiveFinishInRelativeSeconds * 1000
-      )}`
-    );
-  }
-  const delayedStartText = operationStateDelayedStart
-    ? effectiveStartInRelativeSeconds > 0
-      ? `${translate("DELAYED_START")} • ${translate("STARTS_IN")} ${hasEstimatedDuration ? `${translate("APPROX_PREFIX")} ` : ""}${formatDuration(effectiveStartInRelativeSeconds)}${delayedStartScheduleParts.length ? ` • ${delayedStartScheduleParts.join(" • ")}` : ""}`
-      : translate("DELAYED_START")
-    : "";
-  // A planned duration is a property of a program, so it is only shown next to the
-  // program it belongs to. On its own it is unattributable - after a cycle ends an
-  // appliance keeps reporting the duration of the run that just finished, and a
-  // bare "approx. 2h 29m" under an idle appliance claims a program that is not
-  // there. While a program runs the remaining time is the better number anyway,
-  // which is what showPlannedDurationInTitle already encodes.
-  const programMeta =
-    programName && visiblePlannedDurationLabel && showPlannedDurationInTitle
-      ? `${programName} • ${visiblePlannedDurationLabel}`
-      : programName;
-
-  return {
-    programMeta,
-    programSupplement: programSupplementParts.join(" | "),
-    wrinkleProtectionActive,
-    delayedStartText,
-    visiblePlannedDurationLabel
-  };
-}
-
 Module.register("MMM-HomeConnect2", {
   devices: [],
   config: null,
@@ -317,28 +26,23 @@ Module.register("MMM-HomeConnect2", {
     apiRequestTimeoutMs: 15 * 1000,
     progressRefreshIntervalMs: 30 * 1000,
     minActiveProgramIntervalMs: 10 * 60 * 1000, // 10 minutes between active program fetches (backend throttle)
-    // Module logging level: none | error | warn | info | debug
-    logLevel: ""
+    // Optional: none | error | warn | info | debug. Output goes through MagicMirror's
+    // Log, so the global logLevel decides; this can only narrow it. "debug" also
+    // shows the debug panel.
+    logLevel: "",
   },
 
   start() {
-    this.instanceId = resolveInstanceId(this.identifier);
+    // The core-assigned identifier is unique per instance and stable across
+    // reloads. The backend tracks displays by their socket connection, so a
+    // browser-local id is no longer needed to keep its registry bounded.
+    this.instanceId = this.identifier;
     this.shared = globalThis.MMModuleShared;
-    this.sharedContext = this.shared.createModuleContext(
-      "MMM-HomeConnect2",
-      this.identifier,
-      {
-        instanceId: this.instanceId,
-        logLevel: this.config.logLevel || "info",
-        logStructured: true,
-        logRedaction: true
-      }
-    );
     this.transport = this.shared.createTransport({
       moduleName: "MMM-HomeConnect2",
       identifier: this.identifier,
       instanceId: this.instanceId,
-      sendSocketNotification: this.sendSocketNotification.bind(this)
+      sendSocketNotification: this.sendSocketNotification.bind(this),
     });
     this.notifications = this.transport.notifications;
 
@@ -350,9 +54,10 @@ Module.register("MMM-HomeConnect2", {
       logger: this.shared.createLogger({
         moduleName: "MMM-HomeConnect2",
         identifier: this.identifier,
-        getLevel: () => this.config.logLevel || "info",
+        consoleRef: globalThis.Log || console,
+        getLevel: () => this.config.logLevel || "debug",
         structured: false,
-        redact: true
+        redact: true,
       }),
       updateInterval: 0,
       visibleTickInterval:
@@ -363,7 +68,7 @@ Module.register("MMM-HomeConnect2", {
         if (Array.isArray(this.devices) && this.devices.length > 0) {
           this.updateDom(0);
         }
-      }
+      },
     });
     this.lifecycle.start();
   },
@@ -374,8 +79,10 @@ Module.register("MMM-HomeConnect2", {
     return [
       this.file("lib/mmm-shared/mmm-shared.js"),
       this.file("lib/device-utils.js"),
+      this.file("lib/display-state.js"),
       this.file("lib/dom-builder.js"),
-      this.file("lib/device-card-renderer.js")
+      this.file("lib/device-card-renderer.js"),
+      this.file("lib/status-views.js"),
     ];
   },
 
@@ -387,13 +94,12 @@ Module.register("MMM-HomeConnect2", {
     return {
       en: "translations/en.json",
       de: "translations/de.json",
-      da: "translations/da.json"
+      da: "translations/da.json",
     };
   },
 
   getPreferredApiLanguage() {
-    const configuredLanguage =
-      typeof this.config?.apiLanguage === "string" ? this.config.apiLanguage.trim() : "";
+    const configuredLanguage = typeof this.config?.apiLanguage === "string" ? this.config.apiLanguage.trim() : "";
     if (configuredLanguage) {
       return configuredLanguage;
     }
@@ -405,24 +111,19 @@ Module.register("MMM-HomeConnect2", {
     }
 
     const browserLanguages = Array.isArray(navigator?.languages)
-      ? navigator.languages
-        .map((language) => (typeof language === "string" ? language.trim() : ""))
-        .filter(Boolean)
+      ? navigator.languages.map((language) => (typeof language === "string" ? language.trim() : "")).filter(Boolean)
       : [];
     if (browserLanguages.length > 0) {
       return browserLanguages[0];
     }
 
-    const browserLanguage =
-      typeof navigator?.language === "string" ? navigator.language.trim() : "";
+    const browserLanguage = typeof navigator?.language === "string" ? navigator.language.trim() : "";
     if (browserLanguage) {
       return browserLanguage;
     }
 
     const documentLanguage =
-      typeof document?.documentElement?.lang === "string"
-        ? document.documentElement.lang.trim()
-        : "";
+      typeof document?.documentElement?.lang === "string" ? document.documentElement.lang.trim() : "";
     if (documentLanguage) {
       return documentLanguage;
     }
@@ -432,16 +133,35 @@ Module.register("MMM-HomeConnect2", {
 
   notificationReceived(notification) {
     if (notification === "ALL_MODULES_STARTED") {
-      this.transport.sendRequest("CONFIGURE", {
-        config: {
-          ...this.config,
-          instanceId: this.instanceId,
-          // Sent as a hint only: browser-derived values must never take part in
-          // the session comparison, otherwise every device reports a conflict.
-          preferredApiLanguage: this.getPreferredApiLanguage()
-        }
-      });
+      this.sendConfigure();
     }
+  },
+
+  sendConfigure() {
+    this.configurePendingSince = Date.now();
+    this.transport.sendRequest("CONFIGURE", {
+      config: {
+        ...this.config,
+        instanceId: this.instanceId,
+        // Sent as a hint only: browser-derived values must never take part in
+        // the session comparison, otherwise every device reports a conflict.
+        preferredApiLanguage: this.getPreferredApiLanguage(),
+      },
+    });
+  },
+
+  /**
+   * The backend greets every new socket connection with INIT_REQUIRED - after a
+   * server restart or a long network drop this display is unknown there and
+   * must register again. Right after page load the greeting only crosses the
+   * first CONFIGURE, so it is ignored while that one is unanswered.
+   */
+  handleInitRequired() {
+    const pendingMs = Date.now() - (this.configurePendingSince || 0);
+    if (this.configurePendingSince && pendingMs < 30 * 1000) {
+      return;
+    }
+    this.sendConfigure();
   },
 
   socketNotificationReceived(notification, payload) {
@@ -449,13 +169,22 @@ Module.register("MMM-HomeConnect2", {
       return;
     }
 
+    if (payload?.action === "INIT_REQUIRED") {
+      if (payload.instanceId === "*" || payload.instanceId === this.instanceId) {
+        this.handleInitRequired();
+      }
+      return;
+    }
+
     // Only respond to events for this instance
-    if (payload && payload.instanceId && payload.instanceId !== this.instanceId) {
+    if (payload?.instanceId && payload.instanceId !== this.instanceId) {
       return;
     }
 
     const safePayload = payload?.data ?? {};
     const action = payload?.action || "";
+    // Any answer means the backend knows this display.
+    this.configurePendingSince = null;
 
     switch (action) {
       case "DEVICES_UPDATE":
@@ -477,6 +206,7 @@ Module.register("MMM-HomeConnect2", {
       case "INIT_STATUS": {
         Log.log(`${this.name} Init Status: ${safePayload.status} - ${safePayload.message}`);
         this.lastInitStatus = safePayload;
+        this.lastInitStatusReceivedAt = Date.now();
 
         if (safePayload.status === "session_active" || safePayload.status === "complete") {
           // Session active - normal display
@@ -486,7 +216,7 @@ Module.register("MMM-HomeConnect2", {
           // Authentication already in progress (special auth UI)
           this.authStatus = {
             status: "polling",
-            message: safePayload.message
+            message: safePayload.message,
           };
         }
         this.lifecycle.render();
@@ -494,7 +224,11 @@ Module.register("MMM-HomeConnect2", {
       }
       case "DEBUG_STATS":
         this.debugStats = safePayload || {};
-        this.lifecycle.render();
+        // The stats arrive on every API call and SSE keep-alive; only the debug
+        // panel shows them, so without it there is nothing to re-render.
+        if (this.isDebugPanelEnabled()) {
+          this.lifecycle.render();
+        }
         break;
       default:
         break;
@@ -509,111 +243,14 @@ Module.register("MMM-HomeConnect2", {
     this.lifecycle.resume();
   },
 
+  getDisplayState() {
+    return window.HomeConnectDisplayState;
+  },
+
   getDeviceUtils() {
     const browserUtils =
-      typeof window !== "undefined" && window.HomeConnectDeviceUtils
-        ? window.HomeConnectDeviceUtils
-        : {};
-
-    return {
-      parseStartInRelativeSeconds:
-        typeof browserUtils.parseStartInRelativeSeconds === "function"
-          ? browserUtils.parseStartInRelativeSeconds
-          : () => null,
-      parseFinishInRelativeSeconds:
-        typeof browserUtils.parseFinishInRelativeSeconds === "function"
-          ? browserUtils.parseFinishInRelativeSeconds
-          : () => null,
-      parseRemainingSeconds:
-        typeof browserUtils.parseRemainingSeconds === "function"
-          ? browserUtils.parseRemainingSeconds
-          : () => null,
-      parseProgress:
-        typeof browserUtils.parseProgress === "function"
-          ? browserUtils.parseProgress
-          : () => undefined,
-      parseEstimatedTotalSeconds:
-        typeof browserUtils.parseEstimatedTotalSeconds === "function"
-          ? browserUtils.parseEstimatedTotalSeconds
-          : () => null,
-      isEstimatedDuration:
-        typeof browserUtils.isEstimatedDuration === "function"
-          ? browserUtils.isEstimatedDuration
-          : () => false,
-      getDeviceTypeMeta:
-        typeof browserUtils.getDeviceTypeMeta === "function"
-          ? browserUtils.getDeviceTypeMeta
-          : (type) => ({ iconName: type ? `${type}.png` : null, fallbackIconClass: "fa-plug" }),
-      isDeviceExplicitlyDisconnected:
-        typeof browserUtils.isDeviceExplicitlyDisconnected === "function"
-          ? browserUtils.isDeviceExplicitlyDisconnected
-          : () => false,
-      shouldDisplayDevice:
-        typeof browserUtils.shouldDisplayDevice === "function"
-          ? browserUtils.shouldDisplayDevice
-          : () => false,
-      parseOperationState:
-        typeof browserUtils.parseOperationState === "function"
-          ? browserUtils.parseOperationState
-          : () => ({
-            known: false,
-            isRun: false,
-            isPaused: false,
-            isDelayedStart: false,
-            isFinished: false,
-            hasProgramInProgress: false
-          })
-    };
-  },
-
-  getUniqueStrings(values, maxItems = Infinity) {
-    const seen = new Set();
-    const result = [];
-
-    values.forEach((value) => {
-      if (typeof value !== "string") {
-        return;
-      }
-
-      const normalized = value.trim();
-      if (!normalized || seen.has(normalized)) {
-        return;
-      }
-
-      seen.add(normalized);
-      if (result.length < maxItems) {
-        result.push(normalized);
-      }
-    });
-
-    return result;
-  },
-
-  getObjectSummaryValues(value, maxItems = Infinity) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      return [];
-    }
-
-    return this.getUniqueStrings(Object.values(value), maxItems);
-  },
-
-  formatDuration(seconds) {
-    if (!seconds || seconds <= 0) {
-      return "";
-    }
-
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    return (hours > 0 ? `${hours}h ` : "") + `${String(minutes).padStart(2, "0")}m`;
-  },
-
-  formatDebugAge(timestamp) {
-    if (!Number.isFinite(timestamp) || timestamp <= 0) {
-      return "n/a";
-    }
-
-    const ageSeconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
-    return this.formatDuration(ageSeconds) || `${ageSeconds}s`;
+      typeof window !== "undefined" && window.HomeConnectDeviceUtils ? window.HomeConnectDeviceUtils : {};
+    return this.getDisplayState().withDeviceUtilsFallbacks(browserUtils);
   },
 
   formatClockTime(timestamp) {
@@ -629,351 +266,23 @@ Module.register("MMM-HomeConnect2", {
       return new Intl.DateTimeFormat(locale, {
         hour: "2-digit",
         minute: "2-digit",
-        hour12
+        hour12,
       }).format(timestamp);
     } catch {
       return new Date(timestamp).toLocaleTimeString([], {
         hour: "2-digit",
-        minute: "2-digit"
+        minute: "2-digit",
       });
     }
   },
 
-  getObservedProgressEstimate(device, remainingSeconds) {
-    const observedAt = Number(device?._remainingObservedAt);
-    if (!Number.isFinite(observedAt) || !(remainingSeconds > 0)) {
-      return undefined;
-    }
-
-    const observedElapsedSeconds = Math.max(0, Math.round((Date.now() - observedAt) / 1000));
-    if (observedElapsedSeconds <= 0) {
-      return undefined;
-    }
-
-    const estimatedTotalSeconds = observedElapsedSeconds + remainingSeconds;
-    if (!(estimatedTotalSeconds > 0)) {
-      return undefined;
-    }
-
-    return Math.max(
-      0,
-      Math.min(100, Math.round((observedElapsedSeconds / estimatedTotalSeconds) * 100))
-    );
-  },
-
-  getEffectiveRemainingSeconds(device, remainingSeconds) {
-    if (!(remainingSeconds > 0)) {
-      return remainingSeconds;
-    }
-
-    const lastSeenAt = Number(device?._lastRemainingSeenAt || device?._remainingObservedAt);
-    if (!Number.isFinite(lastSeenAt) || lastSeenAt <= 0) {
-      return remainingSeconds;
-    }
-
-    const elapsedSeconds = Math.max(0, Math.round((Date.now() - lastSeenAt) / 1000));
-    return Math.max(0, remainingSeconds - elapsedSeconds);
-  },
-
-  getDeviceRuntimeHint(runtimeHints, device) {
-    const deviceKey = device.haId || device.haid || device.id || device.name || "unknown";
-    return runtimeHints[deviceKey] || (runtimeHints[deviceKey] = { hadActive: false });
-  },
-
-  updateRuntimeHintState({
-    hint,
-    powerState,
-    remainingSeconds,
-    progressNumeric,
-    operationStateActive,
-    suppressSelectedProgramRuntime
-  }) {
-    if (powerState === "Off") {
-      hint.hadActive = false;
-    }
-    if (operationStateActive && powerState !== "Off") {
-      hint.hadActive = true;
-    }
-    if (!suppressSelectedProgramRuntime && remainingSeconds !== null && remainingSeconds > 0) {
-      hint.hadActive = true;
-    }
-    if (
-      !suppressSelectedProgramRuntime &&
-      progressNumeric !== undefined &&
-      progressNumeric > 0 &&
-      progressNumeric < 100
-    ) {
-      hint.hadActive = true;
-    }
-
-    return hint.hadActive && remainingSeconds === 0;
-  },
-
   buildDeviceDisplayState(device, runtimeHints, deviceUtils) {
-    const explicitlyDisconnected = deviceUtils.isDeviceExplicitlyDisconnected(device);
-    const remainingSeconds = deviceUtils.parseRemainingSeconds(device);
-    const effectiveRemainingSeconds = this.getEffectiveRemainingSeconds(device, remainingSeconds);
-    const estimatedTotalSeconds = deviceUtils.parseEstimatedTotalSeconds(device);
-    const hasEstimatedDuration = deviceUtils.isEstimatedDuration(device);
-    const progressValue = deviceUtils.parseProgress(device);
-    const startInRelativeSeconds =
-      typeof deviceUtils.parseStartInRelativeSeconds === "function"
-        ? deviceUtils.parseStartInRelativeSeconds(device)
-        : null;
-    const finishInRelativeSeconds =
-      typeof deviceUtils.parseFinishInRelativeSeconds === "function"
-        ? deviceUtils.parseFinishInRelativeSeconds(device)
-        : null;
-    const hint = this.getDeviceRuntimeHint(runtimeHints, device);
-    const progressNumeric = normalizeProgressValue(progressValue);
-    const operationState = getOperationStateInfo(device, deviceUtils);
-    const hasRuntimeSignalsForSelectedProgram =
-      operationState.isActive ||
-      (Number.isFinite(remainingSeconds) && remainingSeconds > 0 && !hasEstimatedDuration) ||
-      (progressNumeric !== undefined && progressNumeric > 0 && progressNumeric < 100);
-    const suppressSelectedProgramRuntime =
-      device.ActiveProgramSource === "selected" &&
-      !operationState.isDelayedStart &&
-      !hasRuntimeSignalsForSelectedProgram;
-    const effectiveOperationStateActive = suppressSelectedProgramRuntime
-      ? false
-      : operationState.isActive;
-    const finishedViaZero = this.updateRuntimeHintState({
-      hint,
-      powerState: device.PowerState,
-      remainingSeconds,
-      progressNumeric,
-      operationStateActive: effectiveOperationStateActive,
-      suppressSelectedProgramRuntime
+    return this.getDisplayState().buildDeviceDisplayState(device, runtimeHints, deviceUtils, {
+      translate: (key) => this.translate(key),
+      formatClockTime: (timestamp) => this.formatClockTime(timestamp),
+      debug: (this.config?.logLevel || "").toLowerCase() === "debug",
+      now: Date.now(),
     });
-    const isFinished = operationState.isFinished || progressNumeric === 100 || finishedViaZero;
-    // The play icon and the selected-program line are factual claims about the
-    // appliance, so they need proof: an operation state we understand that says
-    // "Run". Remaining times and progress values routinely survive a finished or
-    // merely selected program and must not be used to infer that something runs.
-    const programRunning = operationState.known && effectiveOperationStateActive && !isFinished;
-    if (isFinished) {
-      hint.hadActive = false;
-    }
-    const observedPercent = this.getObservedProgressEstimate(device, effectiveRemainingSeconds);
-    const progressState = computeProgressDisplayState({
-      device,
-      effectiveRemainingSeconds,
-      estimatedTotalSeconds,
-      progressNumeric,
-      suppressSelectedProgramRuntime,
-      effectiveOperationStateActive,
-      observedPercent
-    });
-    const {
-      percent,
-      progressSource,
-      visibleRemainingSeconds,
-      isIndeterminate,
-      estimatedTotalPercent,
-      initialPercent
-    } = progressState;
-
-    const typeMeta = deviceUtils.getDeviceTypeMeta(device.type);
-    const programState = computeProgramDisplayState({
-      device,
-      operationStateHasNoProgram: operationState.hasNoProgram,
-      operationStateDelayedStart: operationState.isDelayedStart,
-      programRunning,
-      suppressSelectedProgramRuntime,
-      visibleRemainingSeconds,
-      estimatedTotalSeconds,
-      hasEstimatedDuration,
-      startInRelativeSeconds,
-      finishInRelativeSeconds,
-      isFinished,
-      nowMs: Date.now(),
-      translate: this.translate.bind(this),
-      formatDuration: this.formatDuration.bind(this),
-      formatClockTime: this.formatClockTime.bind(this)
-    });
-    const {
-      programMeta,
-      programSupplement,
-      wrinkleProtectionActive,
-      delayedStartText,
-      visiblePlannedDurationLabel
-    } = programState;
-
-    const deviceSpecificDetails = this.getObjectSummaryValues(device.DeviceStatusByKey, 4);
-    const deviceAlerts = this.getObjectSummaryValues(device.DeviceAlertsByKey, 3);
-
-    const detailText = deviceSpecificDetails.join(" • ");
-    const alertText = deviceAlerts.length
-      ? `${this.translate("ACTIVE_ALERTS")}: ${deviceAlerts.join(" • ")}`
-      : "";
-
-    const statusText = explicitlyDisconnected
-      ? this.translate("DEVICE_NOT_CONNECTED")
-      : visibleRemainingSeconds > 0
-        ? `${this.translate("DONE_IN")} ${hasEstimatedDuration ? `${this.translate("APPROX_PREFIX")} ` : ""}${this.formatDuration(visibleRemainingSeconds)}`
-        : "";
-    const showProgressDebug = (this.config?.logLevel || "").toLowerCase() === "debug";
-    const progressDebug = showProgressDebug
-      ? [
-        `src=${progressSource}`,
-        `api=${progressNumeric !== undefined ? `${progressNumeric}%` : "n/a"}`,
-        `total=${estimatedTotalPercent !== undefined ? `${estimatedTotalPercent}%` : "n/a"}`,
-        `initial=${initialPercent !== undefined ? `${initialPercent}%` : "n/a"}`,
-        `observed=${observedPercent !== undefined ? `${observedPercent}%` : "n/a"}`,
-        `remaining=${visibleRemainingSeconds !== null ? this.formatDuration(visibleRemainingSeconds) || `${visibleRemainingSeconds}s` : "n/a"}`,
-        `rawRemaining=${remainingSeconds !== null ? this.formatDuration(remainingSeconds) || `${remainingSeconds}s` : "n/a"}`,
-        `planned=${visiblePlannedDurationLabel || "n/a"}`,
-        `seen=${this.formatDebugAge(Number(device._remainingObservedAt))}`
-      ].join(" | ")
-      : "";
-
-    return {
-      deviceName: device.name,
-      imageName: typeMeta.iconName,
-      fallbackIconClass: typeMeta.fallbackIconClass,
-      runtime: {
-        explicitlyDisconnected,
-        operationStateDelayedStart: operationState.isDelayedStart,
-        operationStatePaused: operationState.isPaused,
-        programRunning,
-        isFinished,
-        isIndeterminate,
-        wrinkleProtectionActive,
-        percent
-      },
-      presentation: {
-        delayedStartText,
-        progressDebug,
-        programMeta,
-        detailText,
-        alertText,
-        programSupplement,
-        showProgressDebug,
-        statusText
-      }
-    };
-  },
-
-  getRateLimitNotice() {
-    const status = this.lastInitStatus || this.authStatus;
-    if (!status || typeof status !== "object") {
-      return null;
-    }
-
-    const message = typeof status.message === "string" ? status.message.trim() : "";
-    const isRateLimited =
-      status.isRateLimit === true ||
-      Number(status.statusCode) === 429 ||
-      Number.isFinite(status.rateLimitSeconds) ||
-      /(^|\D)429(\D|$)|rate limit/i.test(message);
-
-    if (!isRateLimited) {
-      return null;
-    }
-
-    return {
-      title: "HTTP 429",
-      message: message || "Home Connect API rate limit reached"
-    };
-  },
-
-  getHomeConnectErrorNotice() {
-    const status = this.lastInitStatus || this.authStatus;
-    // hc_error belongs to the init retry banner.
-    if (!status || typeof status !== "object" || status.status === "hc_error") {
-      return null;
-    }
-
-    const message = typeof status.message === "string" ? status.message.trim() : "";
-    if (!message) {
-      return null;
-    }
-
-    const homeConnectErrorPatterns = [
-      /RemoteControlNotActive/i,
-      /RemoteStartNotActive/i,
-      /WrongOperationState/i,
-      /BSH\.Common\.Error/i
-    ];
-
-    const isHomeConnectError = homeConnectErrorPatterns.some((pattern) => pattern.test(message));
-    if (!isHomeConnectError) {
-      return null;
-    }
-
-    return {
-      title: "Home Connect",
-      message: message.replace(/\s+/g, " ").trim()
-    };
-  },
-
-  getDomBuilder() {
-    return window.HomeConnectDomBuilder;
-  },
-
-  // All status banners share one shape: a title plus one or more message lines.
-  createStatusBanner(title, messages) {
-    const { h } = this.getDomBuilder();
-    return h("div", { class: "hc-status-banner hc-status-banner-warning" }, [
-      h("div", { class: "hc-status-banner-title" }, title),
-      messages
-        .filter(Boolean)
-        .map((message) => h("div", { class: "hc-status-banner-message" }, message))
-    ]);
-  },
-
-  getRateLimitNoticeElement() {
-    const notice = this.getRateLimitNotice();
-    return notice ? this.createStatusBanner(notice.title, [notice.message]) : null;
-  },
-
-  getHomeConnectErrorNoticeElement() {
-    const notice = this.getHomeConnectErrorNotice();
-    return notice ? this.createStatusBanner(notice.title, [notice.message]) : null;
-  },
-
-  // A failed HomeConnect init (typically network/DNS not up yet after a reboot)
-  // is retried by the backend with backoff. Without this banner the module would
-  // show "Loading appliances" for minutes with no hint that anything went wrong.
-  getInitRetryNoticeElement() {
-    const status = this.lastInitStatus;
-    if (!status || typeof status !== "object" || status.status !== "hc_error") {
-      return null;
-    }
-
-    const retryInSeconds = Math.round(Number(status.retryInSeconds));
-    let retryText = "";
-    if (Number.isFinite(retryInSeconds) && retryInSeconds > 0) {
-      const delayText =
-        retryInSeconds < 90 ? `${retryInSeconds}s` : `${Math.round(retryInSeconds / 60)} min`;
-      retryText = `${this.translate("HC_INIT_RETRY_IN")} ${delayText}`;
-    }
-    const errorText = typeof status.message === "string" ? status.message.trim() : "";
-
-    return this.createStatusBanner(this.translate("HC_INIT_FAILED_TITLE"), [errorText, retryText]);
-  },
-
-  getConfigMismatchNoticeElement() {
-    const status = this.lastInitStatus;
-    if (!status || typeof status !== "object" || status.isConfigMismatch !== true) {
-      return null;
-    }
-
-    const mismatchKeys = Array.isArray(status.mismatchKeys) ? status.mismatchKeys : [];
-    const isCredentialMismatch = mismatchKeys.some(
-      (key) => key === "clientId" || key === "clientSecret"
-    );
-    const fallbackMessage = isCredentialMismatch
-      ? this.translate("CONFIG_MISMATCH_CREDENTIALS")
-      : this.translate("CONFIG_MISMATCH");
-
-    const message =
-      typeof status.message === "string" && status.message.trim()
-        ? status.message.trim()
-        : fallbackMessage;
-
-    return this.createStatusBanner(this.translate("CONFIG_MISMATCH_TITLE"), [message]);
   },
 
   renderDeviceCard(device, runtimeHints, deviceUtils) {
@@ -986,210 +295,66 @@ Module.register("MMM-HomeConnect2", {
       displayState: this.buildDeviceDisplayState(device, runtimeHints, deviceUtils),
       showDeviceIcon: Boolean(this.config.showDeviceIcon),
       translate: (key) => this.translate(key),
-      iconUrl: (imageName) => this.file(`icons/${imageName}`)
+      iconUrl: (imageName) => this.file(`icons/${imageName}`),
     });
   },
 
   getDom() {
-    const { h } = this.getDomBuilder();
+    // Cards: lib/device-card-renderer.js; everything else: lib/status-views.js.
+    const views = window.HomeConnectStatusViews;
+    const ctx = { translate: (key) => this.translate(key), now: Date.now() };
     const div = document.createElement("div");
-    const append = (...nodes) => nodes.flat().forEach((node) => node && div.appendChild(node));
-    const runtimeHints = this.deviceRuntimeHints || (this.deviceRuntimeHints = {});
-    const deviceUtils = this.getDeviceUtils();
+    const append = (...nodes) => {
+      for (const node of nodes.flat()) {
+        if (node) {
+          div.appendChild(node);
+        }
+      }
+    };
 
-    // Show authentication info if available
     if (this.authInfo && this.authInfo.status === "waiting") {
-      append(this.getAuthElement());
+      append(views.renderAuthInfo(this.authInfo, ctx));
       return div;
     }
-
-    // Show authentication status if available
     if (this.authStatus && this.authStatus.status === "polling") {
-      append(this.getAuthStatusElement());
+      append(views.renderAuthStatus(this.authStatus, ctx));
       return div;
     }
-
-    // Show error if authentication failed
     if (this.authStatus && this.authStatus.status === "error") {
-      append(this.getAuthErrorElement());
+      append(views.renderAuthError(this.authStatus, ctx));
       return div;
     }
 
-    const notices = [
-      this.getRateLimitNoticeElement(),
-      this.getInitRetryNoticeElement(),
-      this.getHomeConnectErrorNoticeElement(),
-      this.getConfigMismatchNoticeElement()
-    ];
+    const notices = views.renderNotices(
+      {
+        lastInitStatus: this.lastInitStatus,
+        lastInitStatusReceivedAt: this.lastInitStatusReceivedAt,
+        authStatus: this.authStatus,
+      },
+      ctx,
+    );
 
-    // Show loading message if no devices yet
     if (!this.devices || this.devices.length === 0) {
-      append(
-        notices,
-        h("div", { class: "small" }, [
-          h("i", { class: "fa fa-cog fa-spin" }),
-          ` ${this.translate("SESSION_BASED_AUTH")}`,
-          h("br"),
-          h("span", { class: "dimmed" }, `${this.translate("LOADING_APPLIANCES")}...`)
-        ])
-      );
+      append(notices, views.renderLoading(ctx));
       return div;
     }
 
+    if (!this.deviceRuntimeHints) {
+      this.deviceRuntimeHints = {};
+    }
+    const deviceUtils = this.getDeviceUtils();
     const cards = this.devices
-      .map((device) => this.renderDeviceCard(device, runtimeHints, deviceUtils))
+      .map((device) => this.renderDeviceCard(device, this.deviceRuntimeHints, deviceUtils))
       .filter(Boolean);
+    const debugPanel = this.isDebugPanelEnabled()
+      ? views.renderDebugPanel({ debugStats: this.debugStats, lastInitStatus: this.lastInitStatus })
+      : null;
 
-    if (cards.length === 0) {
-      append(
-        notices,
-        h("div", { class: "dimmed small" }, this.translate("NO_ACTIVE_APPLIANCES")),
-        this.getDebugPanel()
-      );
-      return div;
-    }
-
-    append(notices, cards, this.getDebugPanel());
+    append(notices, cards.length > 0 ? cards : views.renderNoActiveAppliances(ctx), debugPanel);
     return div;
   },
 
-  // Links from the OAuth server are only rendered as links when they are http(s).
-  createAuthLink(url) {
-    const { h, isSafeHttpUrl } = this.getDomBuilder();
-    const content = isSafeHttpUrl(url) ? h("a", { href: url }, url) : url;
-    return h("div", { class: "auth-url" }, content);
+  isDebugPanelEnabled() {
+    return (this.config?.logLevel || this.defaults.logLevel || "none").toLowerCase() === "debug";
   },
-
-  createAuthStep(icon, titleKey, content) {
-    const { h } = this.getDomBuilder();
-    return h("div", { class: "auth-step" }, [
-      h("div", { class: "auth-step-title" }, [
-        `${icon} `,
-        h("strong", null, this.translate(titleKey))
-      ]),
-      h("div", { class: "auth-step-content" }, content)
-    ]);
-  },
-
-  getAuthElement() {
-    const { h } = this.getDomBuilder();
-    const authInfo = this.authInfo;
-
-    // The QR code SVG is generated by the helper. Rendering it as an image keeps
-    // it out of the document markup entirely - an <img> cannot run scripts.
-    let directContent = null;
-    if (authInfo.verification_qr_svg) {
-      directContent = h("div", { class: "auth-qr" }, [
-        h("img", {
-          src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(authInfo.verification_qr_svg)}`,
-          alt: "QR code"
-        })
-      ]);
-    } else if (authInfo.verification_uri_complete) {
-      directContent = this.createAuthLink(authInfo.verification_uri_complete);
-    }
-
-    return h("div", { class: "auth-container" }, [
-      h("div", { class: "auth-header" }, `🔐 ${this.translate("AUTH_TITLE")}`),
-      this.createAuthStep("📱", "AUTH_STEP1", this.createAuthLink(authInfo.verification_uri)),
-      this.createAuthStep("🔑", "AUTH_STEP2", h("div", { class: "auth-code" }, authInfo.user_code)),
-      this.createAuthStep("🔗", "AUTH_STEP_DIRECT", directContent),
-      h("div", { class: "auth-footer" }, [
-        h(
-          "div",
-          { class: "auth-timer" },
-          `⏱️ ${this.translate("AUTH_CODE_EXPIRES")} ${authInfo.expires_in_minutes} ${this.translate("AUTH_MINUTES")}`
-        )
-      ]),
-      h("div", { class: "auth-waiting" }, this.translate("AUTH_WAITING"))
-    ]);
-  },
-
-  getAuthStatusElement() {
-    const { h } = this.getDomBuilder();
-    const authStatus = this.authStatus;
-
-    let progressBar = null;
-    if (authStatus.attempt && authStatus.maxAttempts) {
-      const progress = Math.round((authStatus.attempt / authStatus.maxAttempts) * 100);
-      progressBar = h("div", { class: "progress-container" }, [
-        h("div", { class: "progress-bar" }, [
-          h("div", { class: "progress-fill", style: `width: ${progress}%` })
-        ])
-      ]);
-    }
-
-    return h("div", { class: "auth-container" }, [
-      h("div", { class: "auth-header" }, `⏳ ${this.translate("AUTH_STATUS_WAITING")}`),
-      progressBar,
-      h("div", { class: "auth-message" }, authStatus.message),
-      authStatus.interval
-        ? h(
-          "div",
-          { class: "auth-info" },
-          `${this.translate("AUTH_POLL_INTERVAL")} ${authStatus.interval} ${this.translate("AUTH_SECONDS")}`
-        )
-        : null
-    ]);
-  },
-
-  getDebugPanel() {
-    const logLevel = (this.config?.logLevel || this.defaults.logLevel || "none").toLowerCase();
-    if (logLevel !== "debug" || !this.debugStats) {
-      return null;
-    }
-    const { h } = this.getDomBuilder();
-    const formatTime = (ts) => (ts ? new Date(ts).toLocaleTimeString() : "n/a");
-    const row = (label, value) =>
-      h("div", { class: "hc-debug-row" }, [h("span", { class: "hc-debug-label" }, label), ` ${value}`]);
-    const rows = [];
-
-    // Status from INIT_STATUS gets rendered only in debug mode
-    if (this.lastInitStatus && this.lastInitStatus.message) {
-      rows.push(row("last init status:", this.lastInitStatus.message));
-    }
-
-    rows.push(
-      row("SSE traffic:", formatTime(this.debugStats.lastSseTrafficTs || this.debugStats.lastSseEventTs))
-    );
-    rows.push(row("SSE event:", formatTime(this.debugStats.lastSseEventTs)));
-    rows.push(row("API:", formatTime(this.debugStats.lastApiCallTs)));
-
-    const session = this.debugStats.session || null;
-    if (session && typeof session === "object") {
-      const rateLimitRemainingSec = Number.isFinite(session.rateLimitRemainingMs)
-        ? Math.max(0, Math.ceil(session.rateLimitRemainingMs / 1000))
-        : 0;
-      const sessionFlags = [
-        session.authenticated ? "authenticated" : "not authenticated",
-        session.authFlowInProgress ? "auth in progress" : null,
-        session.deviceRefreshInFlight ? "device refresh" : null,
-        session.programFetchInFlight ? "program fetch" : null
-      ]
-        .filter(Boolean)
-        .join(", ");
-      rows.push(row("session:", sessionFlags));
-      rows.push(row("rate limit remaining:", `${rateLimitRemainingSec}s`));
-    }
-
-    const counters = this.debugStats.apiCounters || {};
-    const counterEntries = Object.entries(counters);
-    if (counterEntries.length) {
-      rows.push(h("div", { class: "hc-debug-subtitle" }, "API counts"));
-      counterEntries.sort(([a], [b]) => a.localeCompare(b));
-      counterEntries.forEach(([name, value]) => {
-        rows.push(row(name, value));
-      });
-    }
-    return h("div", { class: "hc-debug-panel" }, rows);
-  },
-
-  getAuthErrorElement() {
-    const { h } = this.getDomBuilder();
-    return h("div", { class: "auth-container error" }, [
-      h("div", { class: "auth-header" }, `❌ ${this.translate("AUTH_FAILED_TITLE")}`),
-      h("div", { class: "auth-message" }, this.authStatus.message),
-      h("div", { class: "auth-info" }, this.translate("AUTH_FAILED_INFO"))
-    ]);
-  }
 }); // End Module
