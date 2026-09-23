@@ -48,7 +48,6 @@ function runUnitTests() {
   runNode("client-liveness.test.js");
   runNode("logger.test.js");
   runNode("init-timeout.test.js");
-  runNode("backend-session.test.js");
 }
 
 async function runLiveSmokeTest() {

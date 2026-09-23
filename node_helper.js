@@ -4,7 +4,7 @@ const DeviceService = require("./lib/device-service");
 const ProgramService = require("./lib/program-service");
 const { ProgramFetchCoordinator } = require("./lib/program-fetch-coordinator");
 const shared = require("./lib/mmm-shared/mmm-shared");
-const { createClientRegistry, formatLogEntry } = require("./lib/backend-session");
+const { createClientRegistry, formatLogEntry } = require("./lib/mmm-shared/backend-session");
 const NodeHelper = require("node_helper"),
   globalSession = {
     accessToken: null, // Access token for API requests

@@ -54,8 +54,7 @@ Module.register("MMM-HomeConnect2", {
       logger: this.shared.createLogger({
         moduleName: "MMM-HomeConnect2",
         identifier: this.identifier,
-        consoleRef: globalThis.Log || console,
-        getLevel: () => this.config.logLevel || "debug",
+        getLevel: () => this.config.logLevel,
         structured: false,
         redact: true,
       }),

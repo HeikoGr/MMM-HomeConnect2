@@ -27,11 +27,10 @@
   `CONFIGURE` once, at `ALL_MODULES_STARTED`, with its core-assigned `identifier` as instance id,
   and again when the backend asks with `INIT_REQUIRED`.
 - Which displays are registered follows their browser sockets (`createClientRegistry` in
-  `lib/backend-session.js`): a display whose socket is gone for 10 minutes is dropped from
+  `lib/mmm-shared/backend-session.js`): a display whose socket is gone for 10 minutes is dropped from
   `clientInstances`; every new connection is greeted with `INIT_REQUIRED`. There is no
   time-based pruning - a display that stays connected stays registered.
-  `lib/backend-session.js` is a module-local copy shared with MMM-CalDAV-Tasks,
-  MMM-LibraryMonitor and MMM-Photoprism2; change all copies together.
+  It comes from the `lib/mmm-shared` submodule (tests there); change it in the mmm-shared repo.
 - `lib/device-utils.js` is loaded twice: via `require` in the backend and via `getScripts()` in
   the browser. Keep it free of Node-only and DOM-only APIs. The same holds for
   `lib/display-state.js` (what a device card shows: progress, program line, status texts).
