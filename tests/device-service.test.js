@@ -553,12 +553,51 @@ function createDeviceService(overrides = {}) {
     });
 
     const before = Date.now();
-    service.getDevices(() => {});
+    let followUps = 0;
+    service.getDevices(() => {}, {
+      onDetailsRefreshed: () => {
+        followUps += 1;
+      },
+    });
     await wait(10);
 
+    assert.strictEqual(followUps, 0, "A failed device fetch must not start the program follow-up");
     assert.strictEqual(rateLimitCalls.length, 1, "Expected the global rate limit to be set");
     assert.ok(rateLimitCalls[0] >= before + 120 * 1000, "Expected Retry-After to drive the backoff window");
     assert.strictEqual(settled, 1, "Expected the failed refresh to settle exactly once");
+  }
+
+  // The program follow-up runs once, after every status call has finished - not
+  // alongside them (a burst) and not on stale state.
+  {
+    const order = [];
+    const { service } = createDeviceService();
+    service.attachClient({
+      getHomeAppliances: () =>
+        Promise.resolve({
+          success: true,
+          data: {
+            homeappliances: [
+              { haId: "ha-1", name: "Washer", connected: true },
+              { haId: "ha-2", name: "Dryer", connected: true },
+            ],
+          },
+        }),
+      getStatus: (haId) => {
+        order.push(`status:${haId}`);
+        return Promise.resolve({ success: true, data: { status: [] } });
+      },
+      getSettings: () => Promise.resolve({ success: true, data: { settings: [] } }),
+      refreshTokens: () => Promise.resolve(),
+      subscribeDevice() {},
+      closeEventSources() {},
+    });
+
+    service.getDevices(() => {}, { onDetailsRefreshed: () => order.push("programs") });
+    await wait(700);
+
+    assert.deepStrictEqual(order, ["status:ha-1", "status:ha-2", "programs"]);
+    service.shutdown();
   }
 
   // A refresh that never reaches the API must still settle its in-flight state.

@@ -100,17 +100,6 @@ function createProgramService(overrides = {}) {
           },
         ],
       },
-      availableProgram: {
-        key: "LaundryCare.Dryer.Program.Synthetic",
-        options: [
-          {
-            key: "LaundryCare.Dryer.Option.DryingTarget",
-            constraints: {
-              allowedvalues: ["LaundryCare.Dryer.EnumType.DryingTarget.CupboardDryPlus"],
-            },
-          },
-        ],
-      },
     };
     service.applyProgramResult(result);
     const device = devices.get("ha-1");
@@ -121,10 +110,9 @@ function createProgramService(overrides = {}) {
       "Less Ironing: 60 min",
       "Gentle Dry",
     ]);
-    assert.deepStrictEqual(device.AvailableOptionDetails, ["Drying Target"]);
   }
 
-  // applyProgramResult: stores available programs and constraints when no active program exists
+  // applyProgramResult: stores available programs when no active program exists
   {
     const { service, devices } = createProgramService();
     const result = {
@@ -135,27 +123,17 @@ function createProgramService(overrides = {}) {
           { key: "ConsumerProducts.CoffeeMaker.Program.Beverage.Coffee", name: "Coffee" },
           { key: "ConsumerProducts.CoffeeMaker.Program.Beverage.Espresso", name: "Espresso" },
         ],
-        programDefinition: {
-          key: "ConsumerProducts.CoffeeMaker.Program.Beverage.Coffee",
-          options: [
-            {
-              key: "ConsumerProducts.CoffeeMaker.Option.FillQuantity",
-              unit: "ml",
-              constraints: { min: 60, max: 260 },
-            },
-          ],
-        },
       },
     };
 
     service.applyProgramResult(result);
     const device = devices.get("ha-1");
     assert.deepStrictEqual(device.AvailablePrograms, ["Coffee", "Espresso"]);
-    assert.deepStrictEqual(device.AvailableOptionDetails, ["Fill Quantity: 60-260 ml"]);
     assert.strictEqual(device.ActiveProgramName, undefined);
   }
 
-  // fetchActiveProgramForDevice: falls back to selected program on 404 active program
+  // fetchActiveProgramForDevice: falls back to selected program on 404 active program,
+  // without fetching the program definition (its constraints were never displayed)
   {
     const { service } = createProgramService();
     let availableProgramCalls = 0;
@@ -187,9 +165,7 @@ function createProgramService(overrides = {}) {
     assert.strictEqual(result.source, "selected");
     assert.strictEqual(result.data.name, "Synthetics");
 
-    const secondResult = await service.fetchActiveProgramForDevice("ha-1", "Washer");
-    assert.strictEqual(secondResult.success, true);
-    assert.strictEqual(availableProgramCalls, 1);
+    assert.strictEqual(availableProgramCalls, 0);
   }
 
   // fetchActiveProgramForDevice: falls back to available programs when active/selected are missing

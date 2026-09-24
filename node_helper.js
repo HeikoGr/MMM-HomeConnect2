@@ -143,7 +143,20 @@ module.exports = NodeHelper.create({
     this.emitStatus("AUTH_STATUS", AUTH_STATUS_MESSAGES, status, payload, options);
   },
 
-  dispatchDeviceRefreshWithProgramSync({ reason, requester, forcePrograms = false, haIds = null } = {}) {
+  /**
+   * Device snapshot, then the program sync once the status calls are done.
+   * `activeProgramsOnly` limits the program sync to appliances that are running
+   * (by their fresh status): an idle appliance answers /programs/active with a
+   * 404 - quota spent, and an error on the way to Home Connect's "10 failed
+   * requests in a row" block - and SSE triggers the fetch when it starts.
+   */
+  dispatchDeviceRefreshWithProgramSync({
+    reason,
+    requester,
+    forcePrograms = false,
+    activeProgramsOnly = false,
+    haIds = null,
+  } = {}) {
     if (!this.deviceService || !this.hc || this.authFlowInProgress) {
       return false;
     }
@@ -151,25 +164,22 @@ module.exports = NodeHelper.create({
     log.debug("Dispatching device refresh", { reason: reason || "device_refresh" });
     this.deviceRefreshInFlight = true;
     this.deviceRefreshStartedAt = Date.now();
-    let followUpRequested = false;
 
     // Pure broadcast sink. The in-flight flag is released by DeviceService's
     // onRefreshSettled hook: a failing fetch never sends a notification, so
     // clearing it here left it stuck on true after a single 429.
-    this.deviceService.getDevices((notification, callbackPayload) => {
-      this.broadcastToAllClients(notification, callbackPayload);
-
-      if (followUpRequested || notification !== "DEVICES_UPDATE") {
-        return;
-      }
-
-      followUpRequested = true;
-      this.handleGetActivePrograms({
-        instanceId: requester || this.instanceId || "unknown",
-        haIds,
-        force: forcePrograms,
-      });
-    });
+    this.deviceService.getDevices(
+      (notification, callbackPayload) => this.broadcastToAllClients(notification, callbackPayload),
+      {
+        onDetailsRefreshed: () =>
+          this.handleGetActivePrograms({
+            instanceId: requester || this.instanceId || "unknown",
+            haIds,
+            force: forcePrograms,
+            activeOnly: activeProgramsOnly,
+          }),
+      },
+    );
 
     return true;
   },
@@ -317,6 +327,7 @@ module.exports = NodeHelper.create({
         reason: "scheduled_full_snapshot",
         requester: "scheduled_snapshot",
         forcePrograms: true,
+        activeProgramsOnly: true,
       });
     }, FULL_SNAPSHOT_INTERVAL_MS);
   },

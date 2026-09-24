@@ -149,9 +149,10 @@ function registeredInstances() {
       staleSequence.push("rebuild");
       return Promise.resolve(true);
     },
-    getDevices(callback) {
+    getDevices(callback, options = {}) {
       staleSequence.push("device_refresh_start");
       callback("DEVICES_UPDATE", [{ haId: "ha-1", name: "Washer" }]);
+      options.onDetailsRefreshed?.();
     },
   };
   helper.sendSocketNotification = (notification, payload) => {
@@ -161,13 +162,14 @@ function registeredInstances() {
   };
   const staleOriginalHandleGetActivePrograms = helper.handleGetActivePrograms;
   helper.handleGetActivePrograms = (payload = {}) => {
-    staleSequence.push(`program_fetch:${payload.instanceId || "unknown"}:${payload.force}`);
+    staleSequence.push(`program_fetch:${payload.instanceId || "unknown"}:${payload.force}:${payload.activeOnly}`);
   };
 
   helper.handleSseStale({ silenceMs: 71000 });
   await wait(0);
 
-  assert.deepStrictEqual(staleSequence, ["rebuild", "device_refresh_start", "program_fetch:sse_watchdog:true"]);
+  // The resync asks only running appliances for their program (activeOnly).
+  assert.deepStrictEqual(staleSequence, ["rebuild", "device_refresh_start", "program_fetch:sse_watchdog:true:true"]);
 
   helper.handleGetActivePrograms = staleOriginalHandleGetActivePrograms;
 
@@ -219,10 +221,11 @@ function registeredInstances() {
   helper.hc = {};
   const initSequence = [];
   helper.deviceService = {
-    getDevices(callback) {
+    getDevices(callback, options = {}) {
       immediateGetDevicesCalls += 1;
       initSequence.push("device_refresh_start");
       callback("DEVICES_UPDATE", []);
+      options.onDetailsRefreshed?.();
     },
   };
   helper.sendSocketNotification = (notification, payload) => {
@@ -248,8 +251,9 @@ function registeredInstances() {
   resetHelperState();
   helper.hc = {};
   helper.deviceService = {
-    getDevices(callback) {
+    getDevices(callback, options = {}) {
       callback("DEVICES_UPDATE", []);
+      options.onDetailsRefreshed?.();
     },
   };
   helper.sessionAuthenticated = true;
@@ -688,9 +692,10 @@ function registeredInstances() {
     };
     let refreshes = 0;
     helper.deviceService = {
-      getDevices(callback) {
+      getDevices(callback, options = {}) {
         refreshes += 1;
         callback("DEVICES_UPDATE", []);
+        options.onDetailsRefreshed?.();
       },
     };
     helper.sendSocketNotification = () => {};
@@ -934,6 +939,63 @@ function registeredInstances() {
         delete require.cache[hcModulePath];
       }
     }
+  }
+
+  // Routine resyncs (activeOnly) ask only running appliances for their program:
+  // an idle one answers with a 404 - quota spent, and an error counted towards
+  // Home Connect's "10 failed requests in a row" block.
+  {
+    const { ProgramFetchCoordinator } = require("../lib/program-fetch-coordinator");
+    const devices = new Map([
+      [
+        "ha-run",
+        { haId: "ha-run", name: "Washer", connected: true, OperationState: "BSH.Common.EnumType.OperationState.Run" },
+      ],
+      [
+        "ha-idle",
+        { haId: "ha-idle", name: "Dryer", connected: true, OperationState: "BSH.Common.EnumType.OperationState.Ready" },
+      ],
+      [
+        "ha-off",
+        {
+          haId: "ha-off",
+          name: "Oven",
+          connected: true,
+          OperationState: "BSH.Common.EnumType.OperationState.Inactive",
+        },
+      ],
+    ]);
+    const fetched = [];
+    const coordinator = new ProgramFetchCoordinator({
+      session: { rateLimitUntil: 0, lastActiveProgramFetch: 0, MIN_ACTIVE_PROGRAM_INTERVAL: 0 },
+      getHc: () => ({}),
+      getDeviceService: () => ({ devices }),
+      getProgramService: () => null,
+      getActiveProgramManager: () => null,
+      isRateLimited: () => false,
+      emitInitStatus: () => {},
+      request: () => {},
+      runFetch: (targetDevices) => fetched.push(targetDevices.map((device) => device.haId)),
+      fetchOne: async () => ({}),
+      broadcastProgramData: () => {},
+      handleError: () => {},
+    });
+
+    coordinator.request({ instanceId: "scheduled_snapshot", force: true, activeOnly: true });
+    assert.deepStrictEqual(fetched, [["ha-run"]]);
+
+    // Without activeOnly (first sync after start) every appliance is asked.
+    coordinator.reset();
+    fetched.length = 0;
+    coordinator.request({ instanceId: "initial_sync" });
+    assert.deepStrictEqual(fetched, [["ha-run", "ha-idle", "ha-off"]]);
+
+    // Nothing running: no request at all.
+    coordinator.reset();
+    fetched.length = 0;
+    devices.delete("ha-run");
+    coordinator.request({ instanceId: "scheduled_snapshot", force: true, activeOnly: true });
+    assert.deepStrictEqual(fetched, []);
   }
 
   console.log("node-helper-session.test.js OK");
