@@ -503,7 +503,7 @@ function registeredInstances() {
   helper.handleConfigNotification({
     instanceId: "frontend-a",
     clientId: "client-1",
-    apiLanguage: "de",
+    language: "de",
     minActiveProgramIntervalMs: 1111,
     enableSSEHeartbeat: true,
     showDeviceIcon: true,
@@ -513,7 +513,7 @@ function registeredInstances() {
   helper.handleConfigNotification({
     instanceId: "frontend-b",
     clientId: "client-1",
-    apiLanguage: "de",
+    language: "de",
     minActiveProgramIntervalMs: 1111,
     enableSSEHeartbeat: true,
     showDeviceIcon: false,
@@ -525,7 +525,7 @@ function registeredInstances() {
   helper.handleConfigNotification({
     instanceId: "frontend-c",
     clientId: "client-1",
-    apiLanguage: "de",
+    language: "de",
     minActiveProgramIntervalMs: 9999,
     enableSSEHeartbeat: false,
   });
@@ -534,14 +534,14 @@ function registeredInstances() {
   helper.handleConfigNotification({
     instanceId: "frontend-d",
     clientId: "client-2",
-    apiLanguage: "de",
+    language: "de",
     minActiveProgramIntervalMs: 1111,
     enableSSEHeartbeat: true,
   });
 
   assert.strictEqual(helper.instanceId, "frontend-a");
   assert.strictEqual(helper.sharedConfigOwnerInstanceId, "frontend-a");
-  assert.strictEqual(helper.config.apiLanguage, "de");
+  assert.strictEqual(helper.config.language, "de");
   assert.strictEqual(helper.config.minActiveProgramIntervalMs, 1111);
   assert.strictEqual(helper.sessionOwnerConfig.minActiveProgramIntervalMs, 1111);
   assert.deepStrictEqual(configuredInstances, ["first:frontend-a", "next:frontend-b", "next:frontend-c"]);
@@ -622,55 +622,81 @@ function registeredInstances() {
   assert.deepStrictEqual(initStatuses, []);
   assert.strictEqual(helper.sharedConfigOwnerInstanceId, "any-tab");
 
-  helper.serverConfigs = originalServerConfigs;
+  // A tab from before a language change is outdated too: it would otherwise render
+  // its old language next to the server's. The entry is found by the module index
+  // in MagicMirror's identifier (module_<index>_<name>).
+  resetHelperState();
+  initStatuses.length = 0;
+  firstTimeConfigs.length = 0;
+  helper.serverConfigs = () => [
+    {
+      language: "de",
+      modules: [{ module: "clock" }, { module: "MMM-HomeConnect2", config: { clientId: "client-1", header: "x" } }],
+    },
+  ];
+  helper.handleConfigNotification({ instanceId: "module_1_MMM-HomeConnect2", clientId: "client-1", language: "en" });
+  assert.deepStrictEqual(
+    initStatuses.map(({ status }) => status),
+    ["config_outdated"],
+  );
+  // Same language, but a module setting from before the restart: outdated as well.
+  initStatuses.length = 0;
+  helper.serverConfigs = () => [
+    {
+      language: "de",
+      modules: [
+        { module: "clock" },
+        { module: "MMM-HomeConnect2", config: { clientId: "client-1", showDeviceIcon: false } },
+      ],
+    },
+  ];
+  helper.handleConfigNotification({
+    instanceId: "module_1_MMM-HomeConnect2",
+    clientId: "client-1",
+    language: "de",
+    showDeviceIcon: true,
+  });
+  assert.deepStrictEqual(
+    initStatuses.map(({ status }) => status),
+    ["config_outdated"],
+  );
+  // The current tab (defaults on top of the server's keys) is accepted.
+  initStatuses.length = 0;
+  helper.handleConfigNotification({
+    instanceId: "module_1_MMM-HomeConnect2",
+    clientId: "client-1",
+    language: "de",
+    showDeviceIcon: false,
+    progressRefreshIntervalMs: 30000,
+  });
+  assert.deepStrictEqual(initStatuses, []);
+  assert.deepStrictEqual(firstTimeConfigs, ["module_1_MMM-HomeConnect2"]);
 
-  // A browser-derived language only fills the gap when nothing is configured.
+  // The session language is MagicMirror's language as loaded on the server - not
+  // whatever the first display sends, and not a leftover apiLanguage.
   resetHelperState();
   helper.emitInitStatus = () => {};
   helper.authService = { setConfig() {} };
   helper.deviceService = { setConfig() {} };
   helper.hc = null;
+  helper.retiredLanguageOptionReported = false;
   helper.handleConfigNotificationFirstTime = () => {
     helper.configReceived = true;
   };
   helper.handleConfigNotificationSubsequent = () => {};
+  helper.serverConfigs = () => [{ language: "de" }];
 
-  helper.handleConfigNotification({
-    instanceId: "kiosk",
-    clientId: "client-1",
-    apiLanguage: "",
-    preferredApiLanguage: "de-DE",
-  });
-  helper.handleConfigNotification({
-    instanceId: "phone",
-    clientId: "client-1",
-    apiLanguage: "",
-    preferredApiLanguage: "en-GB",
-  });
+  helper.handleConfigNotification({ instanceId: "kiosk", clientId: "client-1", language: "en", apiLanguage: "da" });
+  assert.strictEqual(helper.config.language, "de");
+  assert.strictEqual(helper.sessionOwnerConfig.language, "de");
+  assert.strictEqual(helper.retiredLanguageOptionReported, true, "a leftover apiLanguage is reported");
 
-  assert.strictEqual(helper.config.apiLanguage, "de-DE");
-  assert.strictEqual(helper.sessionOwnerConfig.apiLanguage, "de-DE");
-  const registeredAfterLanguage = registeredInstances();
-  assert.ok(registeredAfterLanguage.includes("kiosk"));
-  assert.ok(registeredAfterLanguage.includes("phone"));
-
-  // A client whose browser hint resolves to the session language must not be
-  // reported as ignored, even when another session key differs.
-  const languageDriftKeys = [];
-  helper.warnAboutIgnoredSessionConfig = function patched(_instanceId, clientSessionConfig) {
-    languageDriftKeys.push(
-      Object.keys(clientSessionConfig).filter((key) => this.sessionOwnerConfig[key] !== clientSessionConfig[key]),
-    );
-  };
-  helper.handleConfigNotification({
-    instanceId: "tablet",
-    clientId: "client-1",
-    apiLanguage: "",
-    preferredApiLanguage: "de-DE",
-    enableSSEHeartbeat: false,
-  });
-
-  assert.deepStrictEqual(languageDriftKeys[0], ["instanceId", "enableSSEHeartbeat"]);
+  // Outside MagicMirror the display's language stands in.
+  resetHelperState();
+  helper.serverConfigs = () => [undefined, undefined];
+  helper.handleConfigNotification({ instanceId: "kiosk", clientId: "client-1", language: "da" });
+  assert.strictEqual(helper.config.language, "da");
+  helper.serverConfigs = originalServerConfigs;
 
   helper.emitInitStatus = originalEmitInitStatus;
   helper.warnAboutIgnoredSessionConfig = originalWarnAboutIgnoredSessionConfig;

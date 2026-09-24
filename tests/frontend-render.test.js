@@ -163,31 +163,23 @@ function createInstance(overrides = {}) {
     assert.strictEqual(runningDisplayState.runtime.percent, 35);
     assert.strictEqual(runningDisplayState.presentation.programMeta, "ACTIVE_PROGRAM: Eco 40-60");
 
-    const configuredLanguageInstance = createInstance({
-      config: {
-        apiLanguage: "da",
-      },
-    });
-    assert.strictEqual(configuredLanguageInstance.getPreferredApiLanguage(), "da");
-
-    const magicMirrorLanguageInstance = createInstance({
-      config: {
-        apiLanguage: "",
-      },
-    });
-    globalThis.config.language = "de";
-    assert.strictEqual(magicMirrorLanguageInstance.getPreferredApiLanguage(), "de");
-
-    const browserLanguageInstance = createInstance({
-      config: {
-        apiLanguage: "",
-      },
-    });
-    globalThis.config.language = "";
+    // The module follows MagicMirror's language only - a leftover apiLanguage or
+    // the browser's language must not introduce a second one.
+    const languageInstance = createInstance({ config: { apiLanguage: "da" } });
     const browserNavigator = Reflect.get(globalThis, "navigator");
     browserNavigator.languages = ["fr-FR", "fr"];
     browserNavigator.language = "fr-FR";
-    assert.strictEqual(browserLanguageInstance.getPreferredApiLanguage(), "fr-FR");
+    globalThis.config.language = "de";
+    assert.strictEqual(languageInstance.getLanguage(), "de");
+
+    // CONFIGURE carries that language, so the backend can spot an outdated tab.
+    const sentConfigs = [];
+    languageInstance.transport = { sendRequest: (action, data) => sentConfigs.push({ action, data }) };
+    languageInstance.sendConfigure();
+    assert.strictEqual(sentConfigs[0].action, "CONFIGURE");
+    assert.strictEqual(sentConfigs[0].data.config.language, "de");
+    assert.strictEqual(sentConfigs[0].data.config.preferredApiLanguage, undefined);
+    globalThis.config.language = "en";
 
     const fallbackRunningInstance = createInstance({
       devices: [

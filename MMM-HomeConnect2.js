@@ -12,7 +12,6 @@ Module.register("MMM-HomeConnect2", {
     header: "Home Connect Appliances",
     clientId: "",
     clientSecret: "",
-    apiLanguage: "",
 
     showDeviceIcon: true,
     showAlwaysAllDevices: false,
@@ -97,37 +96,18 @@ Module.register("MMM-HomeConnect2", {
     };
   },
 
-  getPreferredApiLanguage() {
-    const configuredLanguage = typeof this.config?.apiLanguage === "string" ? this.config.apiLanguage.trim() : "";
-    if (configuredLanguage) {
-      return configuredLanguage;
-    }
+  // MagicMirror's config is a global `let` in the browser, not a window property -
+  // globalThis.config is undefined there, which silently dropped the language
+  // (the browser's own was used instead) and the 12/24 h setting.
+  getMagicMirrorConfig() {
+    return typeof config === "object" && config ? config : {};
+  },
 
-    const magicMirrorLanguage =
-      typeof globalThis.config?.language === "string" ? globalThis.config.language.trim() : "";
-    if (magicMirrorLanguage) {
-      return magicMirrorLanguage;
-    }
-
-    const browserLanguages = Array.isArray(navigator?.languages)
-      ? navigator.languages.map((language) => (typeof language === "string" ? language.trim() : "")).filter(Boolean)
-      : [];
-    if (browserLanguages.length > 0) {
-      return browserLanguages[0];
-    }
-
-    const browserLanguage = typeof navigator?.language === "string" ? navigator.language.trim() : "";
-    if (browserLanguage) {
-      return browserLanguage;
-    }
-
-    const documentLanguage =
-      typeof document?.documentElement?.lang === "string" ? document.documentElement.lang.trim() : "";
-    if (documentLanguage) {
-      return documentLanguage;
-    }
-
-    return "";
+  // MagicMirror's language - the same one the translations and the Home Connect
+  // texts (set on the server) use, so the display never mixes two.
+  getLanguage() {
+    const language = this.getMagicMirrorConfig().language;
+    return typeof language === "string" ? language.trim() : "";
   },
 
   notificationReceived(notification) {
@@ -142,9 +122,10 @@ Module.register("MMM-HomeConnect2", {
       config: {
         ...this.config,
         instanceId: this.instanceId,
-        // Sent as a hint only: browser-derived values must never take part in
-        // the session comparison, otherwise every device reports a conflict.
-        preferredApiLanguage: this.getPreferredApiLanguage(),
+        // Lets the backend spot a tab that still runs the language from before a
+        // config change (it then reloads); the session language itself comes
+        // from the server's MagicMirror config.
+        language: this.getLanguage(),
       },
     });
   },
@@ -288,8 +269,8 @@ Module.register("MMM-HomeConnect2", {
       return "";
     }
 
-    const locale = this.getPreferredApiLanguage() || undefined;
-    const timeFormat = globalThis.config?.timeFormat;
+    const locale = this.getLanguage() || undefined;
+    const timeFormat = this.getMagicMirrorConfig().timeFormat;
     const hour12 = timeFormat === 12 ? true : timeFormat === 24 ? false : undefined;
 
     try {

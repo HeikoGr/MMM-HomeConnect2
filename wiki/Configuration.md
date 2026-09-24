@@ -6,7 +6,6 @@
 | --- | --- |
 | `clientId` | Required Home Connect application client ID. |
 | `clientSecret` | Optional client secret when your developer app requires one. |
-| `apiLanguage` | Preferred Home Connect API language, for example `en`, `de`, or `da`. |
 | `logLevel` | Optional: `none`, `error`, `warn`, `info`, `debug`. All output (browser console, `pm2 logs`, including the Home Connect client's SSE and token messages) goes through MagicMirror's `Log`, so the global `logLevel` in `config.js` decides; this option can only narrow it for this module (`none` silences it). Default: empty, the global level alone. `debug` also shows the debug panel. |
 
 ## Rendering Options
@@ -40,7 +39,7 @@ kiosk) therefore causes no additional API load.
 
 Config options fall into two groups:
 
-- **Session options** (`clientId`, `clientSecret`, `apiLanguage`, `logLevel`,
+- **Session options** (`clientId`, `clientSecret`, `logLevel`,
   `apiRequestTimeoutMs`, `minActiveProgramIntervalMs`, all `sse*` options) exist once
   per server. The first display that connects establishes them; if a later display
   asks for different values, the session values still apply and the backend logs a
@@ -57,9 +56,15 @@ Only different credentials (`clientId` / `clientSecret`) are a hard conflict, be
 they point at a different Home Connect account. Such a display is rejected and shows
 the configuration-mismatch banner.
 
-Set `apiLanguage` explicitly in `config.js` if you want a deterministic API language.
-Without it, the language of the first connecting browser wins for all displays,
-because the language is part of the shared API responses.
+## Language
+
+The module follows MagicMirror's `language` setting everywhere: its own texts and the
+texts Home Connect sends (program names, phases, options). There is no separate
+language option; `apiLanguage` from older versions is ignored (the log says so once).
+
+After a change to `config.js` and a restart of MagicMirror, a browser tab that was
+open before still runs the old configuration. It is recognised and reloads itself
+once, so no display keeps showing the previous language or settings.
 
 ## Status Icons
 

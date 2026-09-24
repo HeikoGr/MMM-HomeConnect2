@@ -23,7 +23,6 @@ const config = {
       position: "top_right",
       config: {
         clientId: "YOUR_CLIENT_ID",
-        apiLanguage: "en",
         showDeviceIcon: true,
         showDeviceIfInfoIsAvailable: true,
         apiRequestTimeoutMs: 15 * 1000,

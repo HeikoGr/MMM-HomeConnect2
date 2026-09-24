@@ -31,7 +31,6 @@ npm ci --omit=dev
     position: "top_left",
     config: {
         clientId: "YOUR_CLIENT_ID",
-        apiLanguage: "en",
         showDeviceIcon: true,
         showDeviceIfInfoIsAvailable: true,
     },
