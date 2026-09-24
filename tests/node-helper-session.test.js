@@ -47,6 +47,8 @@ function resetHelperState() {
   helper.instanceId = null;
   helper.sharedConfigOwnerInstanceId = null;
   helper.sessionOwnerConfig = null;
+  helper.lastAuthFailure = null;
+  helper.pendingAuthInfo = null;
   helper.programFetchCoordinator().reset();
   if (helper.fullSnapshotTimer) {
     clearInterval(helper.fullSnapshotTimer);
@@ -868,6 +870,45 @@ function registeredInstances() {
       assert.strictEqual(helper.headlessAuthRetryTimer || null, null, "An invalid clientId must not be retried");
       assert.deepStrictEqual(authStatuses, ["error"]);
       assert.strictEqual(helper.authFlowInProgress, false);
+
+      // A display that connects after the failure still learns about it.
+      const lateStatuses = [];
+      helper.emitAuthStatus = (status, payload, options) => lateStatuses.push({ status, payload, options });
+      // Earlier cases stub this method on the helper; use the real one.
+      require("../lib/client-sessions").handleConfigNotificationSubsequent.call(helper, "late-display");
+      assert.deepStrictEqual(lateStatuses, [
+        {
+          status: "error",
+          payload: {
+            message: "Device authorization failed (HTTP 400): unauthorized_client",
+            reason: "invalid_client",
+            instanceId: "late-display",
+          },
+          options: { broadcast: false, targetInstanceId: "late-display" },
+        },
+      ]);
+      helper.emitAuthStatus = (status) => authStatuses.push(status);
+
+      // A tab opened (or reopened) while the user is still logging in gets the
+      // QR code of the running flow, with the remaining validity - not just
+      // "authentication in progress".
+      const sentEvents = [];
+      const originalSendEventToInstance = helper.sendEventToInstance;
+      helper.sendEventToInstance = (instanceId, action, data) => sentEvents.push({ instanceId, action, data });
+      helper.pendingAuthInfo = {
+        payload: { status: "waiting", user_code: "ABCD-1234", expires_in: 1800, expires_in_minutes: 30 },
+        issuedAt: Date.now() - 10 * 60 * 1000,
+      };
+      require("../lib/client-sessions").notifyAuthInProgress.call(helper, "reopened-tab");
+      helper.sendEventToInstance = originalSendEventToInstance;
+      assert.strictEqual(sentEvents.length, 1);
+      assert.strictEqual(sentEvents[0].instanceId, "reopened-tab");
+      assert.strictEqual(sentEvents[0].action, "AUTH_INFO");
+      assert.strictEqual(sentEvents[0].data.user_code, "ABCD-1234");
+      assert.strictEqual(sentEvents[0].data.expires_in_minutes, 20);
+      assert.ok(Math.abs(sentEvents[0].data.expires_in - 1200) <= 1);
+      assert.strictEqual(helper.pendingAuthInfo.payload.expires_in, 1800, "the stored flow stays unchanged");
+      helper.pendingAuthInfo = null;
 
       // Saved token at boot, network not up yet: retry scheduled, nothing unhandled.
       helper.authService = Object.assign(Object.create(originalAuthService), {

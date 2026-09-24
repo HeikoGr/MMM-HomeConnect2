@@ -79,6 +79,10 @@ module.exports = NodeHelper.create({
   headlessAuthRetryTimer: null,
   invalidGrantRetryTimer: null,
   sessionOwnerConfig: null,
+  // The last failed device flow, replayed to displays that connect afterwards.
+  lastAuthFailure: null,
+  // The QR code / user code of the running device flow, for displays joining late.
+  pendingAuthInfo: null,
   debugStats: {
     lastApiCallTs: null,
     lastSseEventTs: null,

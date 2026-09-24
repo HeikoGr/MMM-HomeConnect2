@@ -207,8 +207,8 @@ Module.register("MMM-HomeConnect2", {
         this.lastInitStatus = safePayload;
         this.lastInitStatusReceivedAt = Date.now();
 
-        if (safePayload.status === "session_active" || safePayload.status === "complete") {
-          // Session active - normal display
+        if (["session_active", "complete", "success"].includes(safePayload.status)) {
+          // Session active - normal display; "success" ends a login this tab showed the QR code for
           this.authInfo = null;
           this.authStatus = null;
         } else if (
