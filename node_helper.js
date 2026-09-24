@@ -227,6 +227,7 @@ module.exports = NodeHelper.create({
 
   start() {
     log.info(`Starting module helper: ${this.name}`);
+    this.startedAt = Date.now();
 
     /*
      * A display stays registered while its browser socket is connected; one

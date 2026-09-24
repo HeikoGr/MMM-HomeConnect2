@@ -211,6 +211,11 @@ Module.register("MMM-HomeConnect2", {
           // Session active - normal display
           this.authInfo = null;
           this.authStatus = null;
+        } else if (
+          safePayload.status === "config_outdated" &&
+          this.reloadForOutdatedConfig(safePayload.serverStartedAt)
+        ) {
+          return;
         } else if (safePayload.status === "auth_in_progress") {
           // Authentication already in progress (special auth UI)
           this.authStatus = {
@@ -232,6 +237,32 @@ Module.register("MMM-HomeConnect2", {
       default:
         break;
     }
+  },
+
+  /**
+   * This tab still runs the config it loaded before the last server restart
+   * (MagicMirror does not reload open pages by default). A reload fetches the
+   * current one - at most once per server start, so configs that never match
+   * cannot loop, while every further restart (the next config edit) may reload
+   * again. When the guard holds, the display shows a hint to reload by hand.
+   * @param {number} [serverStartedAt] - Start time of the backend that asked
+   * @returns {boolean} Whether a reload was started
+   */
+  reloadForOutdatedConfig(serverStartedAt) {
+    const storageKey = `${this.name}:outdatedConfigReloadFor`;
+    const serverStart = String(serverStartedAt ?? "unknown");
+    try {
+      if (window.sessionStorage.getItem(storageKey) === serverStart) {
+        return false;
+      }
+      window.sessionStorage.setItem(storageKey, serverStart);
+    } catch {
+      // Without storage there is no loop guard - leave it to the hint.
+      return false;
+    }
+    Log.info(`${this.name}: config changed on the server - reloading the page`);
+    window.location.reload();
+    return true;
   },
 
   suspend() {
@@ -334,7 +365,7 @@ Module.register("MMM-HomeConnect2", {
     );
 
     if (!this.devices || this.devices.length === 0) {
-      append(notices, views.renderLoading(ctx));
+      append(notices, views.isConfigRejected(this.lastInitStatus) ? null : views.renderLoading(ctx));
       return div;
     }
 

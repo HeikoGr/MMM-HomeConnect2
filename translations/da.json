@@ -32,6 +32,10 @@
   "CONFIG_MISMATCH_TITLE": "Konfigurationskonflikt",
   "CONFIG_MISMATCH": "Dette display bruger en anden MMM-HomeConnect2-konfiguration end den kørende serverinstans.",
   "CONFIG_MISMATCH_CREDENTIALS": "Dette display bruger andre Home Connect-legitimationsoplysninger end den kørende serversession.",
+  "CONFIG_OUTDATED_TITLE": "Konfiguration ændret",
+  "CONFIG_OUTDATED": "MagicMirror blev genstartet med en ny konfiguration. Genindlæs venligst denne side.",
+  "CONFIG_INCOMPLETE_TITLE": "Konfiguration ufuldstændig",
+  "CONFIG_MISSING_CLIENT_ID": "Intet clientId angivet. Indtast Client ID'et for din Home Connect-app i config.js, og genstart MagicMirror.",
   "AVAILABLE_PROGRAMS": "Programmer",
   "AVAILABLE_OPTIONS": "Valgmuligheder",
   "ACTIVE_ALERTS": "Advarsler"

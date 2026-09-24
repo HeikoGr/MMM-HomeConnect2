@@ -562,6 +562,62 @@ function registeredInstances() {
   // Every accepted late client is checked, and only real differences are logged.
   assert.deepStrictEqual(ignoredConfigWarnings, ["frontend-b", "frontend-c"]);
 
+  // After clientId was filled in and MagicMirror restarted, a tab that stayed open
+  // reconnects with its old config first. It must not claim the session - else the
+  // freshly loaded display is rejected as a credential mismatch.
+  resetHelperState();
+  const initStatuses = [];
+  const firstTimeConfigs = [];
+  const originalServerConfigs = helper.serverConfigs;
+  helper.emitInitStatus = (status, payload = {}) => {
+    initStatuses.push({ status, payload });
+  };
+  helper.serverConfigs = () => [
+    { modules: [{ module: "clock" }, { module: "MMM-HomeConnect2", config: { clientId: "client-new" } }] },
+  ];
+  helper.handleConfigNotificationFirstTime = (instanceId) => {
+    firstTimeConfigs.push(instanceId);
+    helper.configReceived = true;
+  };
+  helper.handleConfigNotificationSubsequent = () => {};
+
+  helper.startedAt = 1234;
+  helper.handleConfigNotification({ instanceId: "stale-tab", clientId: "", clientSecret: "" });
+  assert.deepStrictEqual(initStatuses, [
+    { status: "config_outdated", payload: { instanceId: "stale-tab", serverStartedAt: 1234 } },
+  ]);
+  assert.strictEqual(helper.sessionOwnerConfig, null, "the outdated tab must not open the session");
+  assert.ok(!registeredInstances().includes("stale-tab"));
+
+  helper.handleConfigNotification({ instanceId: "fresh-tab", clientId: "client-new", clientSecret: "" });
+  assert.strictEqual(helper.sharedConfigOwnerInstanceId, "fresh-tab");
+  assert.deepStrictEqual(firstTimeConfigs, ["fresh-tab"]);
+  assert.ok(!initStatuses.some(({ payload }) => payload.isConfigMismatch), "no mismatch for the current config");
+
+  // The template config without clientId: a clear hint, no session, no auth flow.
+  resetHelperState();
+  initStatuses.length = 0;
+  firstTimeConfigs.length = 0;
+  helper.serverConfigs = () => [{ modules: [{ module: "MMM-HomeConnect2", config: { clientId: "" } }] }];
+  helper.handleConfigNotification({ instanceId: "template-tab", clientId: "", clientSecret: "" });
+  assert.deepStrictEqual(initStatuses, [
+    { status: "config_incomplete", payload: { instanceId: "template-tab", missingKeys: ["clientId"] } },
+  ]);
+  assert.strictEqual(helper.sessionOwnerConfig, null);
+  assert.deepStrictEqual(firstTimeConfigs, []);
+  assert.ok(!registeredInstances().includes("template-tab"));
+
+  // Outside MagicMirror there is no server config to compare with - nothing is
+  // treated as outdated, only a missing clientId still counts.
+  resetHelperState();
+  initStatuses.length = 0;
+  helper.serverConfigs = () => [undefined, undefined];
+  helper.handleConfigNotification({ instanceId: "any-tab", clientId: "client-x" });
+  assert.deepStrictEqual(initStatuses, []);
+  assert.strictEqual(helper.sharedConfigOwnerInstanceId, "any-tab");
+
+  helper.serverConfigs = originalServerConfigs;
+
   // A browser-derived language only fills the gap when nothing is configured.
   resetHelperState();
   helper.emitInitStatus = () => {};
