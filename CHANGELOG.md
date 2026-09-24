@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.2](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.5.1...v1.5.2) (2026-09-24)
+
+
+### 🔧 Tooling
+
+* assign release-please's PR to HeikoGr ([6eabd79](https://github.com/HeikoGr/MMM-HomeConnect2/commit/6eabd798bc9dc96bf0f7e844abc1f97de3cbf2c5))
+
 ## [1.5.1](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.5.0...v1.5.1) (2026-09-24)
 
 
