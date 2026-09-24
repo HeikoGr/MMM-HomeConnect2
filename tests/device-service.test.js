@@ -373,7 +373,8 @@ function createDeviceService(overrides = {}) {
 
     service.handleKeepAliveEvent({ data: "ping" });
 
-    assert.strictEqual(service.heartbeatArmed, true);
+    assert.ok(Number.isFinite(service.lastEventTimestamp));
+    assert.strictEqual(service.heartbeatTimer, null, "no watchdog timer while the monitor is not running");
     assert.ok(Number.isFinite(service.lastKeepAliveTimestamp));
     assert.ok(logs.some((entry) => entry.level === "debug" && entry.message.includes("SSE KEEP-ALIVE received")));
     assert.ok(!logs.some((entry) => entry.message.includes("undefined")));
@@ -404,7 +405,7 @@ function createDeviceService(overrides = {}) {
   {
     let staleRecoveries = 0;
     const { service, notifications } = createDeviceService({
-      heartbeat: { checkIntervalMs: 10, staleThresholdMs: 20, recoveryCooldownMs: 1000 },
+      heartbeat: { staleThresholdMs: 20 },
       onSseStale: () => {
         staleRecoveries += 1;
       },
@@ -433,11 +434,35 @@ function createDeviceService(overrides = {}) {
     service.shutdown();
   }
 
+  // SSE heartbeat: every message restarts the watchdog - steady traffic (the
+  // KEEP-ALIVE alone) never lets it fire, stopping the traffic does.
+  {
+    let staleRecoveries = 0;
+    const { service } = createDeviceService({
+      heartbeat: { staleThresholdMs: 40 },
+      onSseStale: () => {
+        staleRecoveries += 1;
+      },
+    });
+    service.devices.set("ha-1", { haId: "ha-1", name: "Washer" });
+    service.startHeartbeatMonitor();
+
+    for (let i = 0; i < 6; i += 1) {
+      service.handleKeepAliveEvent({});
+      await wait(15);
+    }
+    assert.strictEqual(staleRecoveries, 0, "a stream that keeps talking is healthy");
+
+    await wait(80);
+    assert.strictEqual(staleRecoveries, 1, "silence beyond the threshold triggers one recovery");
+    service.stopHeartbeatMonitor();
+  }
+
   // SSE heartbeat: after at least one event, prolonged silence still triggers recovery once
   {
     let staleRecoveries = 0;
     const { service, notifications } = createDeviceService({
-      heartbeat: { checkIntervalMs: 10, staleThresholdMs: 20, recoveryCooldownMs: 1000 },
+      heartbeat: { staleThresholdMs: 20 },
       onSseStale: () => {
         staleRecoveries += 1;
       },

@@ -41,7 +41,7 @@ flowchart TD
   H2 --> H3
 
   subgraph SSE[SSE Runtime]
-    H3 --> I1[heartbeat check]
+    H3 --> I1[watchdog timer - restarted by every message, fires after 70 s of silence]
     I1 -->|traffic received| I2[mark traffic + apply device event]
     I2 --> I3[broadcast DEVICES_UPDATE if state changed]
     I3 --> I4[send INIT_STATUS sse_recovered when applicable]
@@ -136,11 +136,11 @@ sequenceDiagram
     NH-->>FE: DEVICES_UPDATE(program-enriched devices)
   end
 
-  loop heartbeat interval
-    DS->>DS: check stale threshold
-    alt traffic observed
-      DS->>DS: mark healthy stream
-    else stale
+  loop every SSE message (KEEP-ALIVE included)
+    DS->>DS: restart the 70 s watchdog timer
+    alt next message within 70 s
+      DS->>DS: stream healthy
+    else timer fires
       DS-->>FE: INIT_STATUS(sse_stale)
       DS->>NH: onSseStale()
       NH->>DS: reconnect subscriptions
