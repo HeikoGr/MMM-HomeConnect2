@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.5.0...v1.5.1) (2026-09-24)
+
+
+### 🐛 Fixes
+
+* do not spend rate-limited quota on the SSE watchdog resync or lift an API 429 early ([e263ed7](https://github.com/HeikoGr/MMM-HomeConnect2/commit/e263ed752c08ce9e5712f570fbe68473780f3dcd))
+
 ## [1.5.0](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.4.2...v1.5.0) (2026-09-23)
 
 
