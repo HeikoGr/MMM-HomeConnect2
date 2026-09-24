@@ -172,6 +172,17 @@ const {
   );
 
   assert.strictEqual(
+    deviceAppearsActive({
+      PowerState: "On",
+      ActiveProgramSource: "selected",
+      ActiveProgramName: "Synthetics",
+      OperationState: "BSH.Common.EnumType.OperationState.Run",
+    }),
+    true,
+    "A reported Run wins over program data that still says selected (the program was just started)",
+  );
+
+  assert.strictEqual(
     shouldDisplayDevice(
       {
         PowerState: "On",

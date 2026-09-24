@@ -216,7 +216,14 @@ module.exports = NodeHelper.create({
     try {
       this.activeProgramManager = new ActiveProgramManager({
         fetchFn: this.fetchActiveProgramForDevice.bind(this),
-        broadcastFn: this.broadcastProgramData.bind(this),
+        // A retry's result has to reach the device object - broadcasting it alone
+        // left the display on its previous state.
+        broadcastFn: (programData, requester, result) => {
+          if (result && this.programService) {
+            this.programService.applyProgramResult(result);
+          }
+          this.broadcastProgramData(programData, requester);
+        },
         logger: log,
         maxRetries: ACTIVE_PROGRAM_MAX_RETRIES,
         retryDelayMs: ACTIVE_PROGRAM_RETRY_DELAY_MS,

@@ -235,6 +235,47 @@ function createDeviceService(overrides = {}) {
     );
   }
 
+  // An appliance that starts the program it had selected gets its active program
+  // fetched right away - once per run, not on every SSE delta of that run.
+  {
+    const requested = [];
+    const { service } = createDeviceService({ onActiveProgramNeeded: (haId) => requested.push(haId) });
+    service.attachClient({
+      applyEventToDevice: (device, item) => {
+        if (item.key === "BSH.Common.Status.OperationState") {
+          device.OperationState = item.value;
+        }
+      },
+    });
+    service.devices.set("ha-dryer", {
+      haId: "ha-dryer",
+      name: "Dryer",
+      OperationState: "BSH.Common.EnumType.OperationState.Ready",
+      ActiveProgramName: "Synthetics",
+      ActiveProgramSource: "selected",
+    });
+    const sse = (key, value) =>
+      service.deviceEvent({ data: JSON.stringify({ haId: "ha-dryer", items: [{ key, value }] }) }, () => {});
+    const state = (label) => sse("BSH.Common.Status.OperationState", `BSH.Common.EnumType.OperationState.${label}`);
+
+    state("Run");
+    assert.deepStrictEqual(requested, ["ha-dryer"], "the start asks for the active program");
+    sse("BSH.Common.Option.RemainingProgramTime", 3000);
+    sse("BSH.Common.Option.ProgramProgress", 5);
+    assert.deepStrictEqual(requested, ["ha-dryer"], "further deltas of the same run do not");
+
+    // Once the REST answer says "active", nothing more is needed.
+    service.devices.get("ha-dryer").ActiveProgramSource = "active";
+    state("Pause");
+    assert.deepStrictEqual(requested, ["ha-dryer"]);
+
+    // Idle again, then the next run: asked again.
+    service.devices.get("ha-dryer").ActiveProgramSource = "selected";
+    state("Ready");
+    state("Run");
+    assert.deepStrictEqual(requested, ["ha-dryer", "ha-dryer"]);
+  }
+
   // noteTokenRefreshed: prevents immediate redundant token refresh before first SSE subscribe
   {
     const { service } = createDeviceService();
