@@ -498,7 +498,6 @@ function registeredInstances() {
     instanceId: "frontend-a",
     clientId: "client-1",
     language: "de",
-    apiRequestTimeoutMs: 1111,
     logLevel: "info",
     showDeviceIcon: true,
   });
@@ -508,7 +507,6 @@ function registeredInstances() {
     instanceId: "frontend-b",
     clientId: "client-1",
     language: "de",
-    apiRequestTimeoutMs: 1111,
     logLevel: "info",
     showDeviceIcon: false,
     showAlwaysAllDevices: true,
@@ -520,7 +518,6 @@ function registeredInstances() {
     instanceId: "frontend-c",
     clientId: "client-1",
     language: "de",
-    apiRequestTimeoutMs: 9999,
     logLevel: "debug",
   });
 
@@ -529,15 +526,14 @@ function registeredInstances() {
     instanceId: "frontend-d",
     clientId: "client-2",
     language: "de",
-    apiRequestTimeoutMs: 1111,
     logLevel: "info",
   });
 
   assert.strictEqual(helper.instanceId, "frontend-a");
   assert.strictEqual(helper.sharedConfigOwnerInstanceId, "frontend-a");
   assert.strictEqual(helper.config.language, "de");
-  assert.strictEqual(helper.config.apiRequestTimeoutMs, 1111);
-  assert.strictEqual(helper.sessionOwnerConfig.apiRequestTimeoutMs, 1111);
+  assert.strictEqual(helper.config.logLevel, "info");
+  assert.strictEqual(helper.sessionOwnerConfig.logLevel, "info");
   assert.deepStrictEqual(configuredInstances, ["first:frontend-a", "next:frontend-b", "next:frontend-c"]);
   assert.strictEqual(authConfigs.length, 1);
   assert.deepStrictEqual(acceptLanguages, ["de", "de", "de"]);

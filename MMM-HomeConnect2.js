@@ -18,9 +18,7 @@ Module.register("MMM-HomeConnect2", {
     showDeviceIfDoorIsOpen: true,
     showDeviceIfFailure: true,
     showDeviceIfInfoIsAvailable: true,
-    // Optional tuning: timeout of one Home Connect request, and how often this
-    // display redraws countdowns and progress.
-    apiRequestTimeoutMs: 15 * 1000,
+    // Optional tuning: how often this display redraws countdowns and progress.
     progressRefreshIntervalMs: 30 * 1000,
     // Optional: none | error | warn | info | debug. Output goes through MagicMirror's
     // Log, so the global logLevel decides; this can only narrow it. "debug" also
