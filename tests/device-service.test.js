@@ -251,6 +251,28 @@ function createDeviceService(overrides = {}) {
     assert.strictEqual(refreshCalls, 0);
   }
 
+  // SSE rebuild: an access token that is still valid for long is not refreshed
+  // (each refresh is a request and one of 100 per day); one about to expire is.
+  {
+    const { service } = createDeviceService();
+    let refreshCalls = 0;
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const hcMock = {
+      tokens: { timestamp: nowSeconds - 3600, expires_in: 86400 },
+      refreshTokens: async () => {
+        refreshCalls += 1;
+      },
+    };
+    service.attachClient(hcMock);
+
+    await service.ensureFreshTokenForSSE();
+    assert.strictEqual(refreshCalls, 0, "a token valid for ~23 h needs no refresh");
+
+    hcMock.tokens = { timestamp: nowSeconds - 86400 + 300, expires_in: 86400 };
+    await service.ensureFreshTokenForSSE();
+    assert.strictEqual(refreshCalls, 1, "a token expiring in 5 min is refreshed first");
+  }
+
   // handleGetDevicesError: broadcasts device_error
   {
     const { service, notifications } = createDeviceService();

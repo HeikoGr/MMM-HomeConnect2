@@ -111,7 +111,6 @@ function makeFakeEventSource() {
     delete require.cache[modulePath];
     const HomeConnect = require(modulePath);
     const hc = new HomeConnect("client", "secret", "refresh");
-    hc.recreateEventSources = () => {};
 
     try {
       await hc.refreshTokens();
@@ -124,7 +123,19 @@ function makeFakeEventSource() {
 
       failNext = false;
       hc._tokenRefreshBlockedUntil = 0;
+      // Open streams survive a token refresh: they read the new token on their
+      // next connect, reopening them would cost a request each and lose events.
+      let closedStreams = 0;
+      const openStream = {
+        close() {
+          closedStreams += 1;
+        },
+      };
+      hc.eventSources = { "ha-1": openStream };
       await hc.refreshTokens();
+      assert.strictEqual(closedStreams, 0, "Expected the token refresh to leave open SSE streams alone");
+      assert.strictEqual(hc.eventSources["ha-1"], openStream);
+      hc.eventSources = {};
 
       assert.strictEqual(hc._tokenRefreshFailures, 0, "Expected success to reset the failure count");
       assert.strictEqual(hc.tokenRefreshBackoffRemainingMs(), 0, "Expected success to clear the backoff window");
