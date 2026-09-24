@@ -18,13 +18,10 @@ Module.register("MMM-HomeConnect2", {
     showDeviceIfDoorIsOpen: true,
     showDeviceIfFailure: true,
     showDeviceIfInfoIsAvailable: true,
-    enableSSEHeartbeat: true, // Enable SSE heartbeat checks by default
-    sseHeartbeatCheckIntervalMs: 10 * 1000, // 10 seconds
-    sseHeartbeatStaleThresholdMs: 70 * 1000, // 70 seconds
-    sseRecoveryCooldownMs: 70 * 1000, // minimum time between SSE stale-recovery attempts
+    // Optional tuning: timeout of one Home Connect request, and how often this
+    // display redraws countdowns and progress.
     apiRequestTimeoutMs: 15 * 1000,
     progressRefreshIntervalMs: 30 * 1000,
-    minActiveProgramIntervalMs: 10 * 60 * 1000, // 10 minutes between active program fetches (backend throttle)
     // Optional: none | error | warn | info | debug. Output goes through MagicMirror's
     // Log, so the global logLevel decides; this can only narrow it. "debug" also
     // shows the debug panel.

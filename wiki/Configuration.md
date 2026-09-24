@@ -19,17 +19,20 @@
 | `showDeviceIfFailure` | Keep a device visible while it reports a failure/error state. |
 | `showAlwaysAllDevices` | Always render all appliances regardless of current state. |
 
-## Timing And Recovery Options
+## Optional Tuning
+
+Both have sensible defaults and are rarely needed.
 
 | Option | Description |
 | --- | --- |
-| `apiRequestTimeoutMs` | Hard timeout for HTTP requests. |
-| `sseRecoveryCooldownMs` | Minimum wait time before another automatic SSE rebuild. |
-| `progressRefreshIntervalMs` | Frontend refresh interval for countdowns and progress indicators. |
-| `minActiveProgramIntervalMs` | Backend throttle for non-forced active-program snapshot requests. |
-| `enableSSEHeartbeat` | Enable SSE health monitoring. |
-| `sseHeartbeatCheckIntervalMs` | How often the heartbeat is checked. |
-| `sseHeartbeatStaleThresholdMs` | Silence threshold before SSE is considered stale. |
+| `apiRequestTimeoutMs` | Timeout for one Home Connect request. Default: 15 s. |
+| `progressRefreshIntervalMs` | How often the display redraws countdowns and progress. Default: 30 s, minimum 5 s. |
+
+The watch on the live event stream needs no settings: Home Connect sends a keep-alive
+about every 55 seconds, so a stream that stays silent for 70 seconds is rebuilt
+automatically. Older options for it (`enableSSEHeartbeat`, `sseHeartbeatCheckIntervalMs`,
+`sseHeartbeatStaleThresholdMs`, `sseRecoveryCooldownMs`) and `minActiveProgramIntervalMs`
+are no longer used and can be removed from `config.js`.
 
 ## Multiple Displays
 
@@ -39,9 +42,8 @@ kiosk) therefore causes no additional API load.
 
 Config options fall into two groups:
 
-- **Session options** (`clientId`, `clientSecret`, `logLevel`,
-  `apiRequestTimeoutMs`, `minActiveProgramIntervalMs`, all `sse*` options) exist once
-  per server. The first display that connects establishes them; if a later display
+- **Session options** (`clientId`, `clientSecret`, `logLevel`, `apiRequestTimeoutMs`)
+  exist once per server. The first display that connects establishes them; if a later display
   asks for different values, the session values still apply and the backend logs a
   warning naming the differing keys. The later display itself shows nothing.
 - **Rendering options** (`showDeviceIcon`, `showDeviceIf*`, `showAlwaysAllDevices`,

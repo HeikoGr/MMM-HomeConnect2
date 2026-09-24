@@ -15,7 +15,8 @@ Wait a minute and try again. The Home Connect device-flow endpoints can enforce 
 ### SSE or live updates stop
 
 - The module can rebuild its SSE subscription automatically.
-- Review `sseHeartbeatCheckIntervalMs`, `sseHeartbeatStaleThresholdMs`, and `sseRecoveryCooldownMs` if your network is unstable.
+- It rebuilds the stream on its own after 70 seconds without any traffic; with `logLevel: "debug"`
+  the log shows when that happens.
 
 ### Configuration mismatch banner
 

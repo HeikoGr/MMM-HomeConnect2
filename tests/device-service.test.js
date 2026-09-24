@@ -195,14 +195,13 @@ function createDeviceService(overrides = {}) {
 
   // handleGetDevicesSuccess: broadcasts the base device list immediately before slow enrichment settles
   {
-    const { service, notifications } = createDeviceService();
+    const { service, notifications } = createDeviceService({ heartbeat: { enabled: false } });
     const sendSocketNotificationCalls = [];
     service.attachClient({
       subscribe: () => {},
       refreshTokens: () => Promise.resolve(),
       closeEventSources: () => {},
     });
-    service.setConfig({ enableSSEHeartbeat: false });
     service.fetchDeviceStatus = () => wait(40);
     service.fetchDeviceSettings = () => wait(40);
 
@@ -336,7 +335,7 @@ function createDeviceService(overrides = {}) {
 
   // SSE per-device subscription establishes immediately and is idempotent
   {
-    const { service: sseService } = createDeviceService();
+    const { service: sseService } = createDeviceService({ heartbeat: { enabled: false } });
     const subscribeCalls = [];
     const hcMock = {
       subscribeDevice: (haId, type) => subscribeCalls.push(`${haId}:${type}`),
@@ -345,7 +344,6 @@ function createDeviceService(overrides = {}) {
     };
     sseService.attachClient(hcMock);
     sseService.devices.set("ha-1", { haId: "ha-1", name: "Washer" });
-    sseService.setConfig({ enableSSEHeartbeat: false });
 
     const handler = () => {};
 
@@ -406,6 +404,7 @@ function createDeviceService(overrides = {}) {
   {
     let staleRecoveries = 0;
     const { service, notifications } = createDeviceService({
+      heartbeat: { checkIntervalMs: 10, staleThresholdMs: 20, recoveryCooldownMs: 1000 },
       onSseStale: () => {
         staleRecoveries += 1;
       },
@@ -419,12 +418,6 @@ function createDeviceService(overrides = {}) {
 
     service.attachClient(hcMock);
     service.devices.set("ha-1", { haId: "ha-1", name: "Washer" });
-    service.setConfig({
-      enableSSEHeartbeat: true,
-      sseHeartbeatCheckIntervalMs: 10,
-      sseHeartbeatStaleThresholdMs: 20,
-      sseRecoveryCooldownMs: 1000,
-    });
 
     service.subscribeToDeviceEvents(() => {});
     await wait(80);
@@ -444,6 +437,7 @@ function createDeviceService(overrides = {}) {
   {
     let staleRecoveries = 0;
     const { service, notifications } = createDeviceService({
+      heartbeat: { checkIntervalMs: 10, staleThresholdMs: 20, recoveryCooldownMs: 1000 },
       onSseStale: () => {
         staleRecoveries += 1;
       },
@@ -459,12 +453,6 @@ function createDeviceService(overrides = {}) {
 
     service.attachClient(hcMock);
     service.devices.set("ha-1", { haId: "ha-1", name: "Washer" });
-    service.setConfig({
-      enableSSEHeartbeat: true,
-      sseHeartbeatCheckIntervalMs: 10,
-      sseHeartbeatStaleThresholdMs: 20,
-      sseRecoveryCooldownMs: 1000,
-    });
 
     const socketNotifications = [];
     service.subscribeToDeviceEvents((payload) =>
@@ -507,7 +495,7 @@ function createDeviceService(overrides = {}) {
   // A repeated device snapshot must not tear down healthy SSE channels: the
   // refresh callback changes per run, but the event handler identity must not.
   {
-    const { service } = createDeviceService();
+    const { service } = createDeviceService({ heartbeat: { enabled: false } });
     const subscribeCalls = [];
     let closeCalls = 0;
     let tokenRefreshes = 0;
@@ -529,7 +517,6 @@ function createDeviceService(overrides = {}) {
       applyEventToDevice: () => {},
     };
     service.attachClient(hcMock);
-    service.setConfig({ enableSSEHeartbeat: false });
 
     const apiResult = {
       data: { homeappliances: [{ haId: "ha-1", name: "Washer", connected: true }] },
@@ -562,7 +549,7 @@ function createDeviceService(overrides = {}) {
   // The SSE watchdog rebuild is a channel-level operation: it must not invalidate
   // the "settings already seeded" cache and cause a /settings refetch per device.
   {
-    const { service } = createDeviceService();
+    const { service } = createDeviceService({ heartbeat: { enabled: false } });
     let settingsFetches = 0;
     service.attachClient({
       subscribeDevice: () => {},
@@ -575,7 +562,6 @@ function createDeviceService(overrides = {}) {
       },
       applyEventToDevice: () => {},
     });
-    service.setConfig({ enableSSEHeartbeat: false });
 
     const apiResult = {
       data: { homeappliances: [{ haId: "ha-1", name: "Washer", connected: true }] },
@@ -734,11 +720,10 @@ function createDeviceService(overrides = {}) {
   // A snapshot must not fire every appliance's detail fetches at once: that burst
   // is what the Home Connect rate limiter answers with 429 in the first place.
   {
-    const { service } = createDeviceService();
+    const { service } = createDeviceService({ heartbeat: { enabled: false } });
     let inFlight = 0;
     let maxInFlight = 0;
     const statusFetches = [];
-    service.setConfig({ enableSSEHeartbeat: false });
     service.attachClient({
       subscribeDevice: () => {},
       refreshTokens: () => Promise.resolve(),

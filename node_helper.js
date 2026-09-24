@@ -14,7 +14,7 @@ const NodeHelper = require("node_helper"),
     MIN_AUTH_INTERVAL: 60000, // 1 minute between auth attempts
     rateLimitUntil: 0, // Timestamp until which rate limiting is active
     lastActiveProgramFetch: 0, // Timestamp of last active program fetch
-    MIN_ACTIVE_PROGRAM_INTERVAL: 10 * 60 * 1000, // 10 minutes between fetches
+    MIN_ACTIVE_PROGRAM_INTERVAL: 10 * 60 * 1000, // 10 minutes between non-forced fetches
   };
 
 const ACTIVE_PROGRAM_RETRY_DELAY_MS = 5000; // 5s
@@ -445,13 +445,5 @@ module.exports = NodeHelper.create({
       this.broadcastDevices.bind(this),
       this.broadcastToAllClients.bind(this),
     );
-  },
-
-  updateActiveProgramInterval() {
-    const minInterval =
-      this.config && typeof this.config.minActiveProgramIntervalMs === "number"
-        ? Math.max(0, this.config.minActiveProgramIntervalMs)
-        : 10 * 60 * 1000;
-    globalSession.MIN_ACTIVE_PROGRAM_INTERVAL = minInterval;
   },
 });

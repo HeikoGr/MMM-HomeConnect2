@@ -461,7 +461,6 @@ function registeredInstances() {
   // client connected against the session's settings (and is logged).
   resetHelperState();
   const authConfigs = [];
-  const deviceConfigs = [];
   const acceptLanguages = [];
   const configuredInstances = [];
   const configMismatchStatuses = [];
@@ -482,11 +481,6 @@ function registeredInstances() {
       authConfigs.push(config);
     },
   };
-  helper.deviceService = {
-    setConfig(config) {
-      deviceConfigs.push(config);
-    },
-  };
   helper.hc = {
     setAcceptLanguage(language) {
       acceptLanguages.push(language);
@@ -504,8 +498,8 @@ function registeredInstances() {
     instanceId: "frontend-a",
     clientId: "client-1",
     language: "de",
-    minActiveProgramIntervalMs: 1111,
-    enableSSEHeartbeat: true,
+    apiRequestTimeoutMs: 1111,
+    logLevel: "info",
     showDeviceIcon: true,
   });
 
@@ -514,8 +508,8 @@ function registeredInstances() {
     instanceId: "frontend-b",
     clientId: "client-1",
     language: "de",
-    minActiveProgramIntervalMs: 1111,
-    enableSSEHeartbeat: true,
+    apiRequestTimeoutMs: 1111,
+    logLevel: "info",
     showDeviceIcon: false,
     showAlwaysAllDevices: true,
     header: "Another header",
@@ -526,8 +520,8 @@ function registeredInstances() {
     instanceId: "frontend-c",
     clientId: "client-1",
     language: "de",
-    minActiveProgramIntervalMs: 9999,
-    enableSSEHeartbeat: false,
+    apiRequestTimeoutMs: 9999,
+    logLevel: "debug",
   });
 
   // Foreign credentials cannot be served by this session.
@@ -535,18 +529,17 @@ function registeredInstances() {
     instanceId: "frontend-d",
     clientId: "client-2",
     language: "de",
-    minActiveProgramIntervalMs: 1111,
-    enableSSEHeartbeat: true,
+    apiRequestTimeoutMs: 1111,
+    logLevel: "info",
   });
 
   assert.strictEqual(helper.instanceId, "frontend-a");
   assert.strictEqual(helper.sharedConfigOwnerInstanceId, "frontend-a");
   assert.strictEqual(helper.config.language, "de");
-  assert.strictEqual(helper.config.minActiveProgramIntervalMs, 1111);
-  assert.strictEqual(helper.sessionOwnerConfig.minActiveProgramIntervalMs, 1111);
+  assert.strictEqual(helper.config.apiRequestTimeoutMs, 1111);
+  assert.strictEqual(helper.sessionOwnerConfig.apiRequestTimeoutMs, 1111);
   assert.deepStrictEqual(configuredInstances, ["first:frontend-a", "next:frontend-b", "next:frontend-c"]);
   assert.strictEqual(authConfigs.length, 1);
-  assert.strictEqual(deviceConfigs.length, 3);
   assert.deepStrictEqual(acceptLanguages, ["de", "de", "de"]);
   const registeredAfterDrift = registeredInstances();
   ["frontend-a", "frontend-b", "frontend-c"].forEach((instanceId) => {
