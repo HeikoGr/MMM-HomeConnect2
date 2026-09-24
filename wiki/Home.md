@@ -6,6 +6,8 @@ MMM-HomeConnect2 connects Home Connect appliances to MagicMirror without requiri
 
 ![MMM-HomeConnect2](https://raw.githubusercontent.com/HeikoGr/MMM-HomeConnect2/master/img/screenshot.png)
 
+![Device states](https://raw.githubusercontent.com/HeikoGr/MMM-HomeConnect2/master/img/screenshot-states.png)
+
 Use this wiki if you want to:
 
 - install the module cleanly

@@ -6,6 +6,10 @@ MagicMirror module for Home Connect appliances using the OAuth2 device flow.
 
 ![MMM-HomeConnect2](img/screenshot.png)
 
+Device states — running with progress, delayed start, finished, open door:
+
+![Device states](img/screenshot-states.png)
+
 ## Installation
 
 ```bash
