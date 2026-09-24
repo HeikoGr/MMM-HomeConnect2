@@ -81,5 +81,47 @@ function createAuthService(overrides = {}) {
     );
   }
 
+  // handleTokenError: authorization_pending is a normal polling state, not a warning
+  {
+    const { service, logs } = createAuthService();
+    assert.deepStrictEqual(service.handleTokenError({ error: "authorization_pending" }), { action: "retry" });
+    assert.deepStrictEqual(
+      logs.filter((entry) => entry.level === "warn" || entry.level === "error"),
+      [],
+    );
+  }
+
+  // pollForToken: an outage of the token endpoint (503, plain text, network) keeps
+  // the device code alive - polling goes on and warns once, not per attempt
+  {
+    const { service, logs } = createAuthService();
+    const originalFetch = globalThis.fetch;
+    const originalSetTimeout = globalThis.setTimeout;
+    const answers = [
+      () => new Response(JSON.stringify({ error: "authorization_pending" }), { status: 400 }),
+      () =>
+        new Response(JSON.stringify({ error_description: "Home Connect subsystem not available" }), { status: 503 }),
+      () => new Response("The request timed out", { status: 200 }),
+      () => {
+        throw new Error("getaddrinfo EAI_AGAIN api.home-connect.com");
+      },
+      () => new Response(JSON.stringify({ error: "authorization_pending" }), { status: 400 }),
+      () => new Response(JSON.stringify({ access_token: "a", refresh_token: "r", expires_in: 60 }), { status: 200 }),
+    ];
+    globalThis.fetch = async () => answers.shift()();
+    globalThis.setTimeout = (fn) => setImmediate(fn);
+    try {
+      const tokens = await service.pollForToken("id", "", "device-code", 5, 20);
+      assert.strictEqual(tokens.refresh_token, "r");
+    } finally {
+      globalThis.fetch = originalFetch;
+      globalThis.setTimeout = originalSetTimeout;
+    }
+    const warnings = logs.filter((entry) => entry.level === "warn" || entry.level === "error");
+    assert.strictEqual(warnings.length, 1, JSON.stringify(warnings));
+    assert.ok(warnings[0].message.includes("HTTP 503: Home Connect subsystem not available"));
+    assert.ok(logs.some((entry) => entry.message === "Token endpoint reachable again"));
+  }
+
   console.log("auth-service.test.js OK");
 })();
