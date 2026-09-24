@@ -35,19 +35,16 @@ function runNode(file) {
   }
 }
 
+// Every tests/*.test.js, so a new test file cannot be left out by accident.
 function runUnitTests() {
-  runNode("auth-service.test.js");
-  runNode("active-program-manager.test.js");
-  runNode("node-helper-session.test.js");
-  runNode("device-utils.test.js");
-  runNode("device-service.test.js");
-  runNode("frontend-render.test.js");
-  runNode("homeconnect-api.test.js");
-  runNode("retry-backoff.test.js");
-  runNode("program-service.test.js");
-  runNode("client-liveness.test.js");
-  runNode("logger.test.js");
-  runNode("init-timeout.test.js");
+  const fs = require("node:fs");
+  const files = fs
+    .readdirSync(__dirname)
+    .filter((file) => file.endsWith(".test.js"))
+    .sort();
+  for (const file of files) {
+    runNode(file);
+  }
 }
 
 async function runLiveSmokeTest() {
