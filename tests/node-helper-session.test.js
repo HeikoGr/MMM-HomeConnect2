@@ -169,6 +169,32 @@ function registeredInstances() {
 
   helper.handleGetActivePrograms = staleOriginalHandleGetActivePrograms;
 
+  // During an API rate limit the watchdog only rebuilds SSE; no snapshot spends quota.
+  staleSequence.length = 0;
+  helper.handleGetActivePrograms = (payload = {}) => {
+    staleSequence.push(`program_fetch:${payload.instanceId || "unknown"}:${payload.force}`);
+  };
+  helper.setRateLimitUntil(Date.now() + 60 * 60 * 1000);
+  helper.handleSseStale({ silenceMs: 71000 });
+  await wait(0);
+  assert.deepStrictEqual(staleSequence, ["rebuild"], "A rate-limited watchdog must not start a device refresh");
+  helper.setRateLimitUntil(0);
+  helper.handleGetActivePrograms = staleOriginalHandleGetActivePrograms;
+
+  // The auth throttle neither lifts nor shortens an API 429 block.
+  resetHelperState();
+  helper.emitInitStatus = () => {};
+  const blockedUntil = Date.now() + 22 * 60 * 60 * 1000;
+  helper.setRateLimitUntil(blockedUntil);
+  helper.globalSession.lastAuthAttempt = 0;
+  assert.strictEqual(helper.checkRateLimit(), true);
+  assert.strictEqual(helper.getRateLimitUntil(), blockedUntil, "An allowed auth attempt must keep the 429 block");
+  helper.globalSession.lastAuthAttempt = Date.now();
+  assert.strictEqual(helper.checkRateLimit(), false);
+  assert.strictEqual(helper.getRateLimitUntil(), blockedUntil, "The auth throttle must not shorten the 429 block");
+  helper.globalSession.lastAuthAttempt = 0;
+  helper.setRateLimitUntil(0);
+
   // An already authenticated session should start the initial device fetch immediately.
   resetHelperState();
   helper.hc = {};
