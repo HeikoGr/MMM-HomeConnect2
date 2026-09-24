@@ -47,5 +47,39 @@ function createAuthService(overrides = {}) {
     assert.strictEqual(broadcasts[0].p.status, "need_auth");
   }
 
+  // initiateDeviceFlow: the OAuth error body becomes one readable line, the code
+  // is kept for the caller, and nothing is logged here (the caller logs once)
+  {
+    const { service, logs } = createAuthService();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ error: "unauthorized_client", error_description: "Invalid client id" }, null, 2), {
+        status: 400,
+      });
+    try {
+      await assert.rejects(service.initiateDeviceFlow("bogus"), (error) => {
+        assert.strictEqual(
+          error.message,
+          "Device authorization failed (HTTP 400): unauthorized_client - Invalid client id",
+        );
+        assert.strictEqual(error.oauthError, "unauthorized_client");
+        return true;
+      });
+
+      globalThis.fetch = async () => new Response("Bad Gateway", { status: 502 });
+      await assert.rejects(service.initiateDeviceFlow("id"), (error) => {
+        assert.strictEqual(error.message, "Device authorization failed (HTTP 502): Bad Gateway");
+        assert.strictEqual(error.oauthError, null);
+        return true;
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    assert.deepStrictEqual(
+      logs.filter((entry) => entry.level === "error"),
+      [],
+    );
+  }
+
   console.log("auth-service.test.js OK");
 })();

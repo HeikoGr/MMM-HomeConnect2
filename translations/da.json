@@ -15,6 +15,7 @@
   "AUTH_SECONDS": "sekunder",
   "AUTH_FAILED_TITLE": "Godkendelse mislykkedes",
   "AUTH_FAILED_INFO": "Genstart MagicMirror for at prøve igen.",
+  "AUTH_INVALID_CLIENT": "Home Connect accepterer ikke dette clientId. Kontrollér Client ID'et for din Home Connect-app i config.js, og genstart MagicMirror.",
   "SESSION_BASED_AUTH": "Sessionsbaseret godkendelse aktiv",
   "PROGRAM_FINISHED": "Program færdig",
   "DELAYED_START": "Forsinket start",

@@ -15,6 +15,7 @@
   "AUTH_SECONDS": "Sekunden",
   "AUTH_FAILED_TITLE": "Authentifizierung fehlgeschlagen",
   "AUTH_FAILED_INFO": "Bitte starten Sie MagicMirror neu, um es erneut zu versuchen.",
+  "AUTH_INVALID_CLIENT": "Home Connect akzeptiert diese clientId nicht. Prüfen Sie die Client-ID Ihrer Home-Connect-App in der config.js und starten Sie MagicMirror neu.",
   "SESSION_BASED_AUTH": "Session-basierte Authentifizierung aktiv",
   "PROGRAM_FINISHED": "Programm fertig",
   "DELAYED_START": "Verzögerter Start",

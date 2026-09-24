@@ -854,6 +854,21 @@ function registeredInstances() {
       assert.ok(authStatuses.includes("error"), "Expected a device-flow failure to be reported as auth error");
       clearRetryTimers();
 
+      // A clientId Home Connect does not know: reported once, never retried.
+      authStatuses.length = 0;
+      helper.initializationAttempts = 0;
+      helper.authService = {
+        headlessAuth: async () => {
+          throw Object.assign(new Error("Device authorization failed (HTTP 400): unauthorized_client"), {
+            oauthError: "unauthorized_client",
+          });
+        },
+      };
+      await helper.initWithHeadlessAuth();
+      assert.strictEqual(helper.headlessAuthRetryTimer || null, null, "An invalid clientId must not be retried");
+      assert.deepStrictEqual(authStatuses, ["error"]);
+      assert.strictEqual(helper.authFlowInProgress, false);
+
       // Saved token at boot, network not up yet: retry scheduled, nothing unhandled.
       helper.authService = Object.assign(Object.create(originalAuthService), {
         readRefreshTokenFromFile: () => "saved-refresh",
