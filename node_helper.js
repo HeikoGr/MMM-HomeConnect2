@@ -1,4 +1,5 @@
 const ActiveProgramManager = require("./lib/active-program-manager");
+const { deviceAppearsActive } = require("./lib/device-utils");
 const AuthService = require("./lib/auth-service");
 const DeviceService = require("./lib/device-service");
 const ProgramService = require("./lib/program-service");
@@ -224,6 +225,7 @@ module.exports = NodeHelper.create({
           }
           this.broadcastProgramData(programData, requester);
         },
+        isDeviceActiveFn: (haId) => deviceAppearsActive(this.deviceService.devices.get(haId)),
         logger: log,
         maxRetries: ACTIVE_PROGRAM_MAX_RETRIES,
         retryDelayMs: ACTIVE_PROGRAM_RETRY_DELAY_MS,
@@ -238,7 +240,7 @@ module.exports = NodeHelper.create({
       logger: log,
       globalSession,
       activeProgramManager: this.activeProgramManager,
-      devices: this.deviceService.devices,
+      getDevices: () => this.deviceService.devices,
       debugHooks: {
         recordApiCall: this.recordApiCall.bind(this),
       },
