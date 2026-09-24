@@ -15,6 +15,7 @@
   "AUTH_SECONDS": "seconds",
   "AUTH_FAILED_TITLE": "Authentication failed",
   "AUTH_FAILED_INFO": "Please restart MagicMirror to try again.",
+  "AUTH_INVALID_CLIENT": "Home Connect does not accept this clientId. Check the Client ID of your Home Connect app in config.js and restart MagicMirror.",
   "SESSION_BASED_AUTH": "Session-based authentication active",
   "PROGRAM_FINISHED": "Program finished",
   "DELAYED_START": "Delayed start",
@@ -32,6 +33,10 @@
   "CONFIG_MISMATCH_TITLE": "Configuration mismatch",
   "CONFIG_MISMATCH": "This display uses a different MMM-HomeConnect2 configuration than the running server instance.",
   "CONFIG_MISMATCH_CREDENTIALS": "This display uses different Home Connect credentials than the running server session.",
+  "CONFIG_OUTDATED_TITLE": "Configuration changed",
+  "CONFIG_OUTDATED": "MagicMirror was restarted with a new configuration. Please reload this page.",
+  "CONFIG_INCOMPLETE_TITLE": "Configuration incomplete",
+  "CONFIG_MISSING_CLIENT_ID": "No clientId set. Enter the Client ID of your Home Connect app in config.js and restart MagicMirror.",
   "AVAILABLE_PROGRAMS": "Programs",
   "AVAILABLE_OPTIONS": "Options",
   "ACTIVE_ALERTS": "Alerts"

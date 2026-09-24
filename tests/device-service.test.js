@@ -195,14 +195,13 @@ function createDeviceService(overrides = {}) {
 
   // handleGetDevicesSuccess: broadcasts the base device list immediately before slow enrichment settles
   {
-    const { service, notifications } = createDeviceService();
+    const { service, notifications } = createDeviceService({ heartbeat: { enabled: false } });
     const sendSocketNotificationCalls = [];
     service.attachClient({
       subscribe: () => {},
       refreshTokens: () => Promise.resolve(),
       closeEventSources: () => {},
     });
-    service.setConfig({ enableSSEHeartbeat: false });
     service.fetchDeviceStatus = () => wait(40);
     service.fetchDeviceSettings = () => wait(40);
 
@@ -235,6 +234,47 @@ function createDeviceService(overrides = {}) {
     );
   }
 
+  // An appliance that starts the program it had selected gets its active program
+  // fetched right away - once per run, not on every SSE delta of that run.
+  {
+    const requested = [];
+    const { service } = createDeviceService({ onActiveProgramNeeded: (haId) => requested.push(haId) });
+    service.attachClient({
+      applyEventToDevice: (device, item) => {
+        if (item.key === "BSH.Common.Status.OperationState") {
+          device.OperationState = item.value;
+        }
+      },
+    });
+    service.devices.set("ha-dryer", {
+      haId: "ha-dryer",
+      name: "Dryer",
+      OperationState: "BSH.Common.EnumType.OperationState.Ready",
+      ActiveProgramName: "Synthetics",
+      ActiveProgramSource: "selected",
+    });
+    const sse = (key, value) =>
+      service.deviceEvent({ data: JSON.stringify({ haId: "ha-dryer", items: [{ key, value }] }) }, () => {});
+    const state = (label) => sse("BSH.Common.Status.OperationState", `BSH.Common.EnumType.OperationState.${label}`);
+
+    state("Run");
+    assert.deepStrictEqual(requested, ["ha-dryer"], "the start asks for the active program");
+    sse("BSH.Common.Option.RemainingProgramTime", 3000);
+    sse("BSH.Common.Option.ProgramProgress", 5);
+    assert.deepStrictEqual(requested, ["ha-dryer"], "further deltas of the same run do not");
+
+    // Once the REST answer says "active", nothing more is needed.
+    service.devices.get("ha-dryer").ActiveProgramSource = "active";
+    state("Pause");
+    assert.deepStrictEqual(requested, ["ha-dryer"]);
+
+    // Idle again, then the next run: asked again.
+    service.devices.get("ha-dryer").ActiveProgramSource = "selected";
+    state("Ready");
+    state("Run");
+    assert.deepStrictEqual(requested, ["ha-dryer", "ha-dryer"]);
+  }
+
   // noteTokenRefreshed: prevents immediate redundant token refresh before first SSE subscribe
   {
     const { service } = createDeviceService();
@@ -249,6 +289,28 @@ function createDeviceService(overrides = {}) {
     await service.ensureFreshTokenForSSE();
 
     assert.strictEqual(refreshCalls, 0);
+  }
+
+  // SSE rebuild: an access token that is still valid for long is not refreshed
+  // (each refresh is a request and one of 100 per day); one about to expire is.
+  {
+    const { service } = createDeviceService();
+    let refreshCalls = 0;
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const hcMock = {
+      tokens: { timestamp: nowSeconds - 3600, expires_in: 86400 },
+      refreshTokens: async () => {
+        refreshCalls += 1;
+      },
+    };
+    service.attachClient(hcMock);
+
+    await service.ensureFreshTokenForSSE();
+    assert.strictEqual(refreshCalls, 0, "a token valid for ~23 h needs no refresh");
+
+    hcMock.tokens = { timestamp: nowSeconds - 86400 + 300, expires_in: 86400 };
+    await service.ensureFreshTokenForSSE();
+    assert.strictEqual(refreshCalls, 1, "a token expiring in 5 min is refreshed first");
   }
 
   // handleGetDevicesError: broadcasts device_error
@@ -273,7 +335,7 @@ function createDeviceService(overrides = {}) {
 
   // SSE per-device subscription establishes immediately and is idempotent
   {
-    const { service: sseService } = createDeviceService();
+    const { service: sseService } = createDeviceService({ heartbeat: { enabled: false } });
     const subscribeCalls = [];
     const hcMock = {
       subscribeDevice: (haId, type) => subscribeCalls.push(`${haId}:${type}`),
@@ -282,7 +344,6 @@ function createDeviceService(overrides = {}) {
     };
     sseService.attachClient(hcMock);
     sseService.devices.set("ha-1", { haId: "ha-1", name: "Washer" });
-    sseService.setConfig({ enableSSEHeartbeat: false });
 
     const handler = () => {};
 
@@ -312,7 +373,8 @@ function createDeviceService(overrides = {}) {
 
     service.handleKeepAliveEvent({ data: "ping" });
 
-    assert.strictEqual(service.heartbeatArmed, true);
+    assert.ok(Number.isFinite(service.lastEventTimestamp));
+    assert.strictEqual(service.heartbeatTimer, null, "no watchdog timer while the monitor is not running");
     assert.ok(Number.isFinite(service.lastKeepAliveTimestamp));
     assert.ok(logs.some((entry) => entry.level === "debug" && entry.message.includes("SSE KEEP-ALIVE received")));
     assert.ok(!logs.some((entry) => entry.message.includes("undefined")));
@@ -343,6 +405,7 @@ function createDeviceService(overrides = {}) {
   {
     let staleRecoveries = 0;
     const { service, notifications } = createDeviceService({
+      heartbeat: { staleThresholdMs: 20 },
       onSseStale: () => {
         staleRecoveries += 1;
       },
@@ -356,12 +419,6 @@ function createDeviceService(overrides = {}) {
 
     service.attachClient(hcMock);
     service.devices.set("ha-1", { haId: "ha-1", name: "Washer" });
-    service.setConfig({
-      enableSSEHeartbeat: true,
-      sseHeartbeatCheckIntervalMs: 10,
-      sseHeartbeatStaleThresholdMs: 20,
-      sseRecoveryCooldownMs: 1000,
-    });
 
     service.subscribeToDeviceEvents(() => {});
     await wait(80);
@@ -377,10 +434,35 @@ function createDeviceService(overrides = {}) {
     service.shutdown();
   }
 
+  // SSE heartbeat: every message restarts the watchdog - steady traffic (the
+  // KEEP-ALIVE alone) never lets it fire, stopping the traffic does.
+  {
+    let staleRecoveries = 0;
+    const { service } = createDeviceService({
+      heartbeat: { staleThresholdMs: 40 },
+      onSseStale: () => {
+        staleRecoveries += 1;
+      },
+    });
+    service.devices.set("ha-1", { haId: "ha-1", name: "Washer" });
+    service.startHeartbeatMonitor();
+
+    for (let i = 0; i < 6; i += 1) {
+      service.handleKeepAliveEvent({});
+      await wait(15);
+    }
+    assert.strictEqual(staleRecoveries, 0, "a stream that keeps talking is healthy");
+
+    await wait(80);
+    assert.strictEqual(staleRecoveries, 1, "silence beyond the threshold triggers one recovery");
+    service.stopHeartbeatMonitor();
+  }
+
   // SSE heartbeat: after at least one event, prolonged silence still triggers recovery once
   {
     let staleRecoveries = 0;
     const { service, notifications } = createDeviceService({
+      heartbeat: { staleThresholdMs: 20 },
       onSseStale: () => {
         staleRecoveries += 1;
       },
@@ -396,12 +478,6 @@ function createDeviceService(overrides = {}) {
 
     service.attachClient(hcMock);
     service.devices.set("ha-1", { haId: "ha-1", name: "Washer" });
-    service.setConfig({
-      enableSSEHeartbeat: true,
-      sseHeartbeatCheckIntervalMs: 10,
-      sseHeartbeatStaleThresholdMs: 20,
-      sseRecoveryCooldownMs: 1000,
-    });
 
     const socketNotifications = [];
     service.subscribeToDeviceEvents((payload) =>
@@ -444,7 +520,7 @@ function createDeviceService(overrides = {}) {
   // A repeated device snapshot must not tear down healthy SSE channels: the
   // refresh callback changes per run, but the event handler identity must not.
   {
-    const { service } = createDeviceService();
+    const { service } = createDeviceService({ heartbeat: { enabled: false } });
     const subscribeCalls = [];
     let closeCalls = 0;
     let tokenRefreshes = 0;
@@ -466,7 +542,6 @@ function createDeviceService(overrides = {}) {
       applyEventToDevice: () => {},
     };
     service.attachClient(hcMock);
-    service.setConfig({ enableSSEHeartbeat: false });
 
     const apiResult = {
       data: { homeappliances: [{ haId: "ha-1", name: "Washer", connected: true }] },
@@ -499,7 +574,7 @@ function createDeviceService(overrides = {}) {
   // The SSE watchdog rebuild is a channel-level operation: it must not invalidate
   // the "settings already seeded" cache and cause a /settings refetch per device.
   {
-    const { service } = createDeviceService();
+    const { service } = createDeviceService({ heartbeat: { enabled: false } });
     let settingsFetches = 0;
     service.attachClient({
       subscribeDevice: () => {},
@@ -512,7 +587,6 @@ function createDeviceService(overrides = {}) {
       },
       applyEventToDevice: () => {},
     });
-    service.setConfig({ enableSSEHeartbeat: false });
 
     const apiResult = {
       data: { homeappliances: [{ haId: "ha-1", name: "Washer", connected: true }] },
@@ -553,12 +627,51 @@ function createDeviceService(overrides = {}) {
     });
 
     const before = Date.now();
-    service.getDevices(() => {});
+    let followUps = 0;
+    service.getDevices(() => {}, {
+      onDetailsRefreshed: () => {
+        followUps += 1;
+      },
+    });
     await wait(10);
 
+    assert.strictEqual(followUps, 0, "A failed device fetch must not start the program follow-up");
     assert.strictEqual(rateLimitCalls.length, 1, "Expected the global rate limit to be set");
     assert.ok(rateLimitCalls[0] >= before + 120 * 1000, "Expected Retry-After to drive the backoff window");
     assert.strictEqual(settled, 1, "Expected the failed refresh to settle exactly once");
+  }
+
+  // The program follow-up runs once, after every status call has finished - not
+  // alongside them (a burst) and not on stale state.
+  {
+    const order = [];
+    const { service } = createDeviceService();
+    service.attachClient({
+      getHomeAppliances: () =>
+        Promise.resolve({
+          success: true,
+          data: {
+            homeappliances: [
+              { haId: "ha-1", name: "Washer", connected: true },
+              { haId: "ha-2", name: "Dryer", connected: true },
+            ],
+          },
+        }),
+      getStatus: (haId) => {
+        order.push(`status:${haId}`);
+        return Promise.resolve({ success: true, data: { status: [] } });
+      },
+      getSettings: () => Promise.resolve({ success: true, data: { settings: [] } }),
+      refreshTokens: () => Promise.resolve(),
+      subscribeDevice() {},
+      closeEventSources() {},
+    });
+
+    service.getDevices(() => {}, { onDetailsRefreshed: () => order.push("programs") });
+    await wait(700);
+
+    assert.deepStrictEqual(order, ["status:ha-1", "status:ha-2", "programs"]);
+    service.shutdown();
   }
 
   // A refresh that never reaches the API must still settle its in-flight state.
@@ -632,11 +745,10 @@ function createDeviceService(overrides = {}) {
   // A snapshot must not fire every appliance's detail fetches at once: that burst
   // is what the Home Connect rate limiter answers with 429 in the first place.
   {
-    const { service } = createDeviceService();
+    const { service } = createDeviceService({ heartbeat: { enabled: false } });
     let inFlight = 0;
     let maxInFlight = 0;
     const statusFetches = [];
-    service.setConfig({ enableSSEHeartbeat: false });
     service.attachClient({
       subscribeDevice: () => {},
       refreshTokens: () => Promise.resolve(),

@@ -1,4 +1,5 @@
 const ActiveProgramManager = require("./lib/active-program-manager");
+const { deviceAppearsActive } = require("./lib/device-utils");
 const AuthService = require("./lib/auth-service");
 const DeviceService = require("./lib/device-service");
 const ProgramService = require("./lib/program-service");
@@ -14,7 +15,7 @@ const NodeHelper = require("node_helper"),
     MIN_AUTH_INTERVAL: 60000, // 1 minute between auth attempts
     rateLimitUntil: 0, // Timestamp until which rate limiting is active
     lastActiveProgramFetch: 0, // Timestamp of last active program fetch
-    MIN_ACTIVE_PROGRAM_INTERVAL: 10 * 60 * 1000, // 10 minutes between fetches
+    MIN_ACTIVE_PROGRAM_INTERVAL: 10 * 60 * 1000, // 10 minutes between non-forced fetches
   };
 
 const ACTIVE_PROGRAM_RETRY_DELAY_MS = 5000; // 5s
@@ -79,6 +80,10 @@ module.exports = NodeHelper.create({
   headlessAuthRetryTimer: null,
   invalidGrantRetryTimer: null,
   sessionOwnerConfig: null,
+  // The last failed device flow, replayed to displays that connect afterwards.
+  lastAuthFailure: null,
+  // The QR code / user code of the running device flow, for displays joining late.
+  pendingAuthInfo: null,
   debugStats: {
     lastApiCallTs: null,
     lastSseEventTs: null,
@@ -139,7 +144,20 @@ module.exports = NodeHelper.create({
     this.emitStatus("AUTH_STATUS", AUTH_STATUS_MESSAGES, status, payload, options);
   },
 
-  dispatchDeviceRefreshWithProgramSync({ reason, requester, forcePrograms = false, haIds = null } = {}) {
+  /**
+   * Device snapshot, then the program sync once the status calls are done.
+   * `activeProgramsOnly` limits the program sync to appliances that are running
+   * (by their fresh status): an idle appliance answers /programs/active with a
+   * 404 - quota spent, and an error on the way to Home Connect's "10 failed
+   * requests in a row" block - and SSE triggers the fetch when it starts.
+   */
+  dispatchDeviceRefreshWithProgramSync({
+    reason,
+    requester,
+    forcePrograms = false,
+    activeProgramsOnly = false,
+    haIds = null,
+  } = {}) {
     if (!this.deviceService || !this.hc || this.authFlowInProgress) {
       return false;
     }
@@ -147,25 +165,22 @@ module.exports = NodeHelper.create({
     log.debug("Dispatching device refresh", { reason: reason || "device_refresh" });
     this.deviceRefreshInFlight = true;
     this.deviceRefreshStartedAt = Date.now();
-    let followUpRequested = false;
 
     // Pure broadcast sink. The in-flight flag is released by DeviceService's
     // onRefreshSettled hook: a failing fetch never sends a notification, so
     // clearing it here left it stuck on true after a single 429.
-    this.deviceService.getDevices((notification, callbackPayload) => {
-      this.broadcastToAllClients(notification, callbackPayload);
-
-      if (followUpRequested || notification !== "DEVICES_UPDATE") {
-        return;
-      }
-
-      followUpRequested = true;
-      this.handleGetActivePrograms({
-        instanceId: requester || this.instanceId || "unknown",
-        haIds,
-        force: forcePrograms,
-      });
-    });
+    this.deviceService.getDevices(
+      (notification, callbackPayload) => this.broadcastToAllClients(notification, callbackPayload),
+      {
+        onDetailsRefreshed: () =>
+          this.handleGetActivePrograms({
+            instanceId: requester || this.instanceId || "unknown",
+            haIds,
+            force: forcePrograms,
+            activeOnly: activeProgramsOnly,
+          }),
+      },
+    );
 
     return true;
   },
@@ -202,7 +217,15 @@ module.exports = NodeHelper.create({
     try {
       this.activeProgramManager = new ActiveProgramManager({
         fetchFn: this.fetchActiveProgramForDevice.bind(this),
-        broadcastFn: this.broadcastProgramData.bind(this),
+        // A retry's result has to reach the device object - broadcasting it alone
+        // left the display on its previous state.
+        broadcastFn: (programData, requester, result) => {
+          if (result && this.programService) {
+            this.programService.applyProgramResult(result);
+          }
+          this.broadcastProgramData(programData, requester);
+        },
+        isDeviceActiveFn: (haId) => deviceAppearsActive(this.deviceService.devices.get(haId)),
         logger: log,
         maxRetries: ACTIVE_PROGRAM_MAX_RETRIES,
         retryDelayMs: ACTIVE_PROGRAM_RETRY_DELAY_MS,
@@ -217,7 +240,7 @@ module.exports = NodeHelper.create({
       logger: log,
       globalSession,
       activeProgramManager: this.activeProgramManager,
-      devices: this.deviceService.devices,
+      getDevices: () => this.deviceService.devices,
       debugHooks: {
         recordApiCall: this.recordApiCall.bind(this),
       },
@@ -227,6 +250,7 @@ module.exports = NodeHelper.create({
 
   start() {
     log.info(`Starting module helper: ${this.name}`);
+    this.startedAt = Date.now();
 
     /*
      * A display stays registered while its browser socket is connected; one
@@ -312,6 +336,7 @@ module.exports = NodeHelper.create({
         reason: "scheduled_full_snapshot",
         requester: "scheduled_snapshot",
         forcePrograms: true,
+        activeProgramsOnly: true,
       });
     }, FULL_SNAPSHOT_INTERVAL_MS);
   },
@@ -422,13 +447,5 @@ module.exports = NodeHelper.create({
       this.broadcastDevices.bind(this),
       this.broadcastToAllClients.bind(this),
     );
-  },
-
-  updateActiveProgramInterval() {
-    const minInterval =
-      this.config && typeof this.config.minActiveProgramIntervalMs === "number"
-        ? Math.max(0, this.config.minActiveProgramIntervalMs)
-        : 10 * 60 * 1000;
-    globalSession.MIN_ACTIVE_PROGRAM_INTERVAL = minInterval;
   },
 });

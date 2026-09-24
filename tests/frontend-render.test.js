@@ -163,31 +163,23 @@ function createInstance(overrides = {}) {
     assert.strictEqual(runningDisplayState.runtime.percent, 35);
     assert.strictEqual(runningDisplayState.presentation.programMeta, "ACTIVE_PROGRAM: Eco 40-60");
 
-    const configuredLanguageInstance = createInstance({
-      config: {
-        apiLanguage: "da",
-      },
-    });
-    assert.strictEqual(configuredLanguageInstance.getPreferredApiLanguage(), "da");
-
-    const magicMirrorLanguageInstance = createInstance({
-      config: {
-        apiLanguage: "",
-      },
-    });
-    globalThis.config.language = "de";
-    assert.strictEqual(magicMirrorLanguageInstance.getPreferredApiLanguage(), "de");
-
-    const browserLanguageInstance = createInstance({
-      config: {
-        apiLanguage: "",
-      },
-    });
-    globalThis.config.language = "";
+    // The module follows MagicMirror's language only - a leftover apiLanguage or
+    // the browser's language must not introduce a second one.
+    const languageInstance = createInstance({ config: { apiLanguage: "da" } });
     const browserNavigator = Reflect.get(globalThis, "navigator");
     browserNavigator.languages = ["fr-FR", "fr"];
     browserNavigator.language = "fr-FR";
-    assert.strictEqual(browserLanguageInstance.getPreferredApiLanguage(), "fr-FR");
+    globalThis.config.language = "de";
+    assert.strictEqual(languageInstance.getLanguage(), "de");
+
+    // CONFIGURE carries that language, so the backend can spot an outdated tab.
+    const sentConfigs = [];
+    languageInstance.transport = { sendRequest: (action, data) => sentConfigs.push({ action, data }) };
+    languageInstance.sendConfigure();
+    assert.strictEqual(sentConfigs[0].action, "CONFIGURE");
+    assert.strictEqual(sentConfigs[0].data.config.language, "de");
+    assert.strictEqual(sentConfigs[0].data.config.preferredApiLanguage, undefined);
+    globalThis.config.language = "en";
 
     const fallbackRunningInstance = createInstance({
       devices: [
@@ -960,7 +952,10 @@ function createInstance(overrides = {}) {
     assert.ok(
       configMismatchDom.innerHTML.includes("Konfigurationskonflikt: Dieses Display nutzt eine andere Konfiguration."),
     );
-    assert.ok(configMismatchDom.innerHTML.includes("LOADING_APPLIANCES"));
+    assert.ok(
+      !configMismatchDom.innerHTML.includes("LOADING_APPLIANCES"),
+      "A rejected display gets no appliances - no spinner",
+    );
 
     // Without an explicit message the banner falls back to a translated text, and
     // credential conflicts get their own wording.
@@ -973,6 +968,22 @@ function createInstance(overrides = {}) {
     });
     const credentialMismatchDom = credentialMismatchInstance.getDom();
     assert.ok(credentialMismatchDom.innerHTML.includes("CONFIG_MISMATCH_CREDENTIALS"));
+
+    // A config without clientId never opens a session: a hint instead of a spinner.
+    const incompleteHtml = createInstance({
+      lastInitStatus: { status: "config_incomplete", message: "Module config incomplete", missingKeys: ["clientId"] },
+    }).getDom().innerHTML;
+    assert.ok(incompleteHtml.includes("CONFIG_INCOMPLETE_TITLE"));
+    assert.ok(incompleteHtml.includes("CONFIG_MISSING_CLIENT_ID"));
+    assert.ok(!incompleteHtml.includes("LOADING_APPLIANCES"));
+    assert.ok(!incompleteHtml.includes("CONFIG_MISMATCH"));
+
+    // An outdated tab that may not reload again shows the manual hint.
+    const outdatedHtml = createInstance({
+      lastInitStatus: { status: "config_outdated", message: "Display config is outdated" },
+    }).getDom().innerHTML;
+    assert.ok(outdatedHtml.includes("CONFIG_OUTDATED_TITLE"));
+    assert.ok(!outdatedHtml.includes("LOADING_APPLIANCES"));
 
     const debugSessionInstance = createInstance({
       config: {
@@ -1146,6 +1157,35 @@ function createInstance(overrides = {}) {
     assert.strictEqual(quiet.renders, 0, "no re-render without the debug panel");
     assert.ok(quiet.stats, "the stats are still kept for a later switch to debug");
     assert.strictEqual(countRenders("debug").renders, 1);
+
+    // A tab from before the server restart reloads once per server start to pick
+    // up the current config; a second request from the same start shows the hint.
+    const storage = new Map();
+    let reloads = 0;
+    globalThis.window.sessionStorage = {
+      getItem: (key) => (storage.has(key) ? storage.get(key) : null),
+      setItem: (key, value) => storage.set(key, String(value)),
+    };
+    globalThis.window.location = {
+      reload() {
+        reloads += 1;
+      },
+    };
+    const sendOutdated = (instance, serverStartedAt) =>
+      instance.socketNotificationReceived("MMM-HomeConnect2_EVENT", {
+        instanceId: "test-instance",
+        action: "INIT_STATUS",
+        data: { status: "config_outdated", message: "Display config is outdated", serverStartedAt },
+      });
+    sendOutdated(createInstance(), 1000);
+    assert.strictEqual(reloads, 1, "the outdated tab reloads");
+    const reloadedInstance = createInstance();
+    sendOutdated(reloadedInstance, 1000);
+    assert.strictEqual(reloads, 1, "no reload loop against the same server start");
+    assert.ok(reloadedInstance.getDom().innerHTML.includes("CONFIG_OUTDATED_TITLE"));
+    // The next config edit means the next restart - that one may reload again.
+    sendOutdated(createInstance(), 2000);
+    assert.strictEqual(reloads, 2, "a new server start may reload again");
 
     console.log("frontend-render.test.js OK");
   } finally {

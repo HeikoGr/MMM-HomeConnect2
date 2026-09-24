@@ -12,20 +12,14 @@ Module.register("MMM-HomeConnect2", {
     header: "Home Connect Appliances",
     clientId: "",
     clientSecret: "",
-    apiLanguage: "",
 
     showDeviceIcon: true,
     showAlwaysAllDevices: false,
     showDeviceIfDoorIsOpen: true,
     showDeviceIfFailure: true,
     showDeviceIfInfoIsAvailable: true,
-    enableSSEHeartbeat: true, // Enable SSE heartbeat checks by default
-    sseHeartbeatCheckIntervalMs: 10 * 1000, // 10 seconds
-    sseHeartbeatStaleThresholdMs: 70 * 1000, // 70 seconds
-    sseRecoveryCooldownMs: 70 * 1000, // minimum time between SSE stale-recovery attempts
-    apiRequestTimeoutMs: 15 * 1000,
+    // Optional tuning: how often this display redraws countdowns and progress.
     progressRefreshIntervalMs: 30 * 1000,
-    minActiveProgramIntervalMs: 10 * 60 * 1000, // 10 minutes between active program fetches (backend throttle)
     // Optional: none | error | warn | info | debug. Output goes through MagicMirror's
     // Log, so the global logLevel decides; this can only narrow it. "debug" also
     // shows the debug panel.
@@ -97,37 +91,18 @@ Module.register("MMM-HomeConnect2", {
     };
   },
 
-  getPreferredApiLanguage() {
-    const configuredLanguage = typeof this.config?.apiLanguage === "string" ? this.config.apiLanguage.trim() : "";
-    if (configuredLanguage) {
-      return configuredLanguage;
-    }
+  // MagicMirror's config is a global `let` in the browser, not a window property -
+  // globalThis.config is undefined there, which silently dropped the language
+  // (the browser's own was used instead) and the 12/24 h setting.
+  getMagicMirrorConfig() {
+    return typeof config === "object" && config ? config : {};
+  },
 
-    const magicMirrorLanguage =
-      typeof globalThis.config?.language === "string" ? globalThis.config.language.trim() : "";
-    if (magicMirrorLanguage) {
-      return magicMirrorLanguage;
-    }
-
-    const browserLanguages = Array.isArray(navigator?.languages)
-      ? navigator.languages.map((language) => (typeof language === "string" ? language.trim() : "")).filter(Boolean)
-      : [];
-    if (browserLanguages.length > 0) {
-      return browserLanguages[0];
-    }
-
-    const browserLanguage = typeof navigator?.language === "string" ? navigator.language.trim() : "";
-    if (browserLanguage) {
-      return browserLanguage;
-    }
-
-    const documentLanguage =
-      typeof document?.documentElement?.lang === "string" ? document.documentElement.lang.trim() : "";
-    if (documentLanguage) {
-      return documentLanguage;
-    }
-
-    return "";
+  // MagicMirror's language - the same one the translations and the Home Connect
+  // texts (set on the server) use, so the display never mixes two.
+  getLanguage() {
+    const language = this.getMagicMirrorConfig().language;
+    return typeof language === "string" ? language.trim() : "";
   },
 
   notificationReceived(notification) {
@@ -142,9 +117,10 @@ Module.register("MMM-HomeConnect2", {
       config: {
         ...this.config,
         instanceId: this.instanceId,
-        // Sent as a hint only: browser-derived values must never take part in
-        // the session comparison, otherwise every device reports a conflict.
-        preferredApiLanguage: this.getPreferredApiLanguage(),
+        // Lets the backend spot a tab that still runs the language from before a
+        // config change (it then reloads); the session language itself comes
+        // from the server's MagicMirror config.
+        language: this.getLanguage(),
       },
     });
   },
@@ -207,10 +183,15 @@ Module.register("MMM-HomeConnect2", {
         this.lastInitStatus = safePayload;
         this.lastInitStatusReceivedAt = Date.now();
 
-        if (safePayload.status === "session_active" || safePayload.status === "complete") {
-          // Session active - normal display
+        if (["session_active", "complete", "success"].includes(safePayload.status)) {
+          // Session active - normal display; "success" ends a login this tab showed the QR code for
           this.authInfo = null;
           this.authStatus = null;
+        } else if (
+          safePayload.status === "config_outdated" &&
+          this.reloadForOutdatedConfig(safePayload.serverStartedAt)
+        ) {
+          return;
         } else if (safePayload.status === "auth_in_progress") {
           // Authentication already in progress (special auth UI)
           this.authStatus = {
@@ -232,6 +213,32 @@ Module.register("MMM-HomeConnect2", {
       default:
         break;
     }
+  },
+
+  /**
+   * This tab still runs the config it loaded before the last server restart
+   * (MagicMirror does not reload open pages by default). A reload fetches the
+   * current one - at most once per server start, so configs that never match
+   * cannot loop, while every further restart (the next config edit) may reload
+   * again. When the guard holds, the display shows a hint to reload by hand.
+   * @param {number} [serverStartedAt] - Start time of the backend that asked
+   * @returns {boolean} Whether a reload was started
+   */
+  reloadForOutdatedConfig(serverStartedAt) {
+    const storageKey = `${this.name}:outdatedConfigReloadFor`;
+    const serverStart = String(serverStartedAt ?? "unknown");
+    try {
+      if (window.sessionStorage.getItem(storageKey) === serverStart) {
+        return false;
+      }
+      window.sessionStorage.setItem(storageKey, serverStart);
+    } catch {
+      // Without storage there is no loop guard - leave it to the hint.
+      return false;
+    }
+    Log.info(`${this.name}: config changed on the server - reloading the page`);
+    window.location.reload();
+    return true;
   },
 
   suspend() {
@@ -257,8 +264,8 @@ Module.register("MMM-HomeConnect2", {
       return "";
     }
 
-    const locale = this.getPreferredApiLanguage() || undefined;
-    const timeFormat = globalThis.config?.timeFormat;
+    const locale = this.getLanguage() || undefined;
+    const timeFormat = this.getMagicMirrorConfig().timeFormat;
     const hour12 = timeFormat === 12 ? true : timeFormat === 24 ? false : undefined;
 
     try {
@@ -334,7 +341,7 @@ Module.register("MMM-HomeConnect2", {
     );
 
     if (!this.devices || this.devices.length === 0) {
-      append(notices, views.renderLoading(ctx));
+      append(notices, views.isConfigRejected(this.lastInitStatus) ? null : views.renderLoading(ctx));
       return div;
     }
 

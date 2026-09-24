@@ -100,5 +100,33 @@ function wait(ms) {
     manager.clearAll();
   }
 
+  // A successful retry hands its result to the callback (which applies it to the
+  // device). A "selected" answer - /programs/active lagging behind the start -
+  // is retried, an "active" one ends the retries.
+  {
+    const answers = [
+      { haId: "ha-4", success: true, source: "selected", data: { key: "Synthetic", name: "Synthetics" } },
+      { haId: "ha-4", success: true, source: "active", data: { key: "Synthetic", name: "Synthetics" } },
+    ];
+    const calls = [];
+    const delivered = [];
+    const manager = new ActiveProgramManager({
+      fetchFn: async () => {
+        calls.push(Date.now());
+        return answers.shift() || { haId: "ha-4", success: false, error: "unexpected" };
+      },
+      broadcastFn: (_payload, _instanceId, result) => delivered.push(result?.source),
+      logger: { info() {}, debug() {}, error() {} },
+      maxRetries: 3,
+      retryDelayMs: 5,
+    });
+
+    manager.schedule([{ haId: "ha-4", name: "Dryer" }], "instance-d");
+    await wait(40);
+    assert.strictEqual(calls.length, 2);
+    assert.deepStrictEqual(delivered, ["selected", "active"]);
+    manager.clearAll();
+  }
+
   console.log("active-program-manager.test.js OK");
 })();

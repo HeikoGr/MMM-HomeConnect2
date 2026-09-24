@@ -9,7 +9,10 @@ flowchart TD
   A[Frontend starts module] --> B[sendSocketNotification: CONFIGURE]
   B --> C[Node Helper: handleConfigNotification]
 
-  C --> C0{Credentials match the running session?}
+  C --> CA{Credentials known to the server config?}
+  CA -->|"no: tab from before a restart"| CB[INIT_STATUS config_outdated - frontend reloads once]
+  CA -->|"yes, but no clientId"| CC[INIT_STATUS config_incomplete - no auth flow]
+  CA -->|yes| C0{Credentials match the running session?}
   C0 -->|"clientId/clientSecret differ"| C1[Reject instance and send INIT_STATUS isConfigMismatch]
   C0 -->|match| D[Continue initialization]
 
@@ -26,9 +29,9 @@ flowchart TD
 
   E --> G[Initial full snapshot]
   G --> G1[getHomeAppliances]
-  G1 --> G2[per connected or active-looking device: getStatus + getSettings]
-  G2 --> G3[broadcast DEVICES_UPDATE]
-  G3 --> G4[run active-program snapshot]
+  G1 --> G3[broadcast DEVICES_UPDATE]
+  G3 --> G2[per connected or active-looking device, paced: getStatus + one-off getSettings]
+  G2 --> G4[then: active-program snapshot - all devices on the first sync, running ones on routine resyncs]
 
   G1 --> H[Establish SSE subscriptions]
   H --> H0{Per-device channels supported?}
@@ -38,14 +41,14 @@ flowchart TD
   H2 --> H3
 
   subgraph SSE[SSE Runtime]
-    H3 --> I1[heartbeat check]
+    H3 --> I1[watchdog timer - restarted by every message, fires after 70 s of silence]
     I1 -->|traffic received| I2[mark traffic + apply device event]
     I2 --> I3[broadcast DEVICES_UPDATE if state changed]
     I3 --> I4[send INIT_STATUS sse_recovered when applicable]
 
     I1 -->|stale traffic| I5[send INIT_STATUS sse_stale]
-    I5 --> I6[rebuild subscriptions]
-    I6 --> I7[one full API resync: devices + programs]
+    I5 --> I6[rebuild subscriptions - token refreshed only if it expires within 15 min]
+    I6 --> I7[one API resync: devices + programs of running devices]
 
     H --> I8[EventSource error]
     I8 -->|401/403/429-like| I9[recreate streams with longer backoff]
@@ -57,13 +60,13 @@ flowchart TD
     P0 -->|yes| P1[skip]
     P0 -->|no| P2[fetchActiveProgramsForDevices]
 
-    P2 --> P3{connected OR appearsActive?}
+    P2 --> P3{connected OR appearsActive? routine resync: appearsActive only}
     P3 -->|no| P4[skip]
     P3 -->|yes| P5[getActiveProgram]
     P5 -->|200| P6[apply ACTIVE_PROGRAM]
     P5 -->|404| P7[getSelectedProgram]
     P7 -->|200| P8[apply SELECTED_PROGRAM]
-    P7 -->|no data| P9[getAvailablePrograms and getAvailableProgram]
+    P7 -->|no data| P9[getAvailablePrograms]
     P9 --> P10[apply AVAILABLE_PROGRAMS]
     P5 -->|429| P11[set rateLimitUntil from Retry-After]
   end
@@ -81,7 +84,7 @@ sequenceDiagram
   participant APM as ActiveProgramManager
   participant HC as HomeConnect API
 
-  FE->>NH: CONFIGURE(instanceId, config, preferredApiLanguage)
+  FE->>NH: CONFIGURE(instanceId, config, MagicMirror language)
   NH->>NH: compare clientId/clientSecret against sessionOwnerConfig
 
   alt credentials differ from shared session
@@ -100,11 +103,6 @@ sequenceDiagram
 
     DS->>HC: getHomeAppliances
     HC-->>DS: device list
-    loop per connected or active-looking device
-      DS->>HC: getStatus
-      DS->>HC: getSettings
-    end
-
     alt per-device events subscription succeeds
       DS->>HC: subscribe KEEP-ALIVE + /homeappliances/{haId}/events
     else fallback path
@@ -112,7 +110,11 @@ sequenceDiagram
     end
 
     DS-->>FE: DEVICES_UPDATE(devices)
-    NH->>APM: request active-program sync
+    loop per connected or active-looking device, one at a time
+      DS->>HC: getStatus
+      DS->>HC: getSettings (once per appliance and session)
+    end
+    NH->>APM: request active-program sync (after the status calls)
 
     loop sequential program fetch
       APM->>PS: fetchActiveProgramForDevice(haId)
@@ -123,7 +125,7 @@ sequenceDiagram
         HC-->>PS: not found
         PS->>HC: getSelectedProgram
         opt still no usable program
-          PS->>HC: getAvailablePrograms + getAvailableProgram
+          PS->>HC: getAvailablePrograms
         end
       else 429
         HC-->>PS: rate limit + Retry-After
@@ -134,16 +136,16 @@ sequenceDiagram
     NH-->>FE: DEVICES_UPDATE(program-enriched devices)
   end
 
-  loop heartbeat interval
-    DS->>DS: check stale threshold
-    alt traffic observed
-      DS->>DS: mark healthy stream
-    else stale
+  loop every SSE message (KEEP-ALIVE included)
+    DS->>DS: restart the 70 s watchdog timer
+    alt next message within 70 s
+      DS->>DS: stream healthy
+    else timer fires
       DS-->>FE: INIT_STATUS(sse_stale)
       DS->>NH: onSseStale()
       NH->>DS: reconnect subscriptions
       NH->>DS: refresh devices
-      NH->>APM: force active-program sync
+      NH->>APM: force active-program sync for running devices
     end
   end
 ```
@@ -153,6 +155,10 @@ sequenceDiagram
 - The frontend only renders backend-provided state; it does not trigger standalone API refresh loops.
 - Program label semantics are explicit: ACTIVE_PROGRAM, SELECTED_PROGRAM, and AVAILABLE_PROGRAMS.
 - Rate-limit handling uses server metadata (`Retry-After`) when available.
+- Routine resyncs (the 30-minute snapshot and the SSE watchdog) ask only running appliances for
+  their program. An idle appliance answers `/programs/active` with 404, which costs quota and counts
+  towards Home Connect's "10 failed requests in a row" block; when it starts, SSE triggers the fetch.
+- Program definitions (`/programs/available/{key}`) are not fetched: the display never used them.
 - Registered displays follow their browser sockets: a display whose socket is gone for 10 minutes
   is dropped from `clientInstances`, and every new socket connection is answered with
   `INIT_REQUIRED`, which makes the frontend send `CONFIGURE` again (e.g. after a server restart

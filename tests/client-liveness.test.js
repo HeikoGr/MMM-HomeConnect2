@@ -192,7 +192,7 @@ test("the frontend answers INIT_REQUIRED unless its first CONFIGURE is still pen
     instanceId: "hc_display",
     notifications: { EVENT },
     transport: { sendRequest: (action) => sent.push(action) },
-    getPreferredApiLanguage: () => "de",
+    getLanguage: () => "de",
     lifecycle: { render() {} },
   };
   const initRequired = { instanceId: "*", action: "INIT_REQUIRED", data: null };
