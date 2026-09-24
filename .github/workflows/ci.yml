@@ -29,9 +29,8 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
-          # Pinned to a specific patch release for reproducible CI runs. This is
-          # newer than the floor declared in package.json engines (>=20.18.1) -
-          # that floor itself isn't exercised by this job.
+          # Pinned to a patch release for reproducible runs. package.json engines follows
+          # MagicMirror's own floor (>=22.21.1); that exact floor is not exercised here.
           node-version: '22.22.2'
           cache: npm
 
