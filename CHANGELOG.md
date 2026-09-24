@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.3](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.5.2...v1.5.3) (2026-09-24)
+
+
+### 🐛 Fixes
+
+* session language, API call reduction, and code review fixes ([#63](https://github.com/HeikoGr/MMM-HomeConnect2/issues/63)) ([c20e5ee](https://github.com/HeikoGr/MMM-HomeConnect2/commit/c20e5ee0805ea93495e42b8abec319d2623625da))
+
 ## [1.5.2](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.5.1...v1.5.2) (2026-09-24)
 
 
