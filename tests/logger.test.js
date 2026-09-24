@@ -52,15 +52,19 @@ test("secrets in logged objects are redacted", () => {
   });
 });
 
-test("errors keep name, message and status; extra arguments are kept as details", () => {
+test("errors and plain values are logged as text; mixed arguments stay structured", () => {
   setModuleLogLevel("debug");
   const error = Object.assign(new Error("boom"), { statusCode: 429 });
-  const [first, second] = capture(() => {
+  const [first, second, third, fourth] = capture(() => {
     log.error("Failed to get devices:", error);
     log.info("Existing refresh token found - length:", 42);
+    log.error("Parse failed:", new TypeError("bad input"));
+    log.warn("Mixed:", "text", { haId: "ha-1" });
   });
-  assert.deepEqual(first.entry.context, { name: "Error", message: "boom", statusCode: 429 });
-  assert.deepEqual(second.entry.context, { details: 42 });
+  assert.equal(first.entry.context, "boom (429)");
+  assert.equal(second.entry.context, "42");
+  assert.equal(third.entry.context, "TypeError: bad input");
+  assert.deepEqual(fourth.entry.context, { details: ["text", { haId: "ha-1" }] });
 });
 
 test("level none silences everything", () => {
