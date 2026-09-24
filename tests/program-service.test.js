@@ -136,7 +136,6 @@ function createProgramService(overrides = {}) {
   // without fetching the program definition (its constraints were never displayed)
   {
     const { service } = createProgramService();
-    let availableProgramCalls = 0;
     service.attachClient({
       getActiveProgram: async () => ({
         success: false,
@@ -147,16 +146,6 @@ function createProgramService(overrides = {}) {
         success: true,
         data: { key: "LaundryCare.Dryer.Program.Synthetic", name: "Synthetics", options: [] },
       }),
-      getAvailableProgram: async () => {
-        availableProgramCalls += 1;
-        return {
-          success: true,
-          data: {
-            key: "LaundryCare.Dryer.Program.Synthetic",
-            options: [],
-          },
-        };
-      },
       applyEventToDevice() {},
     });
 
@@ -164,8 +153,6 @@ function createProgramService(overrides = {}) {
     assert.strictEqual(result.success, true);
     assert.strictEqual(result.source, "selected");
     assert.strictEqual(result.data.name, "Synthetics");
-
-    assert.strictEqual(availableProgramCalls, 0);
   }
 
   // fetchActiveProgramForDevice: falls back to available programs when active/selected are missing
@@ -180,20 +167,6 @@ function createProgramService(overrides = {}) {
           programs: [
             { key: "Cooking.Common.Program.Hood.Venting", name: "Fan setting" },
             { key: "Cooking.Common.Program.Hood.Automatic", name: "Automatic" },
-          ],
-        },
-      }),
-      getAvailableProgram: async () => ({
-        success: true,
-        data: {
-          key: "Cooking.Common.Program.Hood.Venting",
-          options: [
-            {
-              key: "Cooking.Common.Option.Hood.VentingLevel",
-              constraints: {
-                allowedvalues: ["Cooking.Hood.EnumType.Stage.FanStage01"],
-              },
-            },
           ],
         },
       }),
@@ -229,20 +202,6 @@ function createProgramService(overrides = {}) {
           programs: [
             { key: "Cooking.Common.Program.Hood.Venting", name: "Fan setting" },
             { key: "Cooking.Common.Program.Hood.Automatic", name: "Automatic" },
-          ],
-        },
-      }),
-      getAvailableProgram: async () => ({
-        success: true,
-        data: {
-          key: "Cooking.Common.Program.Hood.Venting",
-          options: [
-            {
-              key: "Cooking.Common.Option.Hood.VentingLevel",
-              constraints: {
-                allowedvalues: ["Cooking.Hood.EnumType.Stage.FanStage01"],
-              },
-            },
           ],
         },
       }),
