@@ -15,7 +15,7 @@ Wait a minute and try again. The Home Connect device-flow endpoints can enforce 
 ### SSE or live updates stop
 
 - The module rebuilds the SSE subscription automatically after 70 seconds without any traffic.
-  Enable `logLevel: "debug"` to see when that happens in the log.
+- Enable `logLevel: "debug"` to see when that happens in the log.
 
 ### Configuration mismatch banner
 
