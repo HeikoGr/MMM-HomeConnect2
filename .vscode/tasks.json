@@ -106,7 +106,7 @@
     {
       "label": "pm2: restart & clean",
       "type": "shell",
-      "command": "pkill -f 'pm2 log[s]'; pm2 stop all && pm2 flush && pm2 start all",
+      "command": "pm2 stop all && pm2 flush && pm2 start all",
       "presentation": {
         "echo": true,
         "reveal": "always",
