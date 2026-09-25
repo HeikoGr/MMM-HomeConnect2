@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.5.4](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.5.3...v1.5.4) (2026-09-25)
+
+
+### 🐛 Fixes
+
+* keep an API rate-limit block across restarts and answer every INIT_REQUIRED ([a0d6f49](https://github.com/HeikoGr/MMM-HomeConnect2/commit/a0d6f4995e0742e17d5029cb84735782d5e8469e))
+* update screenshot link to use absolute URL ([32156d9](https://github.com/HeikoGr/MMM-HomeConnect2/commit/32156d98df95f1d4dcc8567a05bae74a22a0ffd6))
+
+
+### 🧱 Refactoring
+
+* **api:** remove the unused single available-program call ([e555010](https://github.com/HeikoGr/MMM-HomeConnect2/commit/e5550102f6d61191b4cfa85abb2f21c6e542c7bf))
+* update mmm-shared to c310517 ([b53653d](https://github.com/HeikoGr/MMM-HomeConnect2/commit/b53653d1aefef2f800b6738e63eb81b3d14ac9ac))
+
+
+### 📚 Documentation
+
+* refresh the screenshot and add one of the appliance states ([6c62f7e](https://github.com/HeikoGr/MMM-HomeConnect2/commit/6c62f7e9d668f1a560f893d898e80ed6538ee1b9))
+
+
+### 🧪 Testing
+
+* run every tests/*.test.js instead of a hand-kept list ([ffa0ac6](https://github.com/HeikoGr/MMM-HomeConnect2/commit/ffa0ac62706054161ad9f6b27edd3b631baa766e))
+
+
+### 📦 Build & Dependencies
+
+* **deps:** require MagicMirror's node version ([8a48c6c](https://github.com/HeikoGr/MMM-HomeConnect2/commit/8a48c6cf0e0fc062c5c384f41553f85bd76d6e0b))
+
+
+### 🔧 Tooling
+
+* describe the pinned node version correctly ([0c2a487](https://github.com/HeikoGr/MMM-HomeConnect2/commit/0c2a487deb6a272a81d8e9962e9be50058b9fb1e))
+* develop branch model and PR title check ([0946cc2](https://github.com/HeikoGr/MMM-HomeConnect2/commit/0946cc213e944c99cf489ee39eea57cdabd5c6d8))
+
 ## [1.5.3](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.5.2...v1.5.3) (2026-09-24)
 
 
