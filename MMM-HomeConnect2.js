@@ -248,10 +248,10 @@ Module.register("MMM-HomeConnect2", {
     return window.HomeConnectDisplayState;
   },
 
+  // Always loaded through getScripts(). Were it missing, failing loudly beats rendering
+  // "no active appliances" from stand-in functions.
   getDeviceUtils() {
-    const browserUtils =
-      typeof window !== "undefined" && window.HomeConnectDeviceUtils ? window.HomeConnectDeviceUtils : {};
-    return this.getDisplayState().withDeviceUtilsFallbacks(browserUtils);
+    return window.HomeConnectDeviceUtils;
   },
 
   formatClockTime(timestamp) {

@@ -233,7 +233,12 @@ module.exports = NodeHelper.create({
 
     try {
       this.activeProgramManager = new ActiveProgramManager({
-        fetchFn: this.fetchActiveProgramForDevice.bind(this),
+        // Retries run on their own timer; during a rate-limit block they get a 429 result
+        // without an API call, which ends them (a 429 is not retryable).
+        fetchFn: (haId, deviceName) =>
+          this.isRateLimited()
+            ? Promise.resolve({ haId, success: false, statusCode: 429, error: "Rate limit active" })
+            : this.fetchActiveProgramForDevice(haId, deviceName),
         // A retry's result has to reach the device object - broadcasting it alone
         // left the display on its previous state.
         broadcastFn: (programData, requester, result) => {
@@ -334,9 +339,8 @@ module.exports = NodeHelper.create({
         return;
       }
 
-      // The scheduled snapshot is the one caller that runs with nobody watching,
-      // so it must not spend quota while a backoff is active. Forced program
-      // fetches deliberately bypass the check downstream, hence the guard here.
+      // The scheduled snapshot runs with nobody watching, so it must not spend
+      // quota while a backoff is active (the device refresh has no check of its own).
       if (this.isRateLimited()) {
         const remainingSeconds = Math.ceil((this.getRateLimitUntil() - Date.now()) / 1000);
         log.info(`Skipping scheduled snapshot - rate limited for another ${remainingSeconds}s`);
