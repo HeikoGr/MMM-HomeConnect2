@@ -33,6 +33,11 @@ fixes it.
 
 The module already throttles some backend requests. If the API returns HTTP 429, wait for the internal backoff window before retrying.
 
+The block is saved to `rate_limit.json` next to the module, so a restart during it does not start
+a new session (token refresh, snapshot, event streams) that would only draw more 429s. The display
+shows the remaining time, and the session starts on its own once the block ends. Delete the file
+to start immediately anyway.
+
 ### Token problems
 
 - Check that `refresh_token.json` exists and is writable.

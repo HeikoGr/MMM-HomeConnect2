@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("node:assert");
+const fs = require("node:fs");
 const Module = require("node:module");
 const os = require("node:os");
 const path = require("node:path");
@@ -8,6 +9,7 @@ const path = require("node:path");
 // The auth paths persist and delete the refresh token file. Redirect that path into
 // a temp directory so running the tests never touches a real Home Connect session.
 const testRefreshTokenPath = path.join(os.tmpdir(), "mmm-homeconnect2-test-refresh-token.json");
+const testRateLimitPath = path.join(os.tmpdir(), "mmm-homeconnect2-test-rate-limit.json");
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -22,7 +24,7 @@ Module._load = function patchedLoad(request, parent, isMain) {
   }
   if (request.endsWith("module-paths")) {
     const actual = originalLoad.call(this, request, parent, isMain);
-    return { ...actual, refreshTokenPath: testRefreshTokenPath };
+    return { ...actual, refreshTokenPath: testRefreshTokenPath, rateLimitPath: testRateLimitPath };
   }
   return originalLoad.call(this, request, parent, isMain);
 };
@@ -96,6 +98,54 @@ function registeredInstances() {
   assert.strictEqual(helper.isRateLimited(), true);
   helper.setRateLimitUntil(0);
   assert.strictEqual(helper.isRateLimited(), false);
+
+  // A block survives a restart: it is saved to disk and restored by init().
+  resetHelperState();
+  const persistedUntil = Date.now() + 60 * 60 * 1000;
+  helper.setRateLimitUntil(persistedUntil);
+  assert.strictEqual(JSON.parse(fs.readFileSync(testRateLimitPath, "utf8")).until, persistedUntil);
+  helper.globalSession.rateLimitUntil = 0; // what a fresh process starts with
+  helper.restoreRateLimit();
+  assert.strictEqual(helper.getRateLimitUntil(), persistedUntil);
+
+  // While blocked, the session start neither reads the token nor calls the API;
+  // it waits for the block to end and tells the display why.
+  const deferStatuses = [];
+  let tokenReads = 0;
+  const emitInitStatusBeforeDefer = helper.emitInitStatus;
+  const authServiceBeforeDefer = helper.authService;
+  helper.emitInitStatus = (status, payload = {}) => deferStatuses.push({ status, ...payload });
+  helper.authService = {
+    readRefreshTokenFromFile: () => {
+      tokenReads += 1;
+      return "token";
+    },
+  };
+  helper.checkTokenAndInitialize("display-1");
+  assert.strictEqual(tokenReads, 0);
+  assert.ok(helper.rateLimitDeferTimer, "the start is scheduled for the end of the block");
+  assert.strictEqual(deferStatuses[0].status, "device_error");
+  assert.strictEqual(deferStatuses[0].isRateLimit, true);
+  assert.strictEqual(deferStatuses[0].instanceId, "display-1");
+  assert.ok(deferStatuses[0].rateLimitSeconds > 3500);
+
+  // A display connecting meanwhile gets the same notice instead of "loading".
+  helper.handleConfigNotificationSubsequent("display-2");
+  assert.strictEqual(deferStatuses[1].instanceId, "display-2");
+  assert.strictEqual(deferStatuses[1].isRateLimit, true);
+
+  clearTimeout(helper.rateLimitDeferTimer);
+  helper.rateLimitDeferTimer = null;
+  helper.emitInitStatus = emitInitStatusBeforeDefer;
+  helper.authService = authServiceBeforeDefer;
+
+  // Lifting the block removes the file; an elapsed file restores nothing.
+  helper.setRateLimitUntil(0);
+  assert.strictEqual(fs.existsSync(testRateLimitPath), false);
+  fs.writeFileSync(testRateLimitPath, JSON.stringify({ until: Date.now() - 1000 }));
+  helper.restoreRateLimit();
+  assert.strictEqual(helper.isRateLimited(), false);
+  fs.rmSync(testRateLimitPath, { force: true });
 
   // Debug stats record the latest traffic timestamps and API counts.
   resetHelperState();
@@ -929,6 +979,15 @@ function registeredInstances() {
       assert.ok(Math.abs(sentEvents[0].data.expires_in - 1200) <= 1);
       assert.strictEqual(helper.pendingAuthInfo.payload.expires_in, 1800, "the stored flow stays unchanged");
       helper.pendingAuthInfo = null;
+
+      // Without a login code (session start with the saved token) a repeated
+      // CONFIGURE must not switch the display into the login view.
+      const startStatuses = [];
+      const emitInitStatusBeforeRepeat = helper.emitInitStatus;
+      helper.emitInitStatus = (status, payload) => startStatuses.push({ status, instanceId: payload?.instanceId });
+      require("../lib/client-sessions").notifyAuthInProgress.call(helper, "page-load");
+      helper.emitInitStatus = emitInitStatusBeforeRepeat;
+      assert.deepStrictEqual(startStatuses, [{ status: "initializing", instanceId: "page-load" }]);
 
       // Saved token at boot, network not up yet: retry scheduled, nothing unhandled.
       helper.authService = Object.assign(Object.create(originalAuthService), {

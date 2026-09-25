@@ -26,6 +26,7 @@ function loadHelper() {
       return {
         ...actual,
         refreshTokenPath: path.join(os.tmpdir(), "mmm-homeconnect2-liveness-token.json"),
+        rateLimitPath: path.join(os.tmpdir(), "mmm-homeconnect2-liveness-rate-limit.json"),
       };
     }
     return originalLoad.call(this, request, parent, isMain);
@@ -177,7 +178,7 @@ test("a display that reconnects and registers again is kept", (t) => {
   assert.deepEqual(reached(), ["hc_display"]);
 });
 
-test("the frontend answers INIT_REQUIRED unless its first CONFIGURE is still pending", () => {
+test("the frontend answers every INIT_REQUIRED, also one crossing its first CONFIGURE", () => {
   const modulePath = require.resolve("../MMM-HomeConnect2.js");
   let definition;
   global.Module = { register: (_name, d) => (definition = d) };
@@ -198,11 +199,12 @@ test("the frontend answers INIT_REQUIRED unless its first CONFIGURE is still pen
   const initRequired = { instanceId: "*", action: "INIT_REQUIRED", data: null };
 
   instance.notificationReceived("ALL_MODULES_STARTED");
+  // The server restarted before it answered the first CONFIGURE: the new
+  // connection's greeting must register the display again.
   instance.socketNotificationReceived(EVENT, initRequired);
-  assert.deepEqual(sent, ["CONFIGURE"], "the greeting crossing the first CONFIGURE is ignored");
+  assert.deepEqual(sent, ["CONFIGURE", "CONFIGURE"]);
 
-  // The backend answered, later the server restarts and greets again.
-  instance.socketNotificationReceived(EVENT, { instanceId: "hc_display", action: "DEBUG_STATS", data: {} });
-  instance.socketNotificationReceived(EVENT, initRequired);
+  // A greeting for another display is not for this one.
+  instance.socketNotificationReceived(EVENT, { ...initRequired, instanceId: "other" });
   assert.deepEqual(sent, ["CONFIGURE", "CONFIGURE"]);
 });

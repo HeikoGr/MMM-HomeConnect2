@@ -4,6 +4,7 @@ const AuthService = require("./lib/auth-service");
 const DeviceService = require("./lib/device-service");
 const ProgramService = require("./lib/program-service");
 const { ProgramFetchCoordinator } = require("./lib/program-fetch-coordinator");
+const { persistRateLimitUntil, readRateLimitUntil } = require("./lib/rate-limit-store");
 const shared = require("./lib/mmm-shared/mmm-shared");
 const { createClientRegistry, formatLogEntry } = require("./lib/mmm-shared/backend-session");
 const NodeHelper = require("node_helper"),
@@ -79,6 +80,8 @@ module.exports = NodeHelper.create({
   hcInitTimeoutMs: 30 * 1000,
   headlessAuthRetryTimer: null,
   invalidGrantRetryTimer: null,
+  // Session start postponed until a rate-limit block ends (see deferWhileRateLimited).
+  rateLimitDeferTimer: null,
   sessionOwnerConfig: null,
   // The last failed device flow, replayed to displays that connect afterwards.
   lastAuthFailure: null,
@@ -101,8 +104,21 @@ module.exports = NodeHelper.create({
   },
 
   setRateLimitUntil(untilTs) {
-    globalSession.rateLimitUntil = Math.max(0, Number(untilTs || 0));
-    return globalSession.rateLimitUntil;
+    const until = Math.max(0, Number(untilTs || 0));
+    if (until !== globalSession.rateLimitUntil) {
+      persistRateLimitUntil(until);
+    }
+    globalSession.rateLimitUntil = until;
+    return until;
+  },
+
+  // A block from before the restart still holds; checkTokenAndInitialize waits it out.
+  restoreRateLimit() {
+    const until = readRateLimitUntil();
+    if (until > (globalSession.rateLimitUntil || 0)) {
+      globalSession.rateLimitUntil = until;
+      log.warn(`Rate limit from before the restart still active until ${new Date(until).toISOString()}`);
+    }
   },
 
   emitStatus(notification, messageMap, status, payload = {}, options = {}) {
@@ -188,6 +204,7 @@ module.exports = NodeHelper.create({
   init() {
     log.info("init module helper: MMM-HomeConnect2 (session-based)");
     this.notifications = shared.buildNotifications("MMM-HomeConnect2");
+    this.restoreRateLimit();
 
     this.authService = new AuthService({
       logger: log,
@@ -360,6 +377,10 @@ module.exports = NodeHelper.create({
     if (this.invalidGrantRetryTimer) {
       clearTimeout(this.invalidGrantRetryTimer);
       this.invalidGrantRetryTimer = null;
+    }
+    if (this.rateLimitDeferTimer) {
+      clearTimeout(this.rateLimitDeferTimer);
+      this.rateLimitDeferTimer = null;
     }
     this.clearHomeConnectInitRetry();
     this.clearPeriodicFullSnapshotRefresh();

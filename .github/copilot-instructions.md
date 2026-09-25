@@ -47,6 +47,8 @@
   ever become text nodes. Never assign `innerHTML` - the frontend tests use a fake DOM whose
   `innerHTML` setter throws.
 - `refresh_token.json` is a credential: written with mode `0600`, gitignored, never logged.
+- `rate_limit.json` (`lib/rate-limit-store.js`, gitignored) keeps an API block across restarts;
+  `setRateLimitUntil()` writes it, `init()` restores it, `checkTokenAndInitialize()` waits it out.
 - Backend code logs through `log.debug|info|warn|error(message, ...details)` from
   `lib/logger.js`, which sits on `createLogger` from `mmm-shared` and writes through MagicMirror's
   `Log` (global `logLevel`; the session `logLevel` can only narrow it; redaction

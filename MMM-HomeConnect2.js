@@ -112,7 +112,6 @@ Module.register("MMM-HomeConnect2", {
   },
 
   sendConfigure() {
-    this.configurePendingSince = Date.now();
     this.transport.sendRequest("CONFIGURE", {
       config: {
         ...this.config,
@@ -128,14 +127,12 @@ Module.register("MMM-HomeConnect2", {
   /**
    * The backend greets every new socket connection with INIT_REQUIRED - after a
    * server restart or a long network drop this display is unknown there and
-   * must register again. Right after page load the greeting only crosses the
-   * first CONFIGURE, so it is ignored while that one is unanswered.
+   * must register again. Always answered: right after page load the greeting
+   * may cross the first CONFIGURE, and the backend takes the second one as a
+   * repeat, while ignoring it could leave the display unregistered when the
+   * server restarted before it answered the first.
    */
   handleInitRequired() {
-    const pendingMs = Date.now() - (this.configurePendingSince || 0);
-    if (this.configurePendingSince && pendingMs < 30 * 1000) {
-      return;
-    }
     this.sendConfigure();
   },
 
@@ -158,8 +155,6 @@ Module.register("MMM-HomeConnect2", {
 
     const safePayload = payload?.data ?? {};
     const action = payload?.action || "";
-    // Any answer means the backend knows this display.
-    this.configurePendingSince = null;
 
     switch (action) {
       case "DEVICES_UPDATE":

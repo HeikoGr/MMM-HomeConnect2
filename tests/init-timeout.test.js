@@ -40,7 +40,11 @@ function loadHelper() {
     }
     if (request.endsWith("module-paths")) {
       const actual = originalLoad.call(this, request, parent, isMain);
-      return { ...actual, refreshTokenPath: path.join(os.tmpdir(), "mmm-homeconnect2-init-timeout-token.json") };
+      return {
+        ...actual,
+        refreshTokenPath: path.join(os.tmpdir(), "mmm-homeconnect2-init-timeout-token.json"),
+        rateLimitPath: path.join(os.tmpdir(), "mmm-homeconnect2-init-timeout-rate-limit.json"),
+      };
     }
     return originalLoad.call(this, request, parent, isMain);
   };
