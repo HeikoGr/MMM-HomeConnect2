@@ -135,3 +135,28 @@ test("an init that fails in time is reported once, not again by the timeout", as
 
   assert.equal(statuses.filter((entry) => entry.status === "hc_error").length, 1);
 });
+
+test("a 429 during init sets the rate-limit block and the retry waits it out", async (t) => {
+  const { helper, statuses } = setup(t);
+  const fs = require("node:fs");
+  t.after(() => fs.rmSync(path.join(os.tmpdir(), "mmm-homeconnect2-init-timeout-rate-limit.json"), { force: true }));
+  const delays = [];
+  const schedule = helper.scheduleHomeConnectInitRetry;
+  helper.scheduleHomeConnectInitRetry = function spy() {
+    const delay = schedule.call(this);
+    delays.push(delay);
+    return delay;
+  };
+  helper.hcInitTimeoutMs = 1000;
+
+  const attempt = helper.initializeHomeConnect("saved");
+  created[0].fail(Object.assign(new Error("HTTP 429 Too Many Requests"), { statusCode: 429, retryAfterSeconds: 120 }));
+  await assert.rejects(attempt, /429/);
+
+  assert.ok(helper.isRateLimited(), "the block is recorded");
+  assert.ok(delays[0] >= 120 * 1000, `the retry waits for the block, not ${delays[0]} ms`);
+  assert.ok(
+    statuses.some((entry) => entry.isRateLimit === true),
+    "the displays are told about the rate limit",
+  );
+});

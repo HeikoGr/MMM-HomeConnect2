@@ -1072,5 +1072,31 @@ function registeredInstances() {
     assert.deepStrictEqual(fetched, []);
   }
 
+  // A rate-limit block holds for forced active-program requests too (SSE, follow-ups):
+  // during it every call could only draw another 429.
+  {
+    const { ProgramFetchCoordinator } = require("../lib/program-fetch-coordinator");
+    const fetched = [];
+    const statuses = [];
+    const coordinator = new ProgramFetchCoordinator({
+      session: { rateLimitUntil: Date.now() + 60000, lastActiveProgramFetch: 0, MIN_ACTIVE_PROGRAM_INTERVAL: 0 },
+      getHc: () => ({}),
+      getDeviceService: () => ({ devices: new Map([["ha-run", { haId: "ha-run", connected: true }]]) }),
+      getProgramService: () => null,
+      getActiveProgramManager: () => null,
+      isRateLimited: () => true,
+      emitInitStatus: (status) => statuses.push(status),
+      request: () => {},
+      runFetch: (targetDevices) => fetched.push(targetDevices.map((device) => device.haId)),
+      fetchOne: async () => ({}),
+      broadcastProgramData: () => {},
+      handleError: () => {},
+    });
+
+    coordinator.request({ instanceId: "sse_program_detected", haIds: ["ha-run"], force: true });
+    assert.deepStrictEqual(fetched, [], "A forced request must not reach the API during a block");
+    assert.deepStrictEqual(statuses, [], "A skipped background request must not flash a notice on the displays");
+  }
+
   console.log("node-helper-session.test.js OK");
 })();

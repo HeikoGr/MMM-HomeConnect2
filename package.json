@@ -1,6 +1,6 @@
 {
   "name": "mmm-homeconnect2",
-  "version": "1.5.3",
+  "version": "1.5.4",
   "description": "MagicMirror² Module for Home Connect",
   "main": "MMM-HomeConnect2.js",
   "author": "HeikoGr",
@@ -56,7 +56,7 @@
     "commit-msg": "npx --no-install commitlint --edit $1 && node scripts/check-commit-scope.js $1"
   },
   "allowScripts": {
-    "simple-git-hooks@2.13.1": true
+    "simple-git-hooks@2.14.0": true
   },
   "bugs": {
     "url": "https://github.com/HeikoGr/MMM-HomeConnect2/issues"

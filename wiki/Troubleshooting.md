@@ -38,6 +38,10 @@ a new session (token refresh, snapshot, event streams) that would only draw more
 shows the remaining time, and the session starts on its own once the block ends. Delete the file
 to start immediately anyway.
 
+During a block the module sends nothing to the API at all: a 429 while the session starts is
+recorded as a block (honouring `Retry-After`), the start is retried only after it, and program
+requests triggered by appliance events wait as well. The scheduled snapshot catches up afterwards.
+
 ### Token problems
 
 - Check that `refresh_token.json` exists and is writable.

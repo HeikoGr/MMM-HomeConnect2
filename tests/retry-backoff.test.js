@@ -43,8 +43,10 @@ function makeFakeEventSource() {
     try {
       await hc.refreshTokens();
 
+      // Remaining time, read a moment after the block was set: allow a little clock drift, the
+      // point is "about a minute" rather than a fixed retry of a few seconds.
       const firstBackoffMs = hc.tokenRefreshBackoffRemainingMs();
-      assert.ok(firstBackoffMs >= 60 * 1000, `Expected the first retry to wait at least 60s, got ${firstBackoffMs}ms`);
+      assert.ok(firstBackoffMs >= 59 * 1000, `Expected the first retry to wait about 60s, got ${firstBackoffMs}ms`);
       assert.strictEqual(rateLimitEvents.length, 1, "Expected a rateLimit report on 429");
       assert.strictEqual(rateLimitEvents[0].source, "token");
 
