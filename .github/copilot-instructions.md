@@ -51,6 +51,22 @@
   `setRateLimitUntil()` writes it, `init()` restores it, `checkTokenAndInitialize()` waits it out.
   The block holds for every automatic path: a 429 during init sets it and the init retry waits
   (`lib/auth-orchestration.js`), forced active-program requests and their retries are skipped.
+- `run_state.json` (`lib/run-state-store.js`, gitignored) keeps when each running program was
+  first seen (`_remainingObservedAt`, `_initialRemaining`). The API has no start time, and
+  appliances without `EstimatedTotalProgramTime`/`ProgramProgress` (the dryer reports a constant
+  0 %) derive progress from it. `DeviceService.broadcastDevices()` reconciles it: records a new
+  run, restores an older start after a restart if program key and remaining time still fit, and
+  drops the record once the operation state says nothing runs. No API calls involved.
+  The records also keep options, forecasts and phase changes of the run, and whether its
+  start was watched (`startObserved`: the appliance was seen idle before).
+- `program_stats.json` (`lib/program-stats.js`, gitignored): per appliance a program catalog
+  (union of every `/programs/available` answer, so bought/downloaded programs join it) and per
+  program counters plus the last 20 runs with a summary. Ended runs come from the reconcile
+  above; a duration is only kept when start and end were both watched. `DeviceService` fetches
+  a catalog only from an idle appliance in a known state (while a program runs,
+  `/programs/available` lists only that program): when it has no complete one (file missing, new
+  appliance), when it is stale (an unknown program ran), or once per unknown selected program and
+  process. Never while rate limited; a failed appliance waits an hour.
 - Backend code logs through `log.debug|info|warn|error(message, ...details)` from
   `lib/logger.js`, which sits on `createLogger` from `mmm-shared` and writes through MagicMirror's
   `Log` (global `logLevel`; the session `logLevel` can only narrow it; redaction

@@ -5,6 +5,8 @@ const DeviceService = require("./lib/device-service");
 const ProgramService = require("./lib/program-service");
 const { ProgramFetchCoordinator } = require("./lib/program-fetch-coordinator");
 const { persistRateLimitUntil, readRateLimitUntil } = require("./lib/rate-limit-store");
+const { persistProgramStats, readProgramStats } = require("./lib/program-stats");
+const { persistRunStates, readRunStates } = require("./lib/run-state-store");
 const shared = require("./lib/mmm-shared/mmm-shared");
 const { createClientRegistry, formatLogEntry } = require("./lib/mmm-shared/backend-session");
 const NodeHelper = require("node_helper"),
@@ -224,6 +226,9 @@ module.exports = NodeHelper.create({
         this.deviceRefreshInFlight = false;
       },
       setRateLimitUntil: this.setRateLimitUntil.bind(this),
+      runStateStore: { read: readRunStates, persist: persistRunStates },
+      programStatsStore: { read: readProgramStats, persist: persistProgramStats },
+      isRateLimited: this.isRateLimited.bind(this),
       debugHooks: {
         recordApiCall: this.recordApiCall.bind(this),
         recordSseEvent: this.recordSseEvent.bind(this),
