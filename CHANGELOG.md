@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.0](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.5.4...v1.6.0) (2026-09-26)
+
+
+### 🔌 Features
+
+* keep program start times across restarts and record program statistics ([#75](https://github.com/HeikoGr/MMM-HomeConnect2/issues/75)) ([47663cd](https://github.com/HeikoGr/MMM-HomeConnect2/commit/47663cde21fe20d75b448f7d5775c86d60a63451))
+
+
+### 🐛 Fixes
+
+* time program runs from the real start to the program end ([#77](https://github.com/HeikoGr/MMM-HomeConnect2/issues/77)) ([b892e99](https://github.com/HeikoGr/MMM-HomeConnect2/commit/b892e991210a5b7c6d07ea4668fc3ddcf508d6ad))
+
 ## [1.5.4](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.5.3...v1.5.4) (2026-09-25)
 
 
