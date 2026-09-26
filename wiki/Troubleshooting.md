@@ -42,6 +42,22 @@ During a block the module sends nothing to the API at all: a 429 while the sessi
 recorded as a block (honouring `Retry-After`), the start is retried only after it, and program
 requests triggered by appliance events wait as well. The scheduled snapshot catches up afterwards.
 
+### Progress bar starts at 0 % after a restart
+
+Home Connect reports no start time for a program. For appliances without a real progress value
+(some dryers), the bar is elapsed time / (elapsed + remaining), counted from the moment the module
+first saw the program running. That moment is saved to `run_state.json` next to the module and
+restored after a restart, as long as the program and its remaining time still fit the saved run.
+Delete the file to start counting afresh.
+
+The module also keeps `program_stats.json` next to it: per appliance the list of available
+programs and, per program, counters and the last 20 runs (a duration only when both start and end
+were watched). A run starts when the program starts (not when a delayed start was set) and ends
+when the program ends (not when a dryer's wrinkle guard is over); an error that the appliance
+recovers from does not split it. It is filled from events the module receives anyway; the program
+list is fetched once from an idle appliance and again only when an unknown program shows up. Both
+files are gitignored and can be deleted at any time.
+
 ### Token problems
 
 - Check that `refresh_token.json` exists and is writable.
