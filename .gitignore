@@ -18,9 +18,11 @@ magicmirror-check-results.md
 # Playwright MCP default output dir (the devcontainer config writes to /tmp instead)
 .playwright-mcp/
 
-# Home Connect OAuth token store and the persisted API rate-limit block
+# Home Connect OAuth token store, the persisted API rate-limit block, program start times and statistics
 refresh_token.json
 rate_limit.json
+run_state.json
+program_stats.json
 
 # Local runtime cache
 cache/
