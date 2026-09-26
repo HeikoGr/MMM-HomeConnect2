@@ -4,6 +4,7 @@ const assert = require("node:assert");
 const { reconcileRunStates } = require("../lib/run-state-store");
 const { addEndedRun, mergeProgramCatalog, summarize } = require("../lib/program-stats");
 const DeviceService = require("../lib/device-service");
+const HomeConnect = require("../lib/homeconnect-api");
 
 const STATE = (label) => `BSH.Common.EnumType.OperationState.${label}`;
 const PROGRAM = "LaundryCare.Dryer.Program.Synthetic";
@@ -110,10 +111,14 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     assert.strictEqual(addEndedRun({}, ended[0]).durationS, null);
   }
 
-  // Outcomes: an error ends as "error", a run replaced by another program as "unobserved".
+  // Outcomes: a run that ends after an error ends as "error", a run replaced by another
+  // program as "unobserved". The error state itself does not end the run.
   {
     const records = { dryer: { programKey: PROGRAM, observedAt: T0, initialRemaining: 3000 } };
-    const { ended } = reconcileRunStates([{ haId: "dryer", OperationState: STATE("Error") }], records, T0 + MIN);
+    const inError = reconcileRunStates([{ haId: "dryer", OperationState: STATE("Error") }], records, T0 + MIN);
+    assert.strictEqual(inError.ended.length, 0);
+    assert.strictEqual(records.dryer.sawError, true);
+    const { ended } = reconcileRunStates([{ haId: "dryer", OperationState: STATE("Ready") }], records, T0 + 2 * MIN);
     assert.strictEqual(ended[0].outcome, "error");
 
     const replaced = {
@@ -122,6 +127,128 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const result = reconcileRunStates([runningDryer({ _remainingObservedAt: T0 + MIN })], replaced, T0 + MIN);
     assert.strictEqual(result.ended[0].outcome, "unobserved");
     assert.strictEqual(replaced.dryer.programKey, PROGRAM);
+  }
+
+  // An appliance that recovers from an error resumes the same run: one start, not two,
+  // and a run that then finishes counts as finished with its duration from the real start.
+  {
+    const records = {};
+    const session = { seenIdle: new Set(["dryer"]), seenRunning: new Set() };
+    reconcileRunStates([runningDryer()], records, T0, session);
+    const errorResult = reconcileRunStates(
+      [runningDryer({ OperationState: STATE("Error") })],
+      records,
+      T0 + 10 * MIN,
+      session,
+    );
+    assert.strictEqual(errorResult.ended.length, 0);
+    const resumed = reconcileRunStates([runningDryer({ RemainingProgramTime: 2000 })], records, T0 + 20 * MIN, session);
+    assert.strictEqual(resumed.ended.length, 0);
+    assert.strictEqual(records.dryer.observedAt, T0);
+    const { ended } = reconcileRunStates(
+      [{ haId: "dryer", OperationState: STATE("Finished") }],
+      records,
+      T0 + 50 * MIN,
+      session,
+    );
+    assert.strictEqual(ended.length, 1);
+    assert.strictEqual(ended[0].outcome, "finished");
+    const stats = {};
+    const run = addEndedRun(stats, ended[0]);
+    assert.strictEqual(stats.dryer.programs[PROGRAM].starts, 1);
+    assert.strictEqual(run.durationS, 50 * 60);
+  }
+
+  // A dryer stays in Run through its wrinkle guard (seen live: remaining 0, progress
+  // 100, up to 120 min more). The run ends when the program reached its end, not when
+  // the appliance leaves Run - and it still counts as finished if the door is opened
+  // during the wrinkle guard.
+  {
+    const records = {};
+    const session = { seenIdle: new Set(["dryer"]), seenRunning: new Set() };
+    reconcileRunStates([runningDryer()], records, T0, session);
+    const wrinkleGuard = runningDryer({ RemainingProgramTime: 0, ProgramProgress: 100 });
+    delete wrinkleGuard._initialRemaining;
+    delete wrinkleGuard._remainingObservedAt;
+    const during = reconcileRunStates([wrinkleGuard], records, T0 + 55 * MIN, session);
+    assert.strictEqual(during.ended.length, 0);
+    reconcileRunStates([wrinkleGuard], records, T0 + 100 * MIN, session);
+    const { ended } = reconcileRunStates(
+      [{ haId: "dryer", OperationState: STATE("Ready") }],
+      records,
+      T0 + 175 * MIN,
+      session,
+    );
+    assert.strictEqual(ended[0].outcome, "finished");
+    assert.strictEqual(addEndedRun({}, ended[0]).durationS, 55 * 60);
+
+    // After a restart during the wrinkle guard the end is not known: no duration.
+    const restartedRecords = {
+      dryer: { programKey: PROGRAM, observedAt: T0, initialRemaining: 3000, startObserved: true },
+    };
+    const fresh = { seenIdle: new Set(), seenRunning: new Set() };
+    reconcileRunStates([wrinkleGuard], restartedRecords, T0 + 90 * MIN, fresh);
+    const afterRestart = reconcileRunStates(
+      [{ haId: "dryer", OperationState: STATE("Finished") }],
+      restartedRecords,
+      T0 + 175 * MIN,
+      fresh,
+    );
+    assert.strictEqual(afterRestart.ended[0].outcome, "finished");
+    assert.strictEqual(addEndedRun({}, afterRestart.ended[0]).durationS, null);
+  }
+
+  // Delayed start, from the appliance's events: the run starts when the appliance
+  // leaves DelayedStart, not when the remaining time was first reported. Covers
+  // both event orders a status snapshot can have.
+  for (const remainingFirst of [false, true]) {
+    const realNow = Date.now;
+    let now = T0;
+    Date.now = () => now;
+    try {
+      const hc = new HomeConnect("client", "secret", "refresh");
+      const device = {
+        haId: "dishwasher",
+        name: "Geschirrspüler",
+        ActiveProgramKey: "Dishcare.Dishwasher.Program.Eco50",
+        ActiveProgramSource: "active",
+      };
+      const delayed = { key: "BSH.Common.Status.OperationState", value: STATE("DelayedStart") };
+      const remaining = { key: "BSH.Common.Option.RemainingProgramTime", value: 9000 };
+      for (const event of remainingFirst ? [remaining, delayed] : [delayed, remaining]) {
+        hc.applyEventToDevice(device, event);
+      }
+      assert.strictEqual(device._remainingObservedAt, undefined, "no start time while the start is delayed");
+
+      const records = {};
+      const session = { seenIdle: new Set(), seenRunning: new Set() };
+      reconcileRunStates([device], records, now, session);
+      assert.strictEqual(records.dishwasher, undefined);
+
+      // Three hours later the program starts.
+      now = T0 + 180 * MIN;
+      hc.applyEventToDevice(device, { key: "BSH.Common.Status.OperationState", value: STATE("Run") });
+      assert.strictEqual(device._remainingObservedAt, now);
+      assert.strictEqual(device._initialRemaining, 9000);
+      reconcileRunStates([device], records, now, session);
+      assert.strictEqual(records.dishwasher.observedAt, T0 + 180 * MIN);
+      assert.strictEqual(records.dishwasher.startObserved, true);
+
+      // A restart one hour into the run restores that start.
+      now = T0 + 240 * MIN;
+      const restarted = { ...device, RemainingProgramTime: 5400, _initialRemaining: 5400, _remainingObservedAt: now };
+      const restore = reconcileRunStates([restarted], records, now, {});
+      assert.strictEqual(restore.ended.length, 0);
+      assert.strictEqual(restarted._remainingObservedAt, T0 + 180 * MIN);
+
+      // Finished after 150 minutes of running.
+      now = T0 + 330 * MIN;
+      hc.applyEventToDevice(device, { key: "BSH.Common.Status.OperationState", value: STATE("Finished") });
+      const { ended } = reconcileRunStates([device], records, now, session);
+      assert.strictEqual(addEndedRun({}, ended[0]).durationS, 150 * 60);
+    } finally {
+      Date.now = realNow;
+    }
   }
 
   // Counters and the recent-runs window.

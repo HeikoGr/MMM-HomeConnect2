@@ -58,7 +58,16 @@
   run, restores an older start after a restart if program key and remaining time still fit, and
   drops the record once the operation state says nothing runs. No API calls involved.
   The records also keep options, forecasts and phase changes of the run, and whether its
-  start was watched (`startObserved`: the appliance was seen idle before).
+  start was watched (`startObserved`: the appliance was seen idle, finished or in `DelayedStart`
+  before). Three rules keep start and end honest:
+  - A delayed start is not the program start: `applyEventToDevice()` sets no
+    `_remainingObservedAt` in `DelayedStart` and starts it on the switch `DelayedStart → Run`.
+  - `Error` does not end a run (the appliance may resume it); the record gets `sawError`, and a
+    run that then ends without finishing counts as `error`.
+  - The run ends when the program does: remaining time 0 or progress 100 while still in `Run` (a
+    dryer's wrinkle guard, up to 120 min) sets `programEndedAt`. Its time is a real end only if
+    the run was watched up to it (`programEndObserved`); such a run counts as `finished` even if
+    the door is opened during the wrinkle guard.
 - `program_stats.json` (`lib/program-stats.js`, gitignored): per appliance a program catalog
   (union of every `/programs/available` answer, so bought/downloaded programs join it) and per
   program counters plus the last 20 runs with a summary. Ended runs come from the reconcile
