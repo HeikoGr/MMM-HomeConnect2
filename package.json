@@ -1,17 +1,8 @@
 {
   "name": "mmm-homeconnect2",
   "version": "1.5.4",
+  "private": true,
   "description": "MagicMirror² Module for Home Connect",
-  "main": "MMM-HomeConnect2.js",
-  "author": "HeikoGr",
-  "type": "commonjs",
-  "engines": {
-    "node": ">=22.21.1"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/HeikoGr/MMM-HomeConnect2.git"
-  },
   "keywords": [
     "MagicMirror²",
     "HomeConnect",
@@ -23,22 +14,30 @@
     "Neff",
     "Gaggenau"
   ],
+  "homepage": "https://github.com/HeikoGr/MMM-HomeConnect2#readme",
+  "bugs": {
+    "url": "https://github.com/HeikoGr/MMM-HomeConnect2/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HeikoGr/MMM-HomeConnect2.git"
+  },
   "license": "MIT",
+  "author": "HeikoGr",
+  "type": "commonjs",
+  "main": "MMM-HomeConnect2.js",
+  "engines": {
+    "node": ">=22.21.1"
+  },
   "scripts": {
     "prepare": "node scripts/install-hooks.js",
     "postinstall": "node scripts/install-mmm-shared-submodule.js",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "test": "node tests/run-all.js",
-    "check": "node --run mmcheck",
-    "mmcheck": "node scripts/magicmirror-check.mjs --devcontainer-only --current",
-    "deps:update": "npx --yes npm-check-updates -u && npm install && npx @biomejs/biome migrate --write",
-    "shared:update": "git submodule update --remote --init --checkout lib/mmm-shared && git submodule status lib/mmm-shared"
-  },
-  "lint-staged": {
-    "*.{js,cjs,mjs,jsx,ts,tsx,json,jsonc,css}": [
-      "biome check --write --files-ignore-unknown=true"
-    ]
+    "check": "node scripts/magicmirror-check.mjs --current",
+    "shared:update": "git submodule update --remote --init --checkout lib/mmm-shared && git submodule status lib/mmm-shared",
+    "deps:update": "npx --yes npm-check-updates -u && npm install && biome migrate --write"
   },
   "dependencies": {
     "eventsource": "^5.1.2",
@@ -46,20 +45,19 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",
-    "@commitlint/cli": "^21.2.3",
-    "@commitlint/config-conventional": "^21.2.3",
     "lint-staged": "^17.5.1",
     "simple-git-hooks": "^2.14.0"
   },
+  "lint-staged": {
+    "*.{js,cjs,mjs,jsx,ts,tsx,json,jsonc,css}": [
+      "biome check --write --files-ignore-unknown=true"
+    ]
+  },
   "simple-git-hooks": {
     "pre-commit": "npx --no-install lint-staged",
-    "commit-msg": "npx --no-install commitlint --edit $1 && node scripts/check-commit-scope.js $1"
+    "commit-msg": "node scripts/check-commit-msg.js $1 && node scripts/check-commit-scope.js $1"
   },
   "allowScripts": {
     "simple-git-hooks@2.14.0": true
-  },
-  "bugs": {
-    "url": "https://github.com/HeikoGr/MMM-HomeConnect2/issues"
-  },
-  "homepage": "https://github.com/HeikoGr/MMM-HomeConnect2"
+  }
 }
