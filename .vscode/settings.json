@@ -42,7 +42,7 @@
     }
   },
   "markdown.validate.enabled": true,
-  // Guided commit form matching commitlint.config.js.
+  // Guided commit form matching scripts/check-commit-msg.js.
   "conventionalCommits.showEditor": true,
   "conventionalCommits.promptScopes": true,
   "conventionalCommits.promptBody": true,
