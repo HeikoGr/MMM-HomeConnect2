@@ -2,10 +2,10 @@
 /**
  * Guard against commit types that understate what the commit actually changes.
  *
- * Why this exists: a low-signal type like `chore` or `docs` is easy to reach for even when the
- * diff quietly changes runtime behavior. check-commit-msg.js only checks the *format* of the subject, not
- * whether the chosen type matches what was actually touched - so a mislabeled commit slips
- * through and never reaches the changelog, which then has to be reconstructed from diffs later.
+ * Why this exists: check-commit-msg.js only validates the *format* of a commit message, not whether the
+ * chosen type matches what the diff actually does. A commit typed `chore` but containing a real
+ * behavior fix in runtime source still passes the format check - and because the type is low-signal,
+ * release-please files it under Maintenance instead of Fixes, and the version bump misses it.
  *
  * So: if a low-signal commit type touches runtime source, ask for a better type.
  *
