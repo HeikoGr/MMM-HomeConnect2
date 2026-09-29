@@ -1,5 +1,47 @@
 # Changelog
 
+## [1.6.0](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.5.4...v1.6.0) (2026-09-29)
+
+
+### 🔌 Features
+
+* keep program start times across restarts and record program statistics ([#75](https://github.com/HeikoGr/MMM-HomeConnect2/issues/75)) ([47663cd](https://github.com/HeikoGr/MMM-HomeConnect2/commit/47663cde21fe20d75b448f7d5775c86d60a63451))
+
+
+### 🐛 Fixes
+
+* time program runs from the real start to the program end ([#77](https://github.com/HeikoGr/MMM-HomeConnect2/issues/77)) ([b892e99](https://github.com/HeikoGr/MMM-HomeConnect2/commit/b892e991210a5b7c6d07ea4668fc3ddcf508d6ad))
+
+
+### ⚡ Performance
+
+* skip the scheduled snapshot while no display is connected ([5060a13](https://github.com/HeikoGr/MMM-HomeConnect2/commit/5060a136c03fad3796f5a65585e707a0d0d18901))
+
+
+### 🧱 Refactoring
+
+* describe the current behavior in comments ([5060a13](https://github.com/HeikoGr/MMM-HomeConnect2/commit/5060a136c03fad3796f5a65585e707a0d0d18901))
+* use identifier for displays everywhere ([5060a13](https://github.com/HeikoGr/MMM-HomeConnect2/commit/5060a136c03fad3796f5a65585e707a0d0d18901))
+
+
+### 📦 Build & Dependencies
+
+* **deps:** bump mmm-shared to 0.4.0 ([75ccd30](https://github.com/HeikoGr/MMM-HomeConnect2/commit/75ccd30c768cd5c80586998a4df72d521c297dfe))
+* **deps:** replace commitlint with a built-in commit message check ([#78](https://github.com/HeikoGr/MMM-HomeConnect2/issues/78)) ([fc8c97c](https://github.com/HeikoGr/MMM-HomeConnect2/commit/fc8c97c231e5573a3f160c2c56571131c2118e56))
+
+
+### 🔧 Tooling
+
+* keep ci-only commits out of releases and the changelog ([#76](https://github.com/HeikoGr/MMM-HomeConnect2/issues/76)) ([ab1bcc7](https://github.com/HeikoGr/MMM-HomeConnect2/commit/ab1bcc7f3a0044675c1998be71d095deea20e8dd))
+* skip the commit message check on the release PR ([#73](https://github.com/HeikoGr/MMM-HomeConnect2/issues/73)) ([4b6cb6d](https://github.com/HeikoGr/MMM-HomeConnect2/commit/4b6cb6d09ac4003ebc2fe81ce01a80b755e0c3a1))
+* treat the mmm-shared submodule pointer as a dependency in the commit scope check ([75ccd30](https://github.com/HeikoGr/MMM-HomeConnect2/commit/75ccd30c768cd5c80586998a4df72d521c297dfe))
+
+
+### 🔧 Maintenance
+
+* list ci and chore commits in the changelog ([5060a13](https://github.com/HeikoGr/MMM-HomeConnect2/commit/5060a136c03fad3796f5a65585e707a0d0d18901))
+* restart instead of stop in the pm2 clean task, warn about PID 1 ([#79](https://github.com/HeikoGr/MMM-HomeConnect2/issues/79)) ([5d4c963](https://github.com/HeikoGr/MMM-HomeConnect2/commit/5d4c963e2121bdc07d12d214383a59c724e14ee5))
+
 ## [1.5.4](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.5.3...v1.5.4) (2026-09-25)
 
 
