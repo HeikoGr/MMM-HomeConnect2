@@ -108,7 +108,7 @@ function createInstance(overrides = {}) {
     debugStats: overrides.debugStats || null,
     lastInitStatus: overrides.lastInitStatus || null,
     deviceRuntimeHints: overrides.deviceRuntimeHints || {},
-    instanceId: "test-instance",
+    identifier: "test-instance",
     notifications: {
       EVENT: "MMM-HomeConnect2_EVENT",
     },
@@ -202,8 +202,8 @@ function createInstance(overrides = {}) {
     assert.ok(fallbackRunningDom.innerHTML.includes("DONE_IN"));
 
     // The play icon must follow the reported operation state, never a guess. An
-    // idle washing machine is the case that used to show a phantom play icon,
-    // because "Inactive" matched a substring test for "Active".
+    // idle washing machine must not show a play icon: "Inactive" contains
+    // "Active", so a substring test would match it.
     const iconMatrix = [
       ["Inactive", "fa-toggle-on", "fa-play"],
       ["Ready", "fa-toggle-on", "fa-play"],
@@ -390,7 +390,6 @@ function createInstance(overrides = {}) {
 
     recoveryInstance.socketNotificationReceived("MMM-HomeConnect2_EVENT", {
       identifier: "test-instance",
-      instanceId: "test-instance",
       action: "DEVICES_UPDATE",
       data: [
         {
@@ -410,7 +409,6 @@ function createInstance(overrides = {}) {
 
     recoveryInstance.socketNotificationReceived("MMM-HomeConnect2_EVENT", {
       identifier: "test-instance",
-      instanceId: "test-instance",
       action: "DEVICES_UPDATE",
       data: [
         {
@@ -434,7 +432,6 @@ function createInstance(overrides = {}) {
 
     recoveryInstance.socketNotificationReceived("MMM-HomeConnect2_EVENT", {
       identifier: "test-instance",
-      instanceId: "test-instance",
       action: "DEVICES_UPDATE",
       data: [
         {
@@ -464,7 +461,6 @@ function createInstance(overrides = {}) {
 
     delayedStartRecoveryInstance.socketNotificationReceived("MMM-HomeConnect2_EVENT", {
       identifier: "test-instance",
-      instanceId: "test-instance",
       action: "DEVICES_UPDATE",
       data: [
         {
@@ -533,7 +529,7 @@ function createInstance(overrides = {}) {
     // all that survived is a remaining time stuck at 0 next to the planned
     // duration - reported through the raw API keys, which outlive the friendly
     // ones. (estimatedTotalSeconds - 0) / estimatedTotalSeconds is exactly 100 %,
-    // so this used to paint a full bar under an idle appliance for the lifetime of
+    // so this would paint a full bar under an idle appliance for the lifetime of
     // the process. Without a running program neither the bar nor the unattributed
     // duration may appear.
     const staleFullBarInstance = createInstance({
@@ -1147,7 +1143,7 @@ function createInstance(overrides = {}) {
         renders += 1;
       };
       instance.socketNotificationReceived("MMM-HomeConnect2_EVENT", {
-        instanceId: "test-instance",
+        identifier: "test-instance",
         action: "DEBUG_STATS",
         data: { lastApiCallTs: Date.now() },
       });
@@ -1173,7 +1169,7 @@ function createInstance(overrides = {}) {
     };
     const sendOutdated = (instance, serverStartedAt) =>
       instance.socketNotificationReceived("MMM-HomeConnect2_EVENT", {
-        instanceId: "test-instance",
+        identifier: "test-instance",
         action: "INIT_STATUS",
         data: { status: "config_outdated", message: "Display config is outdated", serverStartedAt },
       });

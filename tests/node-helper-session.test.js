@@ -54,8 +54,8 @@ function resetHelperState() {
   };
   helper.lastDebugStatsBroadcastTs = 0;
   helper.hc = null;
-  helper.instanceId = null;
-  helper.sharedConfigOwnerInstanceId = null;
+  helper.identifier = null;
+  helper.sharedConfigOwnerIdentifier = null;
   helper.sessionOwnerConfig = null;
   helper.lastAuthFailure = null;
   helper.pendingAuthInfo = null;
@@ -78,8 +78,8 @@ function resetHelperState() {
 function registeredInstances() {
   const ids = [];
   const originalSendEventToInstance = helper.sendEventToInstance;
-  helper.sendEventToInstance = (instanceId) => {
-    ids.push(instanceId);
+  helper.sendEventToInstance = (identifier) => {
+    ids.push(identifier);
   };
   helper.broadcastToAllClients("DEBUG_STATS", {});
   helper.sendEventToInstance = originalSendEventToInstance;
@@ -136,12 +136,12 @@ function registeredInstances() {
   assert.ok(helper.rateLimitDeferTimer, "the start is scheduled for the end of the block");
   assert.strictEqual(deferStatuses[0].status, "device_error");
   assert.strictEqual(deferStatuses[0].isRateLimit, true);
-  assert.strictEqual(deferStatuses[0].instanceId, "display-1");
+  assert.strictEqual(deferStatuses[0].identifier, "display-1");
   assert.ok(deferStatuses[0].rateLimitSeconds > 3500);
 
   // A display connecting meanwhile gets the same notice instead of "loading".
   helper.handleConfigNotificationSubsequent("display-2");
-  assert.strictEqual(deferStatuses[1].instanceId, "display-2");
+  assert.strictEqual(deferStatuses[1].identifier, "display-2");
   assert.strictEqual(deferStatuses[1].isRateLimit, true);
 
   clearTimeout(helper.rateLimitDeferTimer);
@@ -222,7 +222,7 @@ function registeredInstances() {
   };
   const staleOriginalHandleGetActivePrograms = helper.handleGetActivePrograms;
   helper.handleGetActivePrograms = (payload = {}) => {
-    staleSequence.push(`program_fetch:${payload.instanceId || "unknown"}:${payload.force}:${payload.activeOnly}`);
+    staleSequence.push(`program_fetch:${payload.identifier || "unknown"}:${payload.force}:${payload.activeOnly}`);
   };
 
   helper.handleSseStale({ silenceMs: 71000 });
@@ -236,7 +236,7 @@ function registeredInstances() {
   // During an API rate limit the watchdog only rebuilds SSE; no snapshot spends quota.
   staleSequence.length = 0;
   helper.handleGetActivePrograms = (payload = {}) => {
-    staleSequence.push(`program_fetch:${payload.instanceId || "unknown"}:${payload.force}`);
+    staleSequence.push(`program_fetch:${payload.identifier || "unknown"}:${payload.force}`);
   };
   helper.setRateLimitUntil(Date.now() + 60 * 60 * 1000);
   helper.handleSseStale({ silenceMs: 71000 });
@@ -297,7 +297,7 @@ function registeredInstances() {
   immediateGetDevicesCalls = 0;
   const originalInitHandleGetActivePrograms = helper.handleGetActivePrograms;
   helper.handleGetActivePrograms = (payload = {}) => {
-    initSequence.push(`program_fetch:${payload.instanceId || "unknown"}:${payload.force}`);
+    initSequence.push(`program_fetch:${payload.identifier || "unknown"}:${payload.force}`);
   };
 
   helper.handleHomeConnectInitSuccess();
@@ -395,12 +395,12 @@ function registeredInstances() {
   };
 
   helper.handleGetActivePrograms({
-    instanceId: "resume-followup",
+    identifier: "resume-followup",
     haIds: ["ha-1"],
     force: true,
   });
   helper.handleGetActivePrograms({
-    instanceId: "resume-followup",
+    identifier: "resume-followup",
     haIds: ["ha-1"],
     force: true,
   });
@@ -442,14 +442,14 @@ function registeredInstances() {
   };
 
   helper.handleGetActivePrograms({
-    instanceId: "resume-followup",
+    identifier: "resume-followup",
     haIds: ["ha-1"],
     force: true,
   });
   await wait(10); // let the ha-1 fetch start and block on releaseWasherFetch
 
   helper.handleGetActivePrograms({
-    instanceId: "sse_program_detected",
+    identifier: "sse_program_detected",
     haIds: ["ha-2"],
     force: true,
   });
@@ -461,7 +461,7 @@ function registeredInstances() {
   // A device the running fetch already covers needs nothing queued: its data is
   // on its way, so re-requesting it must not schedule a second round.
   helper.handleGetActivePrograms({
-    instanceId: "sse_program_detected",
+    identifier: "sse_program_detected",
     haIds: ["ha-1"],
     force: true,
   });
@@ -493,7 +493,7 @@ function registeredInstances() {
     devices: new Map([["ha-1", { haId: "ha-1", name: "Washer" }]]),
   };
   fetchCalls = 0;
-  helper.fetchActiveProgramsForDevices = (devices, _instanceId, requestMeta = {}) => {
+  helper.fetchActiveProgramsForDevices = (devices, _identifier, requestMeta = {}) => {
     fetchCalls += 1;
     if (requestMeta.force) {
       for (const device of devices) {
@@ -505,12 +505,12 @@ function registeredInstances() {
   };
 
   helper.handleGetActivePrograms({
-    instanceId: "frontend-a",
+    identifier: "frontend-a",
     haIds: ["ha-1"],
     force: true,
   });
   helper.handleGetActivePrograms({
-    instanceId: "frontend-b",
+    identifier: "frontend-b",
     haIds: ["ha-1"],
     force: true,
   });
@@ -532,9 +532,9 @@ function registeredInstances() {
       configMismatchStatuses.push({ status, payload });
     }
   };
-  helper.warnAboutIgnoredSessionConfig = function patched(instanceId, clientSessionConfig) {
-    ignoredConfigWarnings.push(instanceId);
-    return originalWarnAboutIgnoredSessionConfig.call(this, instanceId, clientSessionConfig);
+  helper.warnAboutIgnoredSessionConfig = function patched(identifier, clientSessionConfig) {
+    ignoredConfigWarnings.push(identifier);
+    return originalWarnAboutIgnoredSessionConfig.call(this, identifier, clientSessionConfig);
   };
   helper.authService = {
     setConfig(config) {
@@ -546,16 +546,16 @@ function registeredInstances() {
       acceptLanguages.push(language);
     },
   };
-  helper.handleConfigNotificationFirstTime = (instanceId) => {
-    configuredInstances.push(`first:${instanceId}`);
+  helper.handleConfigNotificationFirstTime = (identifier) => {
+    configuredInstances.push(`first:${identifier}`);
     helper.configReceived = true;
   };
-  helper.handleConfigNotificationSubsequent = (instanceId) => {
-    configuredInstances.push(`next:${instanceId}`);
+  helper.handleConfigNotificationSubsequent = (identifier) => {
+    configuredInstances.push(`next:${identifier}`);
   };
 
   helper.handleConfigNotification({
-    instanceId: "frontend-a",
+    identifier: "frontend-a",
     clientId: "client-1",
     language: "de",
     logLevel: "info",
@@ -564,7 +564,7 @@ function registeredInstances() {
 
   // Display-only options must not be reported as ignored session settings.
   helper.handleConfigNotification({
-    instanceId: "frontend-b",
+    identifier: "frontend-b",
     clientId: "client-1",
     language: "de",
     logLevel: "info",
@@ -575,7 +575,7 @@ function registeredInstances() {
 
   // Session-relevant difference: the client stays registered, its values are ignored.
   helper.handleConfigNotification({
-    instanceId: "frontend-c",
+    identifier: "frontend-c",
     clientId: "client-1",
     language: "de",
     logLevel: "debug",
@@ -583,14 +583,14 @@ function registeredInstances() {
 
   // Foreign credentials cannot be served by this session.
   helper.handleConfigNotification({
-    instanceId: "frontend-d",
+    identifier: "frontend-d",
     clientId: "client-2",
     language: "de",
     logLevel: "info",
   });
 
-  assert.strictEqual(helper.instanceId, "frontend-a");
-  assert.strictEqual(helper.sharedConfigOwnerInstanceId, "frontend-a");
+  assert.strictEqual(helper.identifier, "frontend-a");
+  assert.strictEqual(helper.sharedConfigOwnerIdentifier, "frontend-a");
   assert.strictEqual(helper.config.language, "de");
   assert.strictEqual(helper.config.logLevel, "info");
   assert.strictEqual(helper.sessionOwnerConfig.logLevel, "info");
@@ -598,15 +598,15 @@ function registeredInstances() {
   assert.strictEqual(authConfigs.length, 1);
   assert.deepStrictEqual(acceptLanguages, ["de", "de", "de"]);
   const registeredAfterDrift = registeredInstances();
-  ["frontend-a", "frontend-b", "frontend-c"].forEach((instanceId) => {
-    assert.ok(registeredAfterDrift.includes(instanceId), `${instanceId} must stay registered`);
+  ["frontend-a", "frontend-b", "frontend-c"].forEach((identifier) => {
+    assert.ok(registeredAfterDrift.includes(identifier), `${identifier} must stay registered`);
   });
   assert.ok(!registeredAfterDrift.includes("frontend-d"), "The rejected client must not receive broadcasts");
 
   // Exactly one hard rejection, and only for the credential mismatch.
   assert.strictEqual(configMismatchStatuses.length, 1);
   assert.strictEqual(configMismatchStatuses[0].status, "device_error");
-  assert.strictEqual(configMismatchStatuses[0].payload.instanceId, "frontend-d");
+  assert.strictEqual(configMismatchStatuses[0].payload.identifier, "frontend-d");
   assert.deepStrictEqual(configMismatchStatuses[0].payload.mismatchKeys, ["clientId"]);
   assert.strictEqual(
     typeof configMismatchStatuses[0].payload.message === "string" &&
@@ -630,22 +630,22 @@ function registeredInstances() {
   helper.serverConfigs = () => [
     { modules: [{ module: "clock" }, { module: "MMM-HomeConnect2", config: { clientId: "client-new" } }] },
   ];
-  helper.handleConfigNotificationFirstTime = (instanceId) => {
-    firstTimeConfigs.push(instanceId);
+  helper.handleConfigNotificationFirstTime = (identifier) => {
+    firstTimeConfigs.push(identifier);
     helper.configReceived = true;
   };
   helper.handleConfigNotificationSubsequent = () => {};
 
   helper.startedAt = 1234;
-  helper.handleConfigNotification({ instanceId: "stale-tab", clientId: "", clientSecret: "" });
+  helper.handleConfigNotification({ identifier: "stale-tab", clientId: "", clientSecret: "" });
   assert.deepStrictEqual(initStatuses, [
-    { status: "config_outdated", payload: { instanceId: "stale-tab", serverStartedAt: 1234 } },
+    { status: "config_outdated", payload: { identifier: "stale-tab", serverStartedAt: 1234 } },
   ]);
   assert.strictEqual(helper.sessionOwnerConfig, null, "the outdated tab must not open the session");
   assert.ok(!registeredInstances().includes("stale-tab"));
 
-  helper.handleConfigNotification({ instanceId: "fresh-tab", clientId: "client-new", clientSecret: "" });
-  assert.strictEqual(helper.sharedConfigOwnerInstanceId, "fresh-tab");
+  helper.handleConfigNotification({ identifier: "fresh-tab", clientId: "client-new", clientSecret: "" });
+  assert.strictEqual(helper.sharedConfigOwnerIdentifier, "fresh-tab");
   assert.deepStrictEqual(firstTimeConfigs, ["fresh-tab"]);
   assert.ok(!initStatuses.some(({ payload }) => payload.isConfigMismatch), "no mismatch for the current config");
 
@@ -654,9 +654,9 @@ function registeredInstances() {
   initStatuses.length = 0;
   firstTimeConfigs.length = 0;
   helper.serverConfigs = () => [{ modules: [{ module: "MMM-HomeConnect2", config: { clientId: "" } }] }];
-  helper.handleConfigNotification({ instanceId: "template-tab", clientId: "", clientSecret: "" });
+  helper.handleConfigNotification({ identifier: "template-tab", clientId: "", clientSecret: "" });
   assert.deepStrictEqual(initStatuses, [
-    { status: "config_incomplete", payload: { instanceId: "template-tab", missingKeys: ["clientId"] } },
+    { status: "config_incomplete", payload: { identifier: "template-tab", missingKeys: ["clientId"] } },
   ]);
   assert.strictEqual(helper.sessionOwnerConfig, null);
   assert.deepStrictEqual(firstTimeConfigs, []);
@@ -667,9 +667,9 @@ function registeredInstances() {
   resetHelperState();
   initStatuses.length = 0;
   helper.serverConfigs = () => [undefined, undefined];
-  helper.handleConfigNotification({ instanceId: "any-tab", clientId: "client-x" });
+  helper.handleConfigNotification({ identifier: "any-tab", clientId: "client-x" });
   assert.deepStrictEqual(initStatuses, []);
-  assert.strictEqual(helper.sharedConfigOwnerInstanceId, "any-tab");
+  assert.strictEqual(helper.sharedConfigOwnerIdentifier, "any-tab");
 
   // A tab from before a language change is outdated too: it would otherwise render
   // its old language next to the server's. The entry is found by the module index
@@ -683,7 +683,7 @@ function registeredInstances() {
       modules: [{ module: "clock" }, { module: "MMM-HomeConnect2", config: { clientId: "client-1", header: "x" } }],
     },
   ];
-  helper.handleConfigNotification({ instanceId: "module_1_MMM-HomeConnect2", clientId: "client-1", language: "en" });
+  helper.handleConfigNotification({ identifier: "module_1_MMM-HomeConnect2", clientId: "client-1", language: "en" });
   assert.deepStrictEqual(
     initStatuses.map(({ status }) => status),
     ["config_outdated"],
@@ -700,7 +700,7 @@ function registeredInstances() {
     },
   ];
   helper.handleConfigNotification({
-    instanceId: "module_1_MMM-HomeConnect2",
+    identifier: "module_1_MMM-HomeConnect2",
     clientId: "client-1",
     language: "de",
     showDeviceIcon: true,
@@ -712,7 +712,7 @@ function registeredInstances() {
   // The current tab (defaults on top of the server's keys) is accepted.
   initStatuses.length = 0;
   helper.handleConfigNotification({
-    instanceId: "module_1_MMM-HomeConnect2",
+    identifier: "module_1_MMM-HomeConnect2",
     clientId: "client-1",
     language: "de",
     showDeviceIcon: false,
@@ -735,7 +735,7 @@ function registeredInstances() {
   helper.handleConfigNotificationSubsequent = () => {};
   helper.serverConfigs = () => [{ language: "de" }];
 
-  helper.handleConfigNotification({ instanceId: "kiosk", clientId: "client-1", language: "en", apiLanguage: "da" });
+  helper.handleConfigNotification({ identifier: "kiosk", clientId: "client-1", language: "en", apiLanguage: "da" });
   assert.strictEqual(helper.config.language, "de");
   assert.strictEqual(helper.sessionOwnerConfig.language, "de");
   assert.strictEqual(helper.retiredLanguageOptionReported, true, "a leftover apiLanguage is reported");
@@ -743,7 +743,7 @@ function registeredInstances() {
   // Outside MagicMirror the display's language stands in.
   resetHelperState();
   helper.serverConfigs = () => [undefined, undefined];
-  helper.handleConfigNotification({ instanceId: "kiosk", clientId: "client-1", language: "da" });
+  helper.handleConfigNotification({ identifier: "kiosk", clientId: "client-1", language: "da" });
   assert.strictEqual(helper.config.language, "da");
   helper.serverConfigs = originalServerConfigs;
 
@@ -752,7 +752,7 @@ function registeredInstances() {
 
   // The scheduled snapshot must stay off the API while a rate-limit backoff is
   // active, and it must not stay disabled forever after a refresh that never
-  // settled (a single 429 used to latch deviceRefreshInFlight on true).
+  // settled (e.g. deviceRefreshInFlight left on true after a 429).
   {
     resetHelperState();
     helper.hc = {};
@@ -790,6 +790,11 @@ function registeredInstances() {
     try {
       helper.schedulePeriodicFullSnapshotRefresh();
       assert.ok(tick, "Expected the periodic snapshot to be scheduled");
+
+      helper.globalSession.clientInstances.clear();
+      tick();
+      assert.strictEqual(refreshes, 0, "Expected no snapshot without a connected display");
+      helper.globalSession.clientInstances.add("display");
 
       helper.setRateLimitUntil(Date.now() + 120 * 1000);
       tick();
@@ -962,9 +967,9 @@ function registeredInstances() {
           payload: {
             message: "Device authorization failed (HTTP 400): unauthorized_client",
             reason: "invalid_client",
-            instanceId: "late-display",
+            identifier: "late-display",
           },
-          options: { broadcast: false, targetInstanceId: "late-display" },
+          options: { broadcast: false, targetIdentifier: "late-display" },
         },
       ]);
       helper.emitAuthStatus = (status) => authStatuses.push(status);
@@ -974,7 +979,7 @@ function registeredInstances() {
       // "authentication in progress".
       const sentEvents = [];
       const originalSendEventToInstance = helper.sendEventToInstance;
-      helper.sendEventToInstance = (instanceId, action, data) => sentEvents.push({ instanceId, action, data });
+      helper.sendEventToInstance = (identifier, action, data) => sentEvents.push({ identifier, action, data });
       helper.pendingAuthInfo = {
         payload: { status: "waiting", user_code: "ABCD-1234", expires_in: 1800, expires_in_minutes: 30 },
         issuedAt: Date.now() - 10 * 60 * 1000,
@@ -982,7 +987,7 @@ function registeredInstances() {
       require("../lib/client-sessions").notifyAuthInProgress.call(helper, "reopened-tab");
       helper.sendEventToInstance = originalSendEventToInstance;
       assert.strictEqual(sentEvents.length, 1);
-      assert.strictEqual(sentEvents[0].instanceId, "reopened-tab");
+      assert.strictEqual(sentEvents[0].identifier, "reopened-tab");
       assert.strictEqual(sentEvents[0].action, "AUTH_INFO");
       assert.strictEqual(sentEvents[0].data.user_code, "ABCD-1234");
       assert.strictEqual(sentEvents[0].data.expires_in_minutes, 20);
@@ -994,10 +999,10 @@ function registeredInstances() {
       // CONFIGURE must not switch the display into the login view.
       const startStatuses = [];
       const emitInitStatusBeforeRepeat = helper.emitInitStatus;
-      helper.emitInitStatus = (status, payload) => startStatuses.push({ status, instanceId: payload?.instanceId });
+      helper.emitInitStatus = (status, payload) => startStatuses.push({ status, identifier: payload?.identifier });
       require("../lib/client-sessions").notifyAuthInProgress.call(helper, "page-load");
       helper.emitInitStatus = emitInitStatusBeforeRepeat;
-      assert.deepStrictEqual(startStatuses, [{ status: "initializing", instanceId: "page-load" }]);
+      assert.deepStrictEqual(startStatuses, [{ status: "initializing", identifier: "page-load" }]);
 
       // Saved token at boot, network not up yet: retry scheduled, nothing unhandled.
       helper.authService = Object.assign(Object.create(originalAuthService), {
@@ -1065,20 +1070,20 @@ function registeredInstances() {
       handleError: () => {},
     });
 
-    coordinator.request({ instanceId: "scheduled_snapshot", force: true, activeOnly: true });
+    coordinator.request({ identifier: "scheduled_snapshot", force: true, activeOnly: true });
     assert.deepStrictEqual(fetched, [["ha-run"]]);
 
     // Without activeOnly (first sync after start) every appliance is asked.
     coordinator.reset();
     fetched.length = 0;
-    coordinator.request({ instanceId: "initial_sync" });
+    coordinator.request({ identifier: "initial_sync" });
     assert.deepStrictEqual(fetched, [["ha-run", "ha-idle", "ha-off"]]);
 
     // Nothing running: no request at all.
     coordinator.reset();
     fetched.length = 0;
     devices.delete("ha-run");
-    coordinator.request({ instanceId: "scheduled_snapshot", force: true, activeOnly: true });
+    coordinator.request({ identifier: "scheduled_snapshot", force: true, activeOnly: true });
     assert.deepStrictEqual(fetched, []);
   }
 
@@ -1103,7 +1108,7 @@ function registeredInstances() {
       handleError: () => {},
     });
 
-    coordinator.request({ instanceId: "sse_program_detected", haIds: ["ha-run"], force: true });
+    coordinator.request({ identifier: "sse_program_detected", haIds: ["ha-run"], force: true });
     assert.deepStrictEqual(fetched, [], "A forced request must not reach the API during a block");
     assert.deepStrictEqual(statuses, [], "A skipped background request must not flash a notice on the displays");
   }

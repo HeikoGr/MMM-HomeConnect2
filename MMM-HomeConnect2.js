@@ -3,7 +3,6 @@ Module.register("MMM-HomeConnect2", {
   config: null,
   authInfo: null,
   authStatus: null,
-  instanceId: null,
   deviceRuntimeHints: {},
   debugStats: null,
   lifecycle: null,
@@ -27,15 +26,10 @@ Module.register("MMM-HomeConnect2", {
   },
 
   start() {
-    // The core-assigned identifier is unique per instance and stable across
-    // reloads. The backend tracks displays by their socket connection, so a
-    // browser-local id is no longer needed to keep its registry bounded.
-    this.instanceId = this.identifier;
     this.shared = globalThis.MMModuleShared;
     this.transport = this.shared.createTransport({
       moduleName: "MMM-HomeConnect2",
       identifier: this.identifier,
-      instanceId: this.instanceId,
       sendSocketNotification: this.sendSocketNotification.bind(this),
     });
     this.notifications = this.transport.notifications;
@@ -115,7 +109,7 @@ Module.register("MMM-HomeConnect2", {
     this.transport.sendRequest("CONFIGURE", {
       config: {
         ...this.config,
-        instanceId: this.instanceId,
+        identifier: this.identifier,
         // Lets the backend spot a tab that still runs the language from before a
         // config change (it then reloads); the session language itself comes
         // from the server's MagicMirror config.
@@ -142,14 +136,14 @@ Module.register("MMM-HomeConnect2", {
     }
 
     if (payload?.action === "INIT_REQUIRED") {
-      if (payload.instanceId === "*" || payload.instanceId === this.instanceId) {
+      if (payload.identifier === "*" || payload.identifier === this.identifier) {
         this.handleInitRequired();
       }
       return;
     }
 
     // Only respond to events for this instance
-    if (payload?.instanceId && payload.instanceId !== this.instanceId) {
+    if (payload?.identifier && payload.identifier !== this.identifier) {
       return;
     }
 
