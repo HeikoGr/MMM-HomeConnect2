@@ -1,8 +1,8 @@
 "use strict";
 
 // Retry pacing for the two loops that can spend Home Connect quota on their own:
-// the token endpoint and the SSE channels. Both used to retry at a fixed
-// interval, which turns a 429 into a self-sustaining penalty.
+// the token endpoint and the SSE channels. Both back off exponentially; a fixed
+// interval would turn a 429 into a self-sustaining penalty.
 
 const assert = require("node:assert");
 const modulePath = require.resolve("../lib/homeconnect-api");

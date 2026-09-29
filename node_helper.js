@@ -5,13 +5,15 @@ const DeviceService = require("./lib/device-service");
 const ProgramService = require("./lib/program-service");
 const { ProgramFetchCoordinator } = require("./lib/program-fetch-coordinator");
 const { persistRateLimitUntil, readRateLimitUntil } = require("./lib/rate-limit-store");
+const { persistProgramStats, readProgramStats } = require("./lib/program-stats");
+const { persistRunStates, readRunStates } = require("./lib/run-state-store");
 const shared = require("./lib/mmm-shared/mmm-shared");
 const { createClientRegistry, formatLogEntry } = require("./lib/mmm-shared/backend-session");
 const NodeHelper = require("node_helper"),
   globalSession = {
     accessToken: null, // Access token for API requests
     refreshToken: null, // Refresh token for obtaining new access tokens
-    clientInstances: new Set(), // Set of client instance IDs using this helper
+    clientInstances: new Set(), // identifiers of the registered displays
     lastAuthAttempt: 0, // Timestamp of the last authentication attempt
     MIN_AUTH_INTERVAL: 60000, // 1 minute between auth attempts
     rateLimitUntil: 0, // Timestamp until which rate limiting is active
@@ -59,8 +61,8 @@ module.exports = NodeHelper.create({
   configReceived: false,
   initializationAttempts: 0,
   maxInitAttempts: 3,
-  instanceId: null,
-  sharedConfigOwnerInstanceId: null,
+  identifier: null,
+  sharedConfigOwnerIdentifier: null,
   activeProgramManager: null,
   authService: null,
   deviceService: null,
@@ -122,7 +124,7 @@ module.exports = NodeHelper.create({
   },
 
   emitStatus(notification, messageMap, status, payload = {}, options = {}) {
-    const { broadcast = true, targetInstanceId = null } = options;
+    const { broadcast = true, targetIdentifier = null } = options;
     const builtPayload = buildStatusPayload(messageMap, status, payload);
 
     if (broadcast) {
@@ -131,18 +133,17 @@ module.exports = NodeHelper.create({
     }
 
     this.sendEventToInstance(
-      targetInstanceId || builtPayload.instanceId || this.instanceId || "default",
+      targetIdentifier || builtPayload.identifier || this.identifier || "default",
       notification,
       builtPayload,
     );
   },
 
-  sendEventToInstance(instanceId, action, data) {
+  sendEventToInstance(identifier, action, data) {
     this.sendSocketNotification(
       this.notifications.EVENT,
       shared.createEnvelope({
-        identifier: instanceId || "default",
-        instanceId: instanceId || "default",
+        identifier: identifier || "default",
         action,
         ok: true,
         data,
@@ -190,7 +191,7 @@ module.exports = NodeHelper.create({
       {
         onDetailsRefreshed: () =>
           this.handleGetActivePrograms({
-            instanceId: requester || this.instanceId || "unknown",
+            identifier: requester || this.identifier || "unknown",
             haIds,
             force: forcePrograms,
             activeOnly: activeProgramsOnly,
@@ -224,6 +225,9 @@ module.exports = NodeHelper.create({
         this.deviceRefreshInFlight = false;
       },
       setRateLimitUntil: this.setRateLimitUntil.bind(this),
+      runStateStore: { read: readRunStates, persist: persistRunStates },
+      programStatsStore: { read: readProgramStats, persist: persistProgramStats },
+      isRateLimited: this.isRateLimited.bind(this),
       debugHooks: {
         recordApiCall: this.recordApiCall.bind(this),
         recordSseEvent: this.recordSseEvent.bind(this),
@@ -277,35 +281,33 @@ module.exports = NodeHelper.create({
     /*
      * A display stays registered while its browser socket is connected; one
      * whose socket is gone for the grace period is dropped from clientInstances.
-     * The old rule ("no CONFIGURE for 24 h") also dropped every display that
-     * simply kept running, because the frontend sends CONFIGURE only once.
+     * Liveness cannot come from CONFIGURE: the frontend sends it only once.
      * A new connection is asked for CONFIGURE (INIT_REQUIRED), so a display
      * re-registers after a server restart without a page reload.
      */
     this.clientRegistry = createClientRegistry({
       namespace: this.name || "MMM-HomeConnect2",
-      keyOf: (payload) => payload?.instanceId || null,
+      keyOf: (payload) => payload?.identifier || null,
       onConnect: (socket) =>
         socket.emit(
           this.notifications.EVENT,
           shared.createEnvelope({
             identifier: "*",
-            instanceId: "*",
             action: "INIT_REQUIRED",
             ok: true,
             data: null,
           }),
         ),
-      onGone: (instanceId) => this.releaseClientInstance(instanceId),
+      onGone: (identifier) => this.releaseClientInstance(identifier),
       // Tests inject timers and a grace period here.
       ...this.clientRegistryOptions,
     }).attach(this.io);
   },
 
   // The display's browser is gone: stop addressing it.
-  releaseClientInstance(instanceId) {
-    if (globalSession.clientInstances.delete(instanceId)) {
-      log.info(`Released client instance without a connected display: ${instanceId}`);
+  releaseClientInstance(identifier) {
+    if (globalSession.clientInstances.delete(identifier)) {
+      log.info(`Released client instance without a connected display: ${identifier}`);
     }
   },
 
@@ -339,8 +341,15 @@ module.exports = NodeHelper.create({
         return;
       }
 
-      // The scheduled snapshot runs with nobody watching, so it must not spend
-      // quota while a backoff is active (the device refresh has no check of its own).
+      // Without a connected display nobody sees the result; a display that
+      // registers (CONFIGURE) triggers its own refresh (session_active_refresh).
+      if (globalSession.clientInstances.size === 0) {
+        log.debug("Skipping scheduled snapshot - no display connected");
+        return;
+      }
+
+      // The scheduled snapshot runs unattended, so it must not spend quota while
+      // a backoff is active (the device refresh has no check of its own).
       if (this.isRateLimited()) {
         const remainingSeconds = Math.ceil((this.getRateLimitUntil() - Date.now()) / 1000);
         log.info(`Skipping scheduled snapshot - rate limited for another ${remainingSeconds}s`);
@@ -433,15 +442,15 @@ module.exports = NodeHelper.create({
     if (action === "CONFIGURE") {
       this.handleConfigNotification({
         ...(safePayload?.data?.config || {}),
-        instanceId: safePayload.instanceId || safePayload.identifier || "default",
+        identifier: safePayload.identifier || "default",
       });
     }
   },
 
   broadcastToAllClients(notification, payload) {
-    globalSession.clientInstances.forEach((instanceId) => {
+    globalSession.clientInstances.forEach((identifier) => {
       // Keep payload shape intact (arrays must remain arrays for DEVICES_UPDATE).
-      this.sendEventToInstance(instanceId, notification, payload);
+      this.sendEventToInstance(identifier, notification, payload);
     });
   },
 
@@ -455,8 +464,8 @@ module.exports = NodeHelper.create({
     return this.programService.fetchActiveProgramForDevice(haId, deviceName);
   },
 
-  fetchActiveProgramsForDevices(deviceArray, requestingInstanceId, requestMeta = {}) {
-    return this.programFetchCoordinator().fetchDevices(deviceArray, requestingInstanceId, requestMeta);
+  fetchActiveProgramsForDevices(deviceArray, requestingIdentifier, requestMeta = {}) {
+    return this.programFetchCoordinator().fetchDevices(deviceArray, requestingIdentifier, requestMeta);
   },
 
   handleActiveProgramFetchError(error) {
@@ -464,11 +473,11 @@ module.exports = NodeHelper.create({
     this.programService.handleActiveProgramFetchError(error, this.broadcastToAllClients.bind(this));
   },
 
-  broadcastProgramData(programData, requestingInstanceId) {
+  broadcastProgramData(programData, requestingIdentifier) {
     if (!this.programService) return;
     this.programService.broadcastProgramData(
       programData,
-      requestingInstanceId,
+      requestingIdentifier,
       this.broadcastDevices.bind(this),
       this.broadcastToAllClients.bind(this),
     );

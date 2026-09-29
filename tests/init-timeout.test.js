@@ -1,7 +1,7 @@
 "use strict";
 
 /*
- * A HomeConnect init that takes too long (MODULE-PLAN HC-F5): the displays get
+ * A HomeConnect init that takes too long: the displays get
  * a status and a retry is scheduled; a late answer from a replaced client is
  * discarded instead of flipping the session.
  */

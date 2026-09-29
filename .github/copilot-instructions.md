@@ -4,6 +4,7 @@
 
 - Only change code and files inside this repository.
 - Keep changes minimal and directly related to the request/issue.
+- In the devcontainer `pm2-runtime` is PID 1: never `pm2 stop`, `pm2 delete` or `pm2 kill` (that ends the whole container); use `pm2 restart magicmirror`. The mirror does not restart on file changes (`watch: false`).
 - Do not introduce new dependencies unless explicitly required; if you do, update `package.json` (and existing lockfiles).
 - Never commit secrets (tokens, API keys, session cookies, personal data).
 
@@ -51,6 +52,31 @@
   `setRateLimitUntil()` writes it, `init()` restores it, `checkTokenAndInitialize()` waits it out.
   The block holds for every automatic path: a 429 during init sets it and the init retry waits
   (`lib/auth-orchestration.js`), forced active-program requests and their retries are skipped.
+- `run_state.json` (`lib/run-state-store.js`, gitignored) keeps when each running program was
+  first seen (`_remainingObservedAt`, `_initialRemaining`). The API has no start time, and
+  appliances without `EstimatedTotalProgramTime`/`ProgramProgress` (the dryer reports a constant
+  0 %) derive progress from it. `DeviceService.broadcastDevices()` reconciles it: records a new
+  run, restores an older start after a restart if program key and remaining time still fit, and
+  drops the record once the operation state says nothing runs. No API calls involved.
+  The records also keep options, forecasts and phase changes of the run, and whether its
+  start was watched (`startObserved`: the appliance was seen idle, finished or in `DelayedStart`
+  before). Three rules keep start and end honest:
+  - A delayed start is not the program start: `applyEventToDevice()` sets no
+    `_remainingObservedAt` in `DelayedStart` and starts it on the switch `DelayedStart → Run`.
+  - `Error` does not end a run (the appliance may resume it); the record gets `sawError`, and a
+    run that then ends without finishing counts as `error`.
+  - The run ends when the program does: remaining time 0 or progress 100 while still in `Run` (a
+    dryer's wrinkle guard, up to 120 min) sets `programEndedAt`. Its time is a real end only if
+    the run was watched up to it (`programEndObserved`); such a run counts as `finished` even if
+    the door is opened during the wrinkle guard.
+- `program_stats.json` (`lib/program-stats.js`, gitignored): per appliance a program catalog
+  (union of every `/programs/available` answer, so bought/downloaded programs join it) and per
+  program counters plus the last 20 runs with a summary. Ended runs come from the reconcile
+  above; a duration is only kept when start and end were both watched. `DeviceService` fetches
+  a catalog only from an idle appliance in a known state (while a program runs,
+  `/programs/available` lists only that program): when it has no complete one (file missing, new
+  appliance), when it is stale (an unknown program ran), or once per unknown selected program and
+  process. Never while rate limited; a failed appliance waits an hour.
 - Backend code logs through `log.debug|info|warn|error(message, ...details)` from
   `lib/logger.js`, which sits on `createLogger` from `mmm-shared` and writes through MagicMirror's
   `Log` (global `logLevel`; the session `logLevel` can only narrow it; redaction

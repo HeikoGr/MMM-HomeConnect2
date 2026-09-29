@@ -1,7 +1,7 @@
 "use strict";
 
 /*
- * Which displays the shared session keeps addressing (MODULE-PLAN B2): a display
+ * Which displays the shared session keeps addressing: a display
  * stays registered while its browser socket is connected - regardless of how
  * long ago it sent CONFIGURE - and is released once its socket is gone.
  */
@@ -111,17 +111,16 @@ function setup() {
   helper.checkTokenAndInitialize = () => {};
 
   const broadcasts = [];
-  helper.sendSocketNotification = (_notification, payload) => broadcasts.push(payload.instanceId);
+  helper.sendSocketNotification = (_notification, payload) => broadcasts.push(payload.identifier);
   const connect = (id) => {
     const socket = new FakeSocket(id, helper);
     namespace.emit("connection", socket);
     return socket;
   };
-  const configure = (socket, instanceId) =>
+  const configure = (socket, identifier) =>
     socket.send(REQUEST, {
       action: "CONFIGURE",
-      identifier: "module_5_MMM-HomeConnect2",
-      instanceId,
+      identifier,
       data: { config: { clientId: "client" } },
     });
   const reached = () => {
@@ -138,7 +137,7 @@ test("a new connection is asked to register", (t) => {
   const socket = connect("s1");
   assert.equal(socket.received[0].notification, EVENT);
   assert.equal(socket.received[0].payload.action, "INIT_REQUIRED");
-  assert.equal(socket.received[0].payload.instanceId, "*");
+  assert.equal(socket.received[0].payload.identifier, "*");
 });
 
 test("a display that stays connected keeps receiving data after 24 h", (t) => {
@@ -190,13 +189,13 @@ test("the frontend answers every INIT_REQUIRED, also one crossing its first CONF
   const instance = {
     ...definition,
     config: { ...definition.defaults },
-    instanceId: "hc_display",
+    identifier: "hc_display",
     notifications: { EVENT },
     transport: { sendRequest: (action) => sent.push(action) },
     getLanguage: () => "de",
     lifecycle: { render() {} },
   };
-  const initRequired = { instanceId: "*", action: "INIT_REQUIRED", data: null };
+  const initRequired = { identifier: "*", action: "INIT_REQUIRED", data: null };
 
   instance.notificationReceived("ALL_MODULES_STARTED");
   // The server restarted before it answered the first CONFIGURE: the new
@@ -205,6 +204,6 @@ test("the frontend answers every INIT_REQUIRED, also one crossing its first CONF
   assert.deepEqual(sent, ["CONFIGURE", "CONFIGURE"]);
 
   // A greeting for another display is not for this one.
-  instance.socketNotificationReceived(EVENT, { ...initRequired, instanceId: "other" });
+  instance.socketNotificationReceived(EVENT, { ...initRequired, identifier: "other" });
   assert.deepEqual(sent, ["CONFIGURE", "CONFIGURE"]);
 });
