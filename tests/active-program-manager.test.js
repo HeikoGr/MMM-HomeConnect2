@@ -115,7 +115,7 @@ function wait(ms) {
         calls.push(Date.now());
         return answers.shift() || { haId: "ha-4", success: false, error: "unexpected" };
       },
-      broadcastFn: (_payload, _instanceId, result) => delivered.push(result?.source),
+      broadcastFn: (_payload, _identifier, result) => delivered.push(result?.source),
       logger: { info() {}, debug() {}, error() {} },
       maxRetries: 3,
       retryDelayMs: 5,

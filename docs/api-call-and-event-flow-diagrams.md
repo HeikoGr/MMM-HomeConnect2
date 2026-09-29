@@ -84,7 +84,7 @@ sequenceDiagram
   participant APM as ActiveProgramManager
   participant HC as HomeConnect API
 
-  FE->>NH: CONFIGURE(instanceId, config, MagicMirror language)
+  FE->>NH: CONFIGURE(identifier, config, MagicMirror language)
   NH->>NH: compare clientId/clientSecret against sessionOwnerConfig
 
   alt credentials differ from shared session

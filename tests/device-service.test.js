@@ -687,9 +687,9 @@ function createDeviceService(overrides = {}) {
   }
 
   // A 429 on a per-appliance status fetch must engage the shared backoff as well.
-  // getStatus() resolves with success:false instead of rejecting, so this used to
-  // pass by unnoticed - no log, and no backoff to stop the next snapshot from
-  // repeating the burst that had just been throttled.
+  // getStatus() resolves with success:false instead of rejecting, so the 429 is
+  // easy to miss - without a backoff the next snapshot repeats the burst that
+  // had just been throttled.
   {
     const rateLimitCalls = [];
     const { service, logs } = createDeviceService({
