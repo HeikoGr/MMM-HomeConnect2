@@ -13,6 +13,14 @@ const testRateLimitPath = path.join(os.tmpdir(), "mmm-homeconnect2-test-rate-lim
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Poll instead of guessing how long a slow runner needs.
+async function waitUntil(condition, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition() && Date.now() < deadline) {
+    await wait(10);
+  }
+}
+
 const originalLoad = Module._load;
 Module._load = function patchedLoad(request, parent, isMain) {
   if (request === "node_helper") {
@@ -88,13 +96,15 @@ function registeredInstances() {
   // Rate limiting is derived from the deadline alone - no state to get out of sync.
   assert.strictEqual(helper.isRateLimited(), false);
 
-  helper.setRateLimitUntil(Date.now() + 30);
+  // setRateLimitUntil() also writes the block to disk, which can take longer than a few milliseconds on a
+  // busy CI runner: the deadline has to leave room for that, and expiry is awaited, not timed.
+  helper.setRateLimitUntil(Date.now() + 250);
   assert.strictEqual(helper.isRateLimited(), true);
 
-  await wait(40);
+  await waitUntil(() => !helper.isRateLimited());
   assert.strictEqual(helper.isRateLimited(), false, "An elapsed rate limit must clear itself without a release timer");
 
-  helper.setRateLimitUntil(Date.now() + 30);
+  helper.setRateLimitUntil(Date.now() + 60 * 1000);
   assert.strictEqual(helper.isRateLimited(), true);
   helper.setRateLimitUntil(0);
   assert.strictEqual(helper.isRateLimited(), false);
