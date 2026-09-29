@@ -791,6 +791,11 @@ function registeredInstances() {
       helper.schedulePeriodicFullSnapshotRefresh();
       assert.ok(tick, "Expected the periodic snapshot to be scheduled");
 
+      helper.globalSession.clientInstances.clear();
+      tick();
+      assert.strictEqual(refreshes, 0, "Expected no snapshot without a connected display");
+      helper.globalSession.clientInstances.add("display");
+
       helper.setRateLimitUntil(Date.now() + 120 * 1000);
       tick();
       assert.strictEqual(refreshes, 0, "Expected no snapshot while rate limited");

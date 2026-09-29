@@ -344,8 +344,15 @@ module.exports = NodeHelper.create({
         return;
       }
 
-      // The scheduled snapshot runs with nobody watching, so it must not spend
-      // quota while a backoff is active (the device refresh has no check of its own).
+      // Without a connected display nobody sees the result; a display that
+      // registers (CONFIGURE) triggers its own refresh (session_active_refresh).
+      if (globalSession.clientInstances.size === 0) {
+        log.debug("Skipping scheduled snapshot - no display connected");
+        return;
+      }
+
+      // The scheduled snapshot runs unattended, so it must not spend quota while
+      // a backoff is active (the device refresh has no check of its own).
       if (this.isRateLimited()) {
         const remainingSeconds = Math.ceil((this.getRateLimitUntil() - Date.now()) / 1000);
         log.info(`Skipping scheduled snapshot - rate limited for another ${remainingSeconds}s`);
