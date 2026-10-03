@@ -335,6 +335,17 @@ function createDeviceService(overrides = {}) {
 
   // SSE per-device subscription establishes immediately and is idempotent
   {
+    const { service: connService } = createDeviceService({ heartbeat: { enabled: false } });
+    connService.devices.set("ha-1", { haId: "ha-1", name: "Washer", connected: false });
+    connService._deviceEventNotifier = () => {};
+    connService.handleConnectionEvent("CONNECTED", { data: '{"haId":"ha-1"}' });
+    assert.strictEqual(connService.devices.get("ha-1").connected, true);
+    connService.handleConnectionEvent("DISCONNECTED", { data: "" }, "ha-1");
+    assert.strictEqual(connService.devices.get("ha-1").connected, false);
+  }
+
+  // SSE per-device subscription establishes immediately and is idempotent
+  {
     const { service: sseService } = createDeviceService({ heartbeat: { enabled: false } });
     const subscribeCalls = [];
     const hcMock = {
@@ -351,8 +362,15 @@ function createDeviceService(overrides = {}) {
     await wait(0);
     assert.strictEqual(
       JSON.stringify(subscribeCalls),
-      JSON.stringify(["ha-1:KEEP-ALIVE", "ha-1:NOTIFY", "ha-1:STATUS", "ha-1:EVENT"]),
-      "Expected one device channel subscription for KEEP-ALIVE/NOTIFY/STATUS/EVENT",
+      JSON.stringify([
+        "ha-1:KEEP-ALIVE",
+        "ha-1:NOTIFY",
+        "ha-1:STATUS",
+        "ha-1:EVENT",
+        "ha-1:CONNECTED",
+        "ha-1:DISCONNECTED",
+      ]),
+      "Expected one device channel subscription per event type",
     );
 
     // Calling subscribeToDeviceEvents again with the same handler should not
@@ -361,7 +379,14 @@ function createDeviceService(overrides = {}) {
     await wait(0);
     assert.strictEqual(
       JSON.stringify(subscribeCalls),
-      JSON.stringify(["ha-1:KEEP-ALIVE", "ha-1:NOTIFY", "ha-1:STATUS", "ha-1:EVENT"]),
+      JSON.stringify([
+        "ha-1:KEEP-ALIVE",
+        "ha-1:NOTIFY",
+        "ha-1:STATUS",
+        "ha-1:EVENT",
+        "ha-1:CONNECTED",
+        "ha-1:DISCONNECTED",
+      ]),
       "Expected no additional subscriptions when reusing same handler",
     );
   }
@@ -428,7 +453,14 @@ function createDeviceService(overrides = {}) {
     assert.strictEqual(staleRecoveries, 0);
     assert.strictEqual(
       JSON.stringify(subscribeCalls),
-      JSON.stringify(["ha-1:KEEP-ALIVE", "ha-1:NOTIFY", "ha-1:STATUS", "ha-1:EVENT"]),
+      JSON.stringify([
+        "ha-1:KEEP-ALIVE",
+        "ha-1:NOTIFY",
+        "ha-1:STATUS",
+        "ha-1:EVENT",
+        "ha-1:CONNECTED",
+        "ha-1:DISCONNECTED",
+      ]),
     );
 
     service.shutdown();
@@ -552,7 +584,7 @@ function createDeviceService(overrides = {}) {
 
     const subscribesAfterFirst = subscribeCalls.length;
     const closesAfterFirst = closeCalls;
-    assert.strictEqual(subscribesAfterFirst, 4, "Expected one channel with four event types");
+    assert.strictEqual(subscribesAfterFirst, 6, "Expected one channel with six event types");
     assert.strictEqual(settingsFetches, 1, "Expected settings to be seeded once");
 
     // Second snapshot with a brand new callback - the SSE session must survive.
