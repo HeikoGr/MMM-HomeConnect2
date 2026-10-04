@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.7.0](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.6.0...v1.7.0) (2026-10-04)
+
+
+### 🔌 Features
+
+* add connection event handling and update device connection status ([0f5e760](https://github.com/HeikoGr/MMM-HomeConnect2/commit/0f5e7603a22340c03e7a0cc03a5952ca4820a653))
+* connection detection ([3c1ea33](https://github.com/HeikoGr/MMM-HomeConnect2/commit/3c1ea33eebe36ce68f7b634d5cc6cd4c82fa09dc))
+
+
+### 🔧 Maintenance
+
+* **deps-dev:** bump lint-staged from 17.5.1 to 17.6.0 ([#83](https://github.com/HeikoGr/MMM-HomeConnect2/issues/83)) ([dd40427](https://github.com/HeikoGr/MMM-HomeConnect2/commit/dd404271b186417ff157f7eba88fa9864d7f8523))
+* **deps:** update Dependabot weekly and group minor/patch bumps ([546df61](https://github.com/HeikoGr/MMM-HomeConnect2/commit/546df612357b6f45d5cb726cf1b378254bcb9889))
+* **deps:** update Dependabot weekly and group minor/patch bumps ([b9863ef](https://github.com/HeikoGr/MMM-HomeConnect2/commit/b9863ef317de7336cce533c99759639d69c62152))
+* **master:** release 1.6.0 ([7152d1d](https://github.com/HeikoGr/MMM-HomeConnect2/commit/7152d1de09e4ee26227e9f0055b939c8945473bf))
+* merge master back into develop ([72dff31](https://github.com/HeikoGr/MMM-HomeConnect2/commit/72dff316bdd817af1b631c02dcbc5befb6d36165))
+* remove accidentally committed run_state.jsonx ([c855539](https://github.com/HeikoGr/MMM-HomeConnect2/commit/c85553906dc713d33825205b9b2d32520e442b87))
+* remove accidentally committed run_state.jsonx ([c92ee06](https://github.com/HeikoGr/MMM-HomeConnect2/commit/c92ee062d06d458c2aee24c02a2bb15cef82e4e7))
+
 ## [1.6.0](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.5.4...v1.6.0) (2026-09-29)
 
 
