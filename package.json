@@ -1,6 +1,6 @@
 {
   "name": "mmm-homeconnect2",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "private": true,
   "description": "MagicMirror² Module for Home Connect",
   "keywords": [
@@ -44,7 +44,7 @@
     "qrcode": "^1.5.4"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.14",
+    "@biomejs/biome": "^2.5.15",
     "lint-staged": "^17.6.0",
     "simple-git-hooks": "^2.14.0"
   },
