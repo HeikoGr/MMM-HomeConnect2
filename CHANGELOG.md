@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.7.1](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.7.0...v1.7.1) (2026-10-04)
+
+
+### 📦 Build & Dependencies
+
+* **deps:** align Biome schema with 2.5.15 ([96b50b9](https://github.com/HeikoGr/MMM-HomeConnect2/commit/96b50b9e807123a06f2fe695cef04953e6c2ad28))
+* **deps:** align Biome schema with 2.5.15 ([4a1198e](https://github.com/HeikoGr/MMM-HomeConnect2/commit/4a1198e6233d62c9815aab5bbd420ecb4414409a))
+
+
+### 🔧 Maintenance
+
+* **deps-dev:** bump @biomejs/biome ([c82bd8c](https://github.com/HeikoGr/MMM-HomeConnect2/commit/c82bd8cd3109fc9db4eb4a594e90482fe3b6f48c))
+* **deps-dev:** bump @biomejs/biome from 2.5.14 to 2.5.15 in the npm group ([#90](https://github.com/HeikoGr/MMM-HomeConnect2/issues/90)) ([c82bd8c](https://github.com/HeikoGr/MMM-HomeConnect2/commit/c82bd8cd3109fc9db4eb4a594e90482fe3b6f48c))
+
 ## [1.7.0](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.6.0...v1.7.0) (2026-10-04)
 
 
