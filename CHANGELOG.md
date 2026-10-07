@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.2](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.7.1...v1.7.2) (2026-10-07)
+
+
+### 🔧 Tooling
+
+* ship releases via auto-merged release-ship PR and drop commit hooks ([#94](https://github.com/HeikoGr/MMM-HomeConnect2/issues/94)) ([610e6a3](https://github.com/HeikoGr/MMM-HomeConnect2/commit/610e6a329de2ddad6dfd6e03fa8714e517d21490))
+
 ## [1.7.1](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.7.0...v1.7.1) (2026-10-04)
 
 
