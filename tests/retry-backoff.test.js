@@ -189,14 +189,39 @@ function makeFakeEventSource() {
     hc.handleEventSourceError("device:ha-1", offlineError);
     assert.strictEqual(recreates.at(-1).delayMs, 5000);
 
-    // 429 starts higher and is reported upward for the REST side to honour.
+    // A bare 429 starts higher but stays with its channel: without a stated
+    // block it is most likely a channel held by another client, not a quota block.
     const rateLimitEvents = [];
     hc.on("rateLimit", (payload) => rateLimitEvents.push(payload));
     hc.resetEventSourceRetryState("device:ha-2");
     hc.handleEventSourceError("device:ha-2", { code: 429, message: "Too Many Requests" });
     assert.strictEqual(recreates.at(-1).delayMs, 30000);
+    assert.strictEqual(rateLimitEvents.length, 0, "Expected a bare channel 429 not to block the whole module");
+
+    // ...and it keeps backing off past the 10-minute cap of ordinary errors.
+    for (let i = 0; i < 20; i += 1) {
+      hc.handleEventSourceError("device:ha-2", { code: 429, message: "Too Many Requests" });
+    }
+    assert.strictEqual(recreates.at(-1).delayMs, 60 * 60 * 1000);
+    assert.strictEqual(rateLimitEvents.length, 0);
+
+    // A block the server states (read from the 429 response) is honoured in full,
+    // beyond every cap, and reported upward for the REST side.
+    hc.resetEventSourceRetryState("device:ha-2");
+    hc._eventSourceRateLimitInfo.set("device:ha-2", { retryAfterSeconds: 7200, description: "1000 calls in 1 day" });
+    hc.handleEventSourceError("device:ha-2", { code: 429, message: "Too Many Requests" });
+    assert.strictEqual(recreates.at(-1).delayMs, 7200 * 1000);
     assert.strictEqual(rateLimitEvents.length, 1);
     assert.strictEqual(rateLimitEvents[0].source, "sse:device:ha-2");
+    assert.strictEqual(rateLimitEvents[0].retryAfterSeconds, 7200);
+    assert.strictEqual(hc._eventSourceRateLimitInfo.has("device:ha-2"), false, "Expected the info to be used once");
+
+    // A stale entry does not turn a later non-429 error into a long wait.
+    hc.resetEventSourceRetryState("device:ha-2");
+    hc._eventSourceRateLimitInfo.set("device:ha-2", { retryAfterSeconds: 7200, description: null });
+    hc.handleEventSourceError("device:ha-2", offlineError);
+    assert.strictEqual(recreates.at(-1).delayMs, 5000);
+    assert.strictEqual(rateLimitEvents.length, 1);
 
     // The backoff is capped.
     hc.resetEventSourceRetryState("device:ha-1");
@@ -244,6 +269,57 @@ function makeFakeEventSource() {
       1,
       "Expected the rebuilt channel to carry its listeners again",
     );
+  }
+
+  // --- a 429 on opening a stream is read before the EventSource sees it ---
+  {
+    const originalFetch = globalThis.fetch;
+    const answers = [
+      new Response("rate limited", { status: 429, headers: { "retry-after": "120" } }),
+      new Response(
+        JSON.stringify({
+          error: {
+            key: "429",
+            description:
+              'The rate limit "10 successive error calls in 10 minutes" was reached. Requests are blocked during the remaining period of 557 seconds.',
+          },
+        }),
+        { status: 429, headers: { "content-type": "application/json" } },
+      ),
+      new Response("", { status: 429 }),
+    ];
+    globalThis.fetch = async () => answers.shift();
+
+    delete require.cache[modulePath];
+    const HomeConnect = require(modulePath);
+    const hc = new HomeConnect("client", "secret", "refresh");
+    hc.tokens = { access_token: "at" };
+
+    const openAndFail = (label) =>
+      new Promise((resolve) => {
+        const source = hc.createEventSource("https://example.invalid/events", label);
+        source.addEventListener("error", (err) => {
+          source.close();
+          resolve(err);
+        });
+      });
+
+    try {
+      const err = await openAndFail("device:ha-1");
+      assert.strictEqual(err.code, 429);
+      assert.strictEqual(hc._eventSourceRateLimitInfo.get("device:ha-1").retryAfterSeconds, 120);
+
+      await openAndFail("device:ha-2");
+      const fromBody = hc._eventSourceRateLimitInfo.get("device:ha-2");
+      assert.strictEqual(fromBody.retryAfterSeconds, 557, "Expected the remaining period from the body");
+      assert.match(fromBody.description, /10 successive error calls/);
+
+      await openAndFail("device:ha-3");
+      assert.strictEqual(hc._eventSourceRateLimitInfo.get("device:ha-3").retryAfterSeconds, null);
+    } finally {
+      globalThis.fetch = originalFetch;
+      delete require.cache[modulePath];
+    }
   }
 
   console.log("retry-backoff.test.js OK");
