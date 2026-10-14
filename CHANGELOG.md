@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.3](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.7.2...v1.7.3) (2026-10-14)
+
+
+### 🐛 Fixes
+
+* **api:** honour stated 429 blocks on stream open and keep bare channel 429s local ([#97](https://github.com/HeikoGr/MMM-HomeConnect2/issues/97)) ([84954b8](https://github.com/HeikoGr/MMM-HomeConnect2/commit/84954b84f4ce5ebeb31983a7f04ff149e90067e4))
+
 ## [1.7.2](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.7.1...v1.7.2) (2026-10-07)
 
 
