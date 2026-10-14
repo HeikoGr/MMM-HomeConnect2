@@ -52,6 +52,11 @@
   `setRateLimitUntil()` writes it, `init()` restores it, `checkTokenAndInitialize()` waits it out.
   The block holds for every automatic path: a 429 during init sets it and the init retry waits
   (`lib/auth-orchestration.js`), forced active-program requests and their retries are skipped.
+  A 429 on opening an SSE channel sets this block only when the server states its length
+  (`Retry-After`, or "remaining period of N seconds" in the body, read in `createEventSource`
+  because the EventSource only reports the code). A bare channel 429 usually means the channel
+  is taken - Home Connect allows one per appliance and account, e.g. a second mirror holds it -
+  so only that channel backs off (up to 60 min); a stated block is waited out in full.
 - `run_state.json` (`lib/run-state-store.js`, gitignored) keeps when each running program was
   first seen (`_remainingObservedAt`, `_initialRemaining`). The API has no start time, and
   appliances without `EstimatedTotalProgramTime`/`ProgramProgress` (the dryer reports a constant
