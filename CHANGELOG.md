@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.7.4](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.7.3...v1.7.4) (2026-10-21)
+
+
+### 📦 Build & Dependencies
+
+* **deps:** update dependencies and Biome to 2.6 ([#101](https://github.com/HeikoGr/MMM-HomeConnect2/issues/101)) ([d884ef7](https://github.com/HeikoGr/MMM-HomeConnect2/commit/d884ef75f38a8431eebfb6e091fee07ba9cda612))
+
+
+### 🔧 Maintenance
+
+* **deps:** bump eventsource from 5.1.2 to 5.1.3 in the npm group ([#100](https://github.com/HeikoGr/MMM-HomeConnect2/issues/100)) ([30a479a](https://github.com/HeikoGr/MMM-HomeConnect2/commit/30a479afa2c1f0c2cbe6dbe3f9f53e183431cc9a))
+
 ## [1.7.3](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.7.2...v1.7.3) (2026-10-14)
 
 
