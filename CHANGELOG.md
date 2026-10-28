@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.7.5](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.7.4...v1.7.5) (2026-10-28)
+
+
+### 📦 Build & Dependencies
+
+* **deps:** read the Biome schema from node_modules and update mmm-shared ([#105](https://github.com/HeikoGr/MMM-HomeConnect2/issues/105)) ([9cdf9fc](https://github.com/HeikoGr/MMM-HomeConnect2/commit/9cdf9fcd851897f2c6c2bc057c65d17d407ea0c7))
+
+
+### 🔧 Maintenance
+
+* **deps-dev:** bump @biomejs/biome from 2.6.2 to 2.6.3 in the npm group ([#104](https://github.com/HeikoGr/MMM-HomeConnect2/issues/104)) ([ad6e721](https://github.com/HeikoGr/MMM-HomeConnect2/commit/ad6e721cfc57627ca1ef826d9bb6ee18923493eb))
+
 ## [1.7.4](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.7.3...v1.7.4) (2026-10-21)
 
 
