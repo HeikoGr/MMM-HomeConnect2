@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.6](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.7.5...v1.7.6) (2026-11-02)
+
+
+### 📦 Build & Dependencies
+
+* **deps:** bump eventsource to 5.1.4 and @biomejs/biome to 2.6.4 ([#108](https://github.com/HeikoGr/MMM-HomeConnect2/issues/108)) ([deb7f1f](https://github.com/HeikoGr/MMM-HomeConnect2/commit/deb7f1f83a9cea9aafbade3c004d677815b83a73))
+
 ## [1.7.5](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.7.4...v1.7.5) (2026-10-28)
 
 
