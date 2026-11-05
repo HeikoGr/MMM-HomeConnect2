@@ -1005,10 +1005,18 @@ function createInstance(overrides = {}) {
           deviceRefreshInFlight: false,
           programFetchInFlight: true,
           rateLimitRemainingMs: 120000,
+          sseChannels: [
+            { label: "device:ha-open", open: true, attempts: 0, retryAt: null, channelLimit: false },
+            { label: "device:ha-full", open: false, attempts: 2, retryAt: Date.now(), channelLimit: true },
+            { label: "device:ha-down", open: false, attempts: 1, retryAt: null, channelLimit: false },
+          ],
         },
       },
     });
     const debugSessionDom = debugSessionInstance.getDom();
+    assert.ok(debugSessionDom.innerHTML.includes("SSE channels"));
+    assert.ok(debugSessionDom.innerHTML.includes("device:ha-full"));
+    assert.ok(debugSessionDom.innerHTML.includes("channel limit, retry "));
     assert.ok(debugSessionDom.innerHTML.includes("SSE traffic:"));
     assert.ok(debugSessionDom.innerHTML.includes("SSE event:"));
     assert.ok(debugSessionDom.innerHTML.includes("n/a"));
