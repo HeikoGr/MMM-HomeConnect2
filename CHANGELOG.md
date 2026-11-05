@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.8](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.7.7...v1.7.8) (2026-11-05)
+
+
+### 📦 Build & Dependencies
+
+* **deps:** bump Biome to 2.6.5 and move the devcontainer to the trixie-slim image ([#114](https://github.com/HeikoGr/MMM-HomeConnect2/issues/114)) ([7650d0b](https://github.com/HeikoGr/MMM-HomeConnect2/commit/7650d0bb626747dee9beca40aac54fdca8b2ae44))
+
 ## [1.7.7](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.7.6...v1.7.7) (2026-11-05)
 
 
