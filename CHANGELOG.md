@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.7](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.7.6...v1.7.7) (2026-11-05)
+
+
+### 🐛 Fixes
+
+* **api:** keep the module running when the SSE channel limit is reached ([#111](https://github.com/HeikoGr/MMM-HomeConnect2/issues/111)) ([32a7abe](https://github.com/HeikoGr/MMM-HomeConnect2/commit/32a7abea1115e4171ac20162ab2f68f06940c599))
+
 ## [1.7.6](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.7.5...v1.7.6) (2026-11-02)
 
 
