@@ -813,6 +813,26 @@ function registeredInstances() {
       helper.deviceRefreshStartedAt = Date.now() - 10 * 60 * 1000;
       tick();
       assert.strictEqual(refreshes, 2, "Expected a stuck in-flight flag to be cleared and recovered");
+
+      // The monitoring channel limit blocks new streams only: REST and with it the
+      // snapshot keep running, and nothing is written to rate_limit.json.
+      fs.rmSync(testRateLimitPath, { force: true });
+      const HomeConnect = require("../lib/homeconnect-api");
+      const hc = new HomeConnect("client", "secret", "refresh");
+      hc.scheduleEventSourceRecreate = () => {};
+      helper.hc = hc;
+      helper.setupHomeConnectRateLimitReporting();
+      hc._eventSourceRateLimitInfo.set("device:ha-1", {
+        retryAfterSeconds: 600,
+        description: "Too many parallel monitoring connections. Maximum is 10",
+        limitType: "event",
+      });
+      hc.handleEventSourceError("device:ha-1", { code: 429, message: "Non-200 status code (429)" });
+      assert.strictEqual(helper.isRateLimited(), false, "Expected the channel limit not to engage the backoff");
+      assert.strictEqual(fs.existsSync(testRateLimitPath), false, "Expected no persisted block");
+      helper.deviceRefreshInFlight = false;
+      tick();
+      assert.strictEqual(refreshes, 3, "Expected the snapshot to run during the channel limit");
     } finally {
       helper.clearPeriodicFullSnapshotRefresh();
       helper.handleGetActivePrograms = originalGetActivePrograms;

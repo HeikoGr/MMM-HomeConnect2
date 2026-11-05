@@ -190,7 +190,7 @@ function makeFakeEventSource() {
     assert.strictEqual(recreates.at(-1).delayMs, 5000);
 
     // A bare 429 starts higher but stays with its channel: without a stated
-    // block it is most likely a channel held by another client, not a quota block.
+    // block it says nothing about the quota.
     const rateLimitEvents = [];
     hc.on("rateLimit", (payload) => rateLimitEvents.push(payload));
     hc.resetEventSourceRetryState("device:ha-2");
@@ -229,6 +229,134 @@ function makeFakeEventSource() {
       hc.handleEventSourceError("device:ha-1", offlineError);
     }
     assert.strictEqual(recreates.at(-1).delayMs, 10 * 60 * 1000);
+  }
+
+  // --- the monitoring channel limit stays with the channel ---------------
+  {
+    delete require.cache[modulePath];
+    const HomeConnect = require(modulePath);
+    const hc = new HomeConnect("client", "secret", "refresh");
+    const messages = [];
+    hc.log = {
+      debug() {},
+      info() {},
+      warn: (message) => messages.push(message),
+      error: (message) => messages.push(message),
+    };
+
+    const recreates = [];
+    hc.scheduleEventSourceRecreate = (delayMs, label) => recreates.push({ delayMs, label });
+    hc.eventSources = { "ha-1": makeFakeEventSource() };
+    hc._deviceEventMonitors = { "ha-1": { attached: false } };
+    const rateLimitEvents = [];
+    hc.on("rateLimit", (payload) => rateLimitEvents.push(payload));
+
+    const refuse = (info) => {
+      hc._eventSourceRateLimitInfo.set("device:ha-1", info);
+      hc.handleEventSourceError("device:ha-1", { code: 429, message: "Non-200 status code (429)" });
+      return recreates.at(-1).delayMs;
+    };
+    const channelLimit = {
+      retryAfterSeconds: 600,
+      description: "Too many parallel monitoring connections. Maximum is 10",
+      errorKey: "429",
+      limitType: "event",
+    };
+
+    // The constant Retry-After is the floor; the backoff grows past it up to the cap.
+    const delays = [];
+    for (let i = 0; i < 10; i += 1) {
+      delays.push(refuse(channelLimit) / 1000);
+    }
+    assert.deepStrictEqual(delays, [600, 600, 600, 600, 600, 960, 1920, 3600, 3600, 3600]);
+    assert.strictEqual(rateLimitEvents.length, 0, "Expected the channel limit not to block the module");
+    assert.ok(messages.some((message) => message.includes("retry-after=600s; type=event; key=429")));
+    assert.ok(messages.some((message) => message.includes("monitoring channel limit reached")));
+    assert.strictEqual(hc.getEventSourceRetryState("device:ha-1").channelLimit, true);
+
+    // A successful open starts over.
+    hc.resetEventSourceRetryState("device:ha-1");
+    assert.strictEqual(hc.getEventSourceRetryState("device:ha-1").channelLimit, false);
+    assert.strictEqual(refuse(channelLimit), 600 * 1000);
+
+    // A longer stated wait is honoured beyond the cap.
+    assert.strictEqual(refuse({ ...channelLimit, retryAfterSeconds: 7200 }), 7200 * 1000);
+
+    // The text alone is enough, in case the header goes away.
+    assert.strictEqual(refuse({ ...channelLimit, limitType: null }), 600 * 1000);
+    assert.strictEqual(rateLimitEvents.length, 0);
+
+    // Any other stated block still holds for every request.
+    hc.resetEventSourceRetryState("device:ha-1");
+    refuse({ retryAfterSeconds: 52, description: "5 start program calls in 1 minute", limitType: "time" });
+    assert.strictEqual(rateLimitEvents.length, 1);
+    assert.strictEqual(rateLimitEvents[0].retryAfterSeconds, 52);
+
+    // A stream the server ended reports an event without a message.
+    messages.length = 0;
+    hc.handleEventSourceError("device:ha-1", new Event("error"));
+    assert.ok(messages.some((message) => message.includes("stream ended by the server")));
+    assert.ok(!messages.some((message) => message.includes("[object")));
+  }
+
+  // --- a pending retry must not leave a second stream open ----------------
+  {
+    delete require.cache[modulePath];
+    const HomeConnect = require(modulePath);
+    const hc = new HomeConnect("client", "secret", "refresh");
+    const created = [];
+    hc.createEventSource = () => {
+      const source = makeFakeEventSource();
+      created.push(source);
+      return source;
+    };
+    const listener = () => {};
+
+    hc.subscribeDevice("ha-1", "NOTIFY", listener);
+    hc.handleEventSourceError("device:ha-1", { code: 503, message: "Non-200 status code (503)" });
+    assert.ok(hc.getEventSourceRetryState("device:ha-1").timer, "Expected a retry to be pending");
+
+    // The watchdog rebuild closes the channels and opens them again...
+    hc.closeEventSources();
+    assert.strictEqual(hc.getEventSourceRetryState("device:ha-1").timer, null, "Expected the retry to be dropped");
+    assert.strictEqual(hc.getEventSourceRetryState("device:ha-1").retryAt, null);
+
+    // ...and only the matching timers go when just one kind of channel is closed.
+    hc.handleEventSourceError("global", { code: 503, message: "Non-200 status code (503)" });
+    hc.closeEventSources({ global: false });
+    assert.ok(hc.getEventSourceRetryState("global").timer, "Expected the global retry to stay");
+    hc.closeEventSources();
+
+    hc.subscribeDevice("ha-1", "NOTIFY", listener);
+    const live = created.at(-1);
+    hc.recreateEventSourceByLabel("device:ha-1");
+    assert.strictEqual(live.closed, true, "Expected a replaced stream to be closed");
+    assert.notStrictEqual(hc.eventSources["ha-1"], live);
+
+    hc.subscribe("NOTIFY", listener);
+    const liveGlobal = hc.eventSource;
+    hc.recreateEventSourceByLabel("global");
+    assert.strictEqual(liveGlobal.closed, true, "Expected a replaced global stream to be closed");
+    assert.notStrictEqual(hc.eventSource, liveGlobal);
+
+    // Open streams are counted per stream, also those nothing references any more.
+    const streams = [{ readyState: 1 }, { readyState: 0 }, { readyState: 2 }];
+    hc._eventSourceStreams = new Set(streams);
+    assert.strictEqual(hc.countOpenEventSources(), 1);
+    assert.strictEqual(hc._eventSourceStreams.size, 2, "Expected closed streams to be forgotten");
+
+    hc.closeEventSources();
+    hc.resetEventSourceRetryState("device:ha-1");
+    hc.eventSources = { "ha-1": { readyState: 1 }, "ha-2": { readyState: 2 } };
+    const retrying = hc.getEventSourceRetryState("device:ha-2");
+    retrying.attempts = 3;
+    retrying.retryAt = 12345;
+    retrying.channelLimit = true;
+    assert.deepStrictEqual(hc.getEventSourceStates(), [
+      { label: "device:ha-1", open: true, attempts: 0, retryAt: null, channelLimit: false },
+      { label: "device:ha-2", open: false, attempts: 3, retryAt: 12345, channelLimit: true },
+    ]);
+    hc.destroy();
   }
 
   // --- a channel rebuild touches only that channel ----------------------
@@ -287,6 +415,15 @@ function makeFakeEventSource() {
         { status: 429, headers: { "content-type": "application/json" } },
       ),
       new Response("", { status: 429 }),
+      new Response(
+        JSON.stringify({
+          error: { key: "429", description: "Too many parallel monitoring connections. Maximum is 10" },
+        }),
+        {
+          status: 429,
+          headers: { "content-type": "application/json", "retry-after": "600", "rate-limit-type": "event" },
+        },
+      ),
     ];
     globalThis.fetch = async () => answers.shift();
 
@@ -316,6 +453,12 @@ function makeFakeEventSource() {
 
       await openAndFail("device:ha-3");
       assert.strictEqual(hc._eventSourceRateLimitInfo.get("device:ha-3").retryAfterSeconds, null);
+
+      await openAndFail("device:ha-4");
+      const channelLimit = hc._eventSourceRateLimitInfo.get("device:ha-4");
+      assert.strictEqual(channelLimit.retryAfterSeconds, 600);
+      assert.strictEqual(channelLimit.limitType, "event");
+      assert.strictEqual(channelLimit.errorKey, "429");
     } finally {
       globalThis.fetch = originalFetch;
       delete require.cache[modulePath];
