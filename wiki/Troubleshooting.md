@@ -42,6 +42,16 @@ During a block the module sends nothing to the API at all: a 429 while the sessi
 recorded as a block (honouring `Retry-After`), the start is retried only after it, and program
 requests triggered by appliance events wait as well. The scheduled snapshot catches up afterwards.
 
+`Too many parallel monitoring connections. Maximum is 10` is different: Home Connect counts open
+event streams per `clientId` and account. Only new streams are refused, REST requests still work, so
+the module shows no rate-limit notice and keeps its 30-minute snapshot. A refused stream retries on
+its own, up to once an hour. Appliances without a stream show snapshot data until then, and values
+that only come from `/settings` (such as the power state) stay as they are. The log line
+`monitoring channel limit reached with N channel(s) open here` shows how many of the 10 are this
+module's. The debug panel lists each channel. If `N` is below 10, the rest is held elsewhere, for
+example by another install with the same `clientId`, or Home Connect still counts streams it ended
+itself. A separate `clientId` has its own count.
+
 ### Progress bar starts at 0 % after a restart
 
 Home Connect reports no start time for a program. For appliances without a real progress value

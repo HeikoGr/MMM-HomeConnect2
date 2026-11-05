@@ -54,9 +54,12 @@
   (`lib/auth-orchestration.js`), forced active-program requests and their retries are skipped.
   A 429 on opening an SSE channel sets this block only when the server states its length
   (`Retry-After`, or "remaining period of N seconds" in the body, read in `createEventSource`
-  because the EventSource only reports the code). A bare channel 429 usually means the channel
-  is taken - Home Connect allows one per appliance and account, e.g. a second mirror holds it -
-  so only that channel backs off (up to 60 min); a stated block is waited out in full.
+  because the EventSource only reports the code) and it is not the monitoring channel limit.
+  That limit (10 per `client_id` and account, shared by all channels, several per appliance are
+  accepted) is marked by the header `rate-limit-type: event` or its text. It answers
+  `Retry-After: 600` as a constant, REST keeps working, so it never sets the block: only that
+  channel backs off, to the larger of the stated time and its backoff (up to 60 min). A bare
+  channel 429 also stays with its channel; any other stated block is waited out in full.
 - `run_state.json` (`lib/run-state-store.js`, gitignored) keeps when each running program was
   first seen (`_remainingObservedAt`, `_initialRemaining`). The API has no start time, and
   appliances without `EstimatedTotalProgramTime`/`ProgramProgress` (the dryer reports a constant
