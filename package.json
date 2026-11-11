@@ -1,6 +1,6 @@
 {
   "name": "mmm-homeconnect2",
-  "version": "1.7.8",
+  "version": "1.7.9",
   "private": true,
   "description": "MagicMirror² Module for Home Connect",
   "keywords": [
@@ -27,7 +27,7 @@
   "type": "commonjs",
   "main": "MMM-HomeConnect2.js",
   "engines": {
-    "node": ">=22.21.1"
+    "node": ">=22.22.2 <23 || >=24"
   },
   "scripts": {
     "postinstall": "node scripts/install-mmm-shared-submodule.js",
@@ -43,6 +43,6 @@
     "qrcode": "^1.5.4"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.6.5"
+    "@biomejs/biome": "^2.6.6"
   }
 }

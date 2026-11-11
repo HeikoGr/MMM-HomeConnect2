@@ -27,6 +27,8 @@ function loadHelper() {
         ...actual,
         refreshTokenPath: path.join(os.tmpdir(), "mmm-homeconnect2-liveness-token.json"),
         rateLimitPath: path.join(os.tmpdir(), "mmm-homeconnect2-liveness-rate-limit.json"),
+        // init() must not move the state files of a real installation around.
+        legacyStateFiles: [],
       };
     }
     return originalLoad.call(this, request, parent, isMain);

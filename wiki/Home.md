@@ -19,15 +19,17 @@ Use this wiki if you want to:
 ## Start Here
 
 - [Installation](Installation)
+- [Developer Application](Developer-Application)
 - [Update](Update)
 - [Quick Start](Quick-Start)
 - [Configuration](Configuration)
 - [Authentication](Authentication)
 - [Troubleshooting](Troubleshooting)
+- [Security](Security)
 
 ## Typical Setup Path
 
-1. Create a Home Connect developer application and copy its client ID.
+1. Create a Home Connect developer application and copy its client ID ([Developer Application](Developer-Application)).
 2. Install the module.
 3. Start with the example from [Quick Start](Quick-Start).
 4. Complete the device-flow login from [Authentication](Authentication).
