@@ -10,18 +10,20 @@ is separate from the account you use in the Home Connect app.
 
 ## 2. Register an application
 
-In the developer portal open **Applications** and choose **Register Application**:
+In the developer portal open the applications overview and register a new application. The labels
+below follow the portal; they may differ slightly:
 
 | Field | Value |
 | --- | --- |
-| Application ID | any name, for example `MagicMirror` |
+| Name / Application ID | any name, for example `MagicMirror` |
 | OAuth Flow | **Device Flow** |
-| Home Connect User Account for Testing | the e-mail address of your **Home Connect app** account (the one your appliances are paired with) |
-| Redirect URI | not needed for the device flow |
+| Home Connect user account for testing | the e-mail address of your **Home Connect app** account (the one your appliances are paired with) |
+| Redirect URIs | not used by the device flow |
 | One Time Token Mode | leave disabled |
+| Proof Key for Code Exchange | leave disabled (only for the authorization code flow) |
 
-Save the application. A private application only works for the Home Connect account entered as
-test account; that is all a mirror at home needs.
+Save the application. Its access is **private**: it only works for the Home Connect account entered as
+test account, which is all a mirror at home needs.
 
 ## 3. Copy the client ID
 
@@ -33,14 +35,21 @@ config: {
 }
 ```
 
-`clientSecret` is not needed for an application with the device flow. Set it only if the portal shows
-the secret as required for your application.
+The portal shows a **Client Secret** next to it. The device flow works without it, but Home Connect
+recommends sending it; set it as `clientSecret` (see [Security](Security) for keeping it out of the
+browser). The module then sends it with every token request.
 
-## 4. Wait for activation
+## 4. If the login is refused
 
-A new application is often not accepted right away. If the module shows an error such as
-`invalid_client` or `unauthorized_client` directly after you created the application, wait about
-15 to 30 minutes and restart MagicMirror.
+`unauthorized_client` in the module or on the login page usually means one of these:
+
+- the client ID is wrong or incomplete (it is 64 characters long);
+- the application was registered for another OAuth flow - it must be **Device Flow**;
+- you signed in with a Home Connect account that is not the application's test account;
+- `clientSecret` is set but does not belong to this application.
+
+A new application is sometimes not accepted right away. If everything above is right, wait a few
+minutes and restart MagicMirror.
 
 ## 5. Sign in
 
