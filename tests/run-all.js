@@ -55,7 +55,7 @@ async function runLiveSmokeTest() {
   }
 
   if (!fs.existsSync(refreshTokenPath)) {
-    console.log("No refresh_token.json found – skipping live API smoke test.");
+    console.log("No .state/refresh_token.json found – skipping live API smoke test.");
     return;
   }
 

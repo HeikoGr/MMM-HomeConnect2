@@ -19,6 +19,8 @@ magicmirror-check-results.md
 .playwright-mcp/
 
 # Home Connect OAuth token store, the persisted API rate-limit block, program start times and statistics
+# (lib/module-paths.js). Up to 1.7.8 they lay in the module folder; init() moves them into .state/.
+.state/
 refresh_token.json
 rate_limit.json
 run_state.json
