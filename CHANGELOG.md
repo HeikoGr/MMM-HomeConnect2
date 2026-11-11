@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.7.9](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.7.8...v1.7.9) (2026-11-11)
+
+
+### 🐛 Fixes
+
+* **auth:** keep the token and state files out of the served module folder ([#118](https://github.com/HeikoGr/MMM-HomeConnect2/issues/118)) ([71c6484](https://github.com/HeikoGr/MMM-HomeConnect2/commit/71c6484e8da1159dfa6119b75551f99c8956fe30))
+* **auth:** start a new login when the refresh token is rejected while running ([#119](https://github.com/HeikoGr/MMM-HomeConnect2/issues/119)) ([7f4f84f](https://github.com/HeikoGr/MMM-HomeConnect2/commit/7f4f84f45f9498948f0ee16778ab288fa2fd32bb))
+* **config:** drop the ineffective header option and fix the user documentation ([#120](https://github.com/HeikoGr/MMM-HomeConnect2/issues/120)) ([b09dbf6](https://github.com/HeikoGr/MMM-HomeConnect2/commit/b09dbf62b0da8043d46188cdfd73c0891ddcfe38))
+
+
+### 🔧 Tooling
+
+* keep the write token away from Dependabot code and test Node 22 and 24 ([#121](https://github.com/HeikoGr/MMM-HomeConnect2/issues/121)) ([2c093ec](https://github.com/HeikoGr/MMM-HomeConnect2/commit/2c093ecb540ff4a8db794774f912c67dd1244a9d))
+
+
+### 🔧 Maintenance
+
+* **deps-dev:** bump @biomejs/biome from 2.6.5 to 2.6.6 in the npm group ([#117](https://github.com/HeikoGr/MMM-HomeConnect2/issues/117)) ([b20cc7c](https://github.com/HeikoGr/MMM-HomeConnect2/commit/b20cc7c65c65736ce5f6a2b810f8f8a8ddaeb9b5))
+
 ## [1.7.8](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.7.7...v1.7.8) (2026-11-05)
 
 
