@@ -25,8 +25,8 @@ be served by the shared session. Align the credentials and reload.
 
 A dimmed note listing option names instead means harmless drift: the display stays
 connected and simply runs with the session settings established by the first client.
-The log line `Client config differs from the running session` names the exact keys and
-values. Usually the second browser has a cached older module version - a hard reload
+The log line `Client config differs from the running session` names the differing keys (not
+their values, which may be credentials). Usually the second browser has a cached older module version - a hard reload
 fixes it.
 
 ### Rate limits

@@ -1,0 +1,27 @@
+# Security Policy
+
+## Supported versions
+
+Only the latest release on `master` receives fixes.
+
+## Reporting a vulnerability
+
+Please do **not** open a public issue for a security problem. Report it privately through GitHub:
+**Security → Report a vulnerability** on
+[this repository](https://github.com/HeikoGr/MMM-HomeConnect2/security/advisories/new).
+
+Include what an attacker can reach (the mirror's web port, the local machine, the Home Connect
+account), the steps to reproduce and the module version. Never attach your `refresh_token.json`,
+`config.js` or unredacted logs.
+
+You will get an answer within two weeks. Fixes are released as a patch version, and the advisory is
+published once a fixed version is available.
+
+## What the module keeps
+
+- `.state/refresh_token.json` grants access to your Home Connect account (mode `0600`).
+- `.state/rate_limit.json`, `.state/run_state.json` and `.state/program_stats.json` describe when
+  your appliances run.
+
+See [Security](https://github.com/HeikoGr/MMM-HomeConnect2/wiki/Security) in the wiki for how to run
+the mirror safely.
