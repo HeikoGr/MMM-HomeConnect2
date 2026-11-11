@@ -7,6 +7,7 @@ const { ProgramFetchCoordinator } = require("./lib/program-fetch-coordinator");
 const { persistRateLimitUntil, readRateLimitUntil } = require("./lib/rate-limit-store");
 const { persistProgramStats, readProgramStats } = require("./lib/program-stats");
 const { persistRunStates, readRunStates } = require("./lib/run-state-store");
+const { migrateLegacyStateFiles } = require("./lib/state-files");
 const shared = require("./lib/mmm-shared/mmm-shared");
 const { createClientRegistry, formatLogEntry } = require("./lib/mmm-shared/backend-session");
 const NodeHelper = require("node_helper"),
@@ -204,6 +205,11 @@ module.exports = NodeHelper.create({
 
   init() {
     log.info("init module helper: MMM-HomeConnect2 (session-based)");
+    // First thing: MagicMirror calls init() before start(), and init() already
+    // reads the saved rate limit and builds the DeviceService, which reads the
+    // run states and statistics - and writes them back soon after. Migrating any
+    // later would overwrite the moved files with empty ones.
+    migrateLegacyStateFiles();
     this.notifications = shared.buildNotifications("MMM-HomeConnect2");
     this.restoreRateLimit();
 
