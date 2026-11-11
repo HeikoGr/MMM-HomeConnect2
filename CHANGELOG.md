@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.7.10](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.7.9...v1.7.10) (2026-11-11)
+
+
+### 🔧 Tooling
+
+* only accept release PRs on the default branch ([#125](https://github.com/HeikoGr/MMM-HomeConnect2/issues/125)) ([75d8b5c](https://github.com/HeikoGr/MMM-HomeConnect2/commit/75d8b5c5785e46ecac36fb55f02577f4c3d550a6))
+
+
+### 🔧 Maintenance
+
+* **deps:** bump eventsource from 5.1.4 to 5.1.5 in the npm group ([#124](https://github.com/HeikoGr/MMM-HomeConnect2/issues/124)) ([73aa06c](https://github.com/HeikoGr/MMM-HomeConnect2/commit/73aa06c3d6e532743be6a1360bb04558afb5f523))
+
 ## [1.7.9](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.7.8...v1.7.9) (2026-11-11)
 
 
