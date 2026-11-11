@@ -48,6 +48,10 @@
   ever become text nodes. Never assign `innerHTML` - the frontend tests use a fake DOM whose
   `innerHTML` setter throws.
 - `refresh_token.json` is a credential: written with mode `0600`, gitignored, never logged.
+- `refreshTokens()` (`lib/homeconnect-api.js`) never rejects: it resolves true/false, and concurrent
+  callers share one request. Decide on error fields (`statusCode`, `oauthError`), never on message
+  text. `invalid_grant` emits `authInvalid`; the helper's `restartAuthentication()` drops the client
+  and the token and starts the device flow - the same path as an `invalid_grant` at init.
 - `rate_limit.json` (`lib/rate-limit-store.js`, gitignored) keeps an API block across restarts;
   `setRateLimitUntil()` writes it, `init()` restores it, `checkTokenAndInitialize()` waits it out.
   The block holds for every automatic path: a 429 during init sets it and the init retry waits

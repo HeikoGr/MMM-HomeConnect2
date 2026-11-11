@@ -13,7 +13,8 @@ MMM-HomeConnect2 uses the OAuth2 device flow.
 
 - The module stores refresh data locally in `refresh_token.json`.
 - Future restarts should reuse the saved token automatically.
-- If the refresh token becomes invalid, the device flow is shown again.
+- If the refresh token becomes invalid (access revoked in the Home Connect account, or expired), the
+  device flow is shown again on its own, also while MagicMirror keeps running.
 
 ## Security Notes
 
@@ -23,4 +24,6 @@ MMM-HomeConnect2 uses the OAuth2 device flow.
 ## Common Auth Problems
 
 - If authorization seems stuck, wait briefly before retrying because the API may enforce a polling interval.
+- If nobody enters the code in time, the module gives up after three codes and shows an error. Reload
+  the page (or let a display reconnect) to get a new code; no restart of MagicMirror is needed.
 - If you changed your Home Connect app settings, re-run the device flow with the updated client ID or secret.
