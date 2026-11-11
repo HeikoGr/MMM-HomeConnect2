@@ -39,7 +39,7 @@
     "deps:update": "npx --yes npm-check-updates -u && npm install && biome migrate --write"
   },
   "dependencies": {
-    "eventsource": "^5.1.4",
+    "eventsource": "^5.1.5",
     "qrcode": "^1.5.4"
   },
   "devDependencies": {
