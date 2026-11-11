@@ -8,6 +8,7 @@ Expected behavior
 - Be open to feedback and address disagreements professionally.
 
 Reporting
-- If you experience or witness unacceptable behavior, please open an issue and flag it as confidential, or contact the project maintainers directly.
+- If you experience or witness unacceptable behavior, contact the maintainer directly through the e-mail address on
+  [their GitHub profile](https://github.com/HeikoGr). GitHub issues are always public.
 
 This Code of Conduct is intentionally short. The goal is a friendly, professional community.

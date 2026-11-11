@@ -8,7 +8,6 @@ Module.register("MMM-HomeConnect2", {
   lifecycle: null,
 
   defaults: {
-    header: "Home Connect Appliances",
     clientId: "",
     clientSecret: "",
 

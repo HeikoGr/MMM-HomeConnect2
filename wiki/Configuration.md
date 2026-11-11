@@ -8,11 +8,24 @@
 | `clientSecret` | Optional client secret when your developer app requires one. |
 | `logLevel` | Optional: `none`, `error`, `warn`, `info`, `debug`. All output (browser console, `pm2 logs`, including the Home Connect client's SSE and token messages) goes through MagicMirror's `Log`, so the global `logLevel` in `config.js` decides; this option can only narrow it for this module (`none` silences it). Default: empty, the global level alone. `debug` also shows the debug panel. |
 
+## Module Header
+
+The title above the module is MagicMirror's own `header` property of the module entry, next to
+`module` and `position` - not an option inside `config`:
+
+```js
+{
+  module: "MMM-HomeConnect2",
+  position: "top_left",
+  header: "Home Connect",
+  config: { /* ... */ },
+}
+```
+
 ## Rendering Options
 
 | Option | Description |
 | --- | --- |
-| `header` | Module header text. |
 | `showDeviceIcon` | Show appliance icons. |
 | `showDeviceIfInfoIsAvailable` | Keep devices visible when useful status data exists, even if they are idle. |
 | `showDeviceIfDoorIsOpen` | Keep a device visible while its door is open, even if otherwise idle. |
@@ -45,7 +58,7 @@ Config options fall into two groups:
   different values, the session values still apply and the backend logs a warning
   naming the differing keys. The later display itself shows nothing.
 - **Rendering options** (`showDeviceIcon`, `showDeviceIf*`, `showAlwaysAllDevices`,
-  `header`, `progressRefreshIntervalMs`) are evaluated in the browser and may differ
+  `progressRefreshIntervalMs`) are evaluated in the browser and may differ
   per display without any warning.
 
 A display stays registered as long as its browser is connected. When a browser closes,

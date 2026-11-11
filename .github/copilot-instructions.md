@@ -47,7 +47,11 @@
 - The DOM is built with `lib/dom-builder.js` and `lib/device-card-renderer.js`; API values only
   ever become text nodes. Never assign `innerHTML` - the frontend tests use a fake DOM whose
   `innerHTML` setter throws.
-- `refresh_token.json` is a credential: written with mode `0600`, gitignored, never logged.
+- All state files live in `.state/` (`lib/module-paths.js`): MagicMirror serves `modules/` over
+  HTTP and only skips dot paths. Write them with `writeFileAtomic()` (`lib/state-files.js`, tmp +
+  rename, mode `0600`); `init()` moves files an older version left in the module folder - first,
+  before anything reads them (`init()` runs before `start()` and already builds the services).
+- `.state/refresh_token.json` is a credential: mode `0600`, gitignored, never logged.
 - `refreshTokens()` (`lib/homeconnect-api.js`) never rejects: it resolves true/false, and concurrent
   callers share one request. Decide on error fields (`statusCode`, `oauthError`), never on message
   text. `invalid_grant` emits `authInvalid`; the helper's `restartAuthentication()` drops the client
