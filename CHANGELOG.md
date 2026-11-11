@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.11](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.7.10...v1.7.11) (2026-11-11)
+
+
+### 📚 Documentation
+
+* check the developer application page against the Home Connect API docs ([#127](https://github.com/HeikoGr/MMM-HomeConnect2/issues/127)) ([9e3f1a3](https://github.com/HeikoGr/MMM-HomeConnect2/commit/9e3f1a3246b0d98d4eed796a0774e1f45b4a053e))
+
 ## [1.7.10](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.7.9...v1.7.10) (2026-11-11)
 
 
