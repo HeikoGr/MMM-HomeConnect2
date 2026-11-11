@@ -45,6 +45,16 @@ process.on("exit", () => fs.rmSync(tmpRoot, { recursive: true, force: true }));
   assert.deepStrictEqual(fs.readdirSync(dir), ["refresh_token.json"]);
 }
 
+// An existing folder keeps its mode: it need not be ours (tests write into the temp dir, and
+// chmod on /tmp fails for a normal user - or, as root, locks everyone else out).
+{
+  const dir = path.join(tmpRoot, "shared");
+  fs.mkdirSync(dir, { mode: 0o755 });
+  fs.chmodSync(dir, 0o755);
+  writeFileAtomic(path.join(dir, "rate_limit.json"), "{}");
+  assert.strictEqual(mode(dir), 0o755);
+}
+
 // A failed write leaves the previous content untouched and no temp file behind.
 {
   const dir = path.join(tmpRoot, "failing", ".state");
