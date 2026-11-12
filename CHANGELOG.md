@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.7.11...v1.8.0) (2026-11-12)
+
+
+### 🔌 Features
+
+* translate authentication and alarm texts ([#132](https://github.com/HeikoGr/MMM-HomeConnect2/issues/132)) ([26b10c5](https://github.com/HeikoGr/MMM-HomeConnect2/commit/26b10c5a4a900e715b43deea1a1bc5d7824e07e0))
+
 ## [1.7.11](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.7.10...v1.7.11) (2026-11-11)
 
 

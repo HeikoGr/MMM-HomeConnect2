@@ -11,7 +11,7 @@
   text-align: left;
 }
 
-.deviceContainer {
+:where(.MMM-HomeConnect2) .deviceContainer {
   display: grid;
   grid-template-columns: 60px 32px minmax(0, 1fr);
   column-gap: 12px;
@@ -20,16 +20,16 @@
   align-items: start;
 }
 
-.deviceContainer.deviceContainerWithoutDeviceIcon {
+:where(.MMM-HomeConnect2) .deviceContainer.deviceContainerWithoutDeviceIcon {
   grid-template-columns: 32px minmax(0, 1fr);
 }
 
-.deviceContainer.deviceOffline {
+:where(.MMM-HomeConnect2) .deviceContainer.deviceOffline {
   opacity: 0.72;
 }
 
-.deviceContainer > img,
-.device_img {
+:where(.MMM-HomeConnect2) .deviceContainer > img,
+:where(.MMM-HomeConnect2) .device_img {
   text-align: center;
   align-self: start;
   width: 60px;
@@ -40,7 +40,7 @@
   object-position: center;
 }
 
-.deviceIconFallback {
+:where(.MMM-HomeConnect2) .deviceIconFallback {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -50,12 +50,12 @@
   font-size: 28px;
 }
 
-.deviceContainer > div {
+:where(.MMM-HomeConnect2) .deviceContainer > div {
   text-align: left;
   min-width: 0;
 }
 
-.deviceStatusIcons {
+:where(.MMM-HomeConnect2) .deviceStatusIcons {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -66,11 +66,11 @@
   min-width: 32px;
 }
 
-.deviceContainerWithoutDeviceIcon .deviceStatusIcons {
+:where(.MMM-HomeConnect2) .deviceContainerWithoutDeviceIcon .deviceStatusIcons {
   grid-column: 1;
 }
 
-.deviceStatusIcon {
+:where(.MMM-HomeConnect2) .deviceStatusIcon {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -81,11 +81,11 @@
   font-size: 16pt;
 }
 
-.deviceStatusIconOffline {
+:where(.MMM-HomeConnect2) .deviceStatusIconOffline {
   color: #ffbf80;
 }
 
-.deviceName {
+:where(.MMM-HomeConnect2) .deviceName {
   grid-column: 3;
   grid-row: 1;
   font-size: 17pt;
@@ -96,19 +96,19 @@
   align-self: start;
 }
 
-.deviceNameLabel {
+:where(.MMM-HomeConnect2) .deviceNameLabel {
   display: block;
   line-height: 1;
 }
 
-.deviceStatus {
+:where(.MMM-HomeConnect2) .deviceStatus {
   grid-column: 3;
   grid-row: 2;
   font-size: 11px;
   align-self: start;
 }
 
-.deviceProgram {
+:where(.MMM-HomeConnect2) .deviceProgram {
   display: block;
   margin-top: 4px;
   font-size: 11px;
@@ -116,7 +116,7 @@
   line-height: 1.15;
 }
 
-.deviceProgramDetails {
+:where(.MMM-HomeConnect2) .deviceProgramDetails {
   display: block;
   margin-top: 2px;
   max-width: 100%;
@@ -125,7 +125,7 @@
   line-height: 1.15;
 }
 
-.deviceAlert {
+:where(.MMM-HomeConnect2) .deviceAlert {
   display: block;
   margin-top: 3px;
   font-size: 10px;
@@ -133,7 +133,7 @@
   color: #ffd27d;
 }
 
-.deviceProgressBar {
+:where(.MMM-HomeConnect2) .deviceProgressBar {
   grid-column: 3;
   grid-row: 3;
   align-self: start;
@@ -143,7 +143,7 @@
   inline-size: 16em;
 }
 
-.hc-progress-label {
+:where(.MMM-HomeConnect2) .hc-progress-label {
   display: inline-block;
   margin-left: 6px;
   font-size: 10px;
@@ -151,13 +151,13 @@
   color: #ffffff;
 }
 
-.hc-finished {
+:where(.MMM-HomeConnect2) .hc-finished {
   color: #b2ffb2;
   font-weight: bold;
   font-size: 12px;
 }
 
-.hc-device-debug {
+:where(.MMM-HomeConnect2) .hc-device-debug {
   grid-column: 3;
   grid-row: 4;
   margin-top: 2px;
@@ -169,10 +169,10 @@
 
 /* Without an icon the text column moves left. After the base rules, so the
    more specific selectors also come later in the file. */
-.deviceContainerWithoutDeviceIcon .deviceName,
-.deviceContainerWithoutDeviceIcon .deviceStatus,
-.deviceContainerWithoutDeviceIcon .deviceProgressBar,
-.deviceContainerWithoutDeviceIcon .hc-device-debug {
+:where(.MMM-HomeConnect2) .deviceContainerWithoutDeviceIcon .deviceName,
+:where(.MMM-HomeConnect2) .deviceContainerWithoutDeviceIcon .deviceStatus,
+:where(.MMM-HomeConnect2) .deviceContainerWithoutDeviceIcon .deviceProgressBar,
+:where(.MMM-HomeConnect2) .deviceContainerWithoutDeviceIcon .hc-device-debug {
   grid-column: 2;
 }
 
@@ -187,7 +187,7 @@
   );
 }
 
-.hc-debug-panel {
+:where(.MMM-HomeConnect2) .hc-debug-panel {
   margin-top: 10px;
   padding: 8px;
   background: rgba(0, 0, 0, 0.45);
@@ -198,53 +198,53 @@
   color: #f5f5f5;
 }
 
-.hc-status-banner {
+:where(.MMM-HomeConnect2) .hc-status-banner {
   margin: 0 0 10px;
   padding: 8px 10px;
   border-radius: 8px;
   line-height: 1.35;
 }
 
-.hc-status-banner-warning {
+:where(.MMM-HomeConnect2) .hc-status-banner-warning {
   border: 1px solid rgba(255, 191, 128, 0.45);
   background: rgba(120, 72, 10, 0.28);
   color: #ffe1b8;
 }
 
-.hc-status-banner-title {
+:where(.MMM-HomeConnect2) .hc-status-banner-title {
   font-size: 12px;
   font-weight: 600;
 }
 
-.hc-status-banner-message {
+:where(.MMM-HomeConnect2) .hc-status-banner-message {
   margin-top: 3px;
   font-size: 11px;
 }
 
-.hc-debug-row {
+:where(.MMM-HomeConnect2) .hc-debug-row {
   display: flex;
   justify-content: space-between;
   gap: 12px;
 }
 
-.hc-debug-row + .hc-debug-row {
+:where(.MMM-HomeConnect2) .hc-debug-row + .hc-debug-row {
   margin-top: 4px;
 }
 
-.hc-debug-label {
+:where(.MMM-HomeConnect2) .hc-debug-label {
   color: rgba(255, 255, 255, 0.7);
   flex: 0 0 auto;
   margin-right: 8px;
 }
 
-.hc-debug-subtitle {
+:where(.MMM-HomeConnect2) .hc-debug-subtitle {
   margin-top: 8px;
   font-size: 12px;
   font-weight: 600;
   color: #ffffff;
 }
 
-.auth-container {
+:where(.MMM-HomeConnect2) .auth-container {
   margin-top: 8px;
   padding: 12px;
   border: 1px solid rgba(255, 255, 255, 0.16);
@@ -253,54 +253,54 @@
   color: #f5f5f5;
 }
 
-.auth-container.error {
+:where(.MMM-HomeConnect2) .auth-container.error {
   border-color: rgba(255, 120, 120, 0.45);
   background: rgba(90, 10, 10, 0.28);
 }
 
-.auth-header {
+:where(.MMM-HomeConnect2) .auth-header {
   font-size: 16px;
   font-weight: 600;
   line-height: 1.2;
 }
 
-.auth-step,
-.auth-footer,
-.auth-waiting,
-.auth-message,
-.auth-info,
-.progress-container {
+:where(.MMM-HomeConnect2) .auth-step,
+:where(.MMM-HomeConnect2) .auth-footer,
+:where(.MMM-HomeConnect2) .auth-waiting,
+:where(.MMM-HomeConnect2) .auth-message,
+:where(.MMM-HomeConnect2) .auth-info,
+:where(.MMM-HomeConnect2) .progress-container {
   margin-top: 10px;
 }
 
-.auth-step-title {
+:where(.MMM-HomeConnect2) .auth-step-title {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.8);
 }
 
-.auth-step-content {
+:where(.MMM-HomeConnect2) .auth-step-content {
   margin-top: 4px;
 }
 
-.auth-url,
-.auth-code,
-.auth-info,
-.auth-message,
-.auth-waiting,
-.auth-timer {
+:where(.MMM-HomeConnect2) .auth-url,
+:where(.MMM-HomeConnect2) .auth-code,
+:where(.MMM-HomeConnect2) .auth-info,
+:where(.MMM-HomeConnect2) .auth-message,
+:where(.MMM-HomeConnect2) .auth-waiting,
+:where(.MMM-HomeConnect2) .auth-timer {
   line-height: 1.4;
 }
 
-.auth-url {
+:where(.MMM-HomeConnect2) .auth-url {
   overflow-wrap: anywhere;
 }
 
-.auth-url a {
+:where(.MMM-HomeConnect2) .auth-url a {
   color: #d6f1ff;
   text-decoration: underline;
 }
 
-.auth-code {
+:where(.MMM-HomeConnect2) .auth-code {
   display: inline-block;
   padding: 4px 8px;
   border-radius: 6px;
@@ -310,12 +310,12 @@
   letter-spacing: 0.08em;
 }
 
-.auth-qr {
+:where(.MMM-HomeConnect2) .auth-qr {
   margin: 6px auto 0;
   max-width: 220px;
 }
 
-.auth-qr img {
+:where(.MMM-HomeConnect2) .auth-qr img {
   box-sizing: border-box;
   display: block;
   margin: 0 auto;
@@ -326,7 +326,7 @@
   padding: 6px;
 }
 
-.progress-bar {
+:where(.MMM-HomeConnect2) .progress-bar {
   width: 100%;
   height: 6px;
   overflow: hidden;
@@ -334,13 +334,13 @@
   background: rgba(255, 255, 255, 0.14);
 }
 
-.progress-fill {
+:where(.MMM-HomeConnect2) .progress-fill {
   height: 100%;
   border-radius: inherit;
   background: linear-gradient(90deg, #9ad7ff, #ffffff);
 }
 
-.hc-status-note {
+:where(.MMM-HomeConnect2) .hc-status-note {
   margin: 0 0 8px;
   font-size: 11px;
   line-height: 1.35;

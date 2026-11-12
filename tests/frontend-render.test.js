@@ -1191,6 +1191,110 @@ function createInstance(overrides = {}) {
     sendOutdated(createInstance(), 2000);
     assert.strictEqual(reloads, 2, "a new server start may reload again");
 
+    // Backend texts carry a translation key: a German display shows German, not the English text
+    // the backend logs. Without a translation the English text stays.
+    {
+      const german = {
+        AUTH_POLLING_ATTEMPT: "Warte auf Bestätigung ({attempt}/{maxAttempts})",
+        AUTH_CODE_EXPIRED: "Der Anmeldecode ist abgelaufen.",
+        RATE_LIMIT_WAIT: "API-Limit erreicht - noch {seconds} s",
+        AUTH_IN_PROGRESS: "Anmeldung läuft",
+        ALERT_DUST_BOX_MISSING: "Staubbehälter fehlt",
+      };
+      const translateDe = (key, variables = {}) =>
+        key in german ? german[key].replace(/\{([^}]+)\}/g, (_m, name) => String(variables[name])) : key;
+      const localized = (overrides) => {
+        const instance = createInstance(overrides);
+        instance.translate = translateDe;
+        return instance.getDom().innerHTML;
+      };
+
+      const polling = localized({
+        authStatus: {
+          status: "polling",
+          message: "Waiting for authorization... (attempt 3/120)",
+          messageKey: "AUTH_POLLING_ATTEMPT",
+          messageParams: { attempt: 3, maxAttempts: 120 },
+          attempt: 3,
+          maxAttempts: 120,
+        },
+      });
+      assert.ok(polling.includes("Warte auf Bestätigung (3/120)"), polling);
+      assert.ok(!polling.includes("Waiting for authorization"));
+
+      const failed = localized({
+        authStatus: {
+          status: "error",
+          message: "Authentication failed: ❌ Device code expired - please restart",
+          messageKey: "AUTH_CODE_EXPIRED",
+        },
+      });
+      assert.ok(failed.includes("Der Anmeldecode ist abgelaufen."));
+
+      const technical = localized({
+        authStatus: { status: "error", message: "Authentication failed: getaddrinfo ENOTFOUND" },
+      });
+      assert.ok(technical.includes("Authentication failed: getaddrinfo ENOTFOUND"), "no key: the text stays");
+
+      // The hint under an auth error: reload for a normal failure, restart only where nothing retries.
+      const hints = {
+        AUTH_FAILED_INFO: "Neuladen",
+        AUTH_INVALID_CLIENT: "clientId",
+        RATE_LIMIT_RESTART: "neu starten",
+      };
+      const hintFor = (reason) => {
+        const instance = createInstance({
+          authStatus: { status: "error", message: "x", ...(reason ? { reason } : {}) },
+        });
+        instance.translate = (key) => hints[key] || key;
+        return instance.getDom().findByClass("auth-info")[0].textContent;
+      };
+      assert.strictEqual(hintFor(undefined), "Neuladen");
+      assert.strictEqual(hintFor("invalid_client"), "clientId");
+      assert.strictEqual(hintFor("rate_limited"), "neu starten");
+
+      const unknownKey = localized({
+        authStatus: { status: "error", message: "English text", messageKey: "NOT_TRANSLATED_YET" },
+      });
+      assert.ok(unknownKey.includes("English text"), "a key without translation falls back");
+
+      const rateLimited = localized({
+        lastInitStatus: {
+          status: "device_error",
+          message: "Rate limit active - wait 30s",
+          messageKey: "RATE_LIMIT_WAIT",
+          messageParams: { seconds: 30 },
+          rateLimitSeconds: 30,
+          isRateLimit: true,
+        },
+      });
+      assert.ok(rateLimited.includes("API-Limit erreicht - noch 30 s"), rateLimited);
+
+      const inProgress = createInstance({});
+      inProgress.translate = translateDe;
+      inProgress.socketNotificationReceived(inProgress.notifications.EVENT, {
+        identifier: "test-instance",
+        action: "INIT_STATUS",
+        ok: true,
+        data: { status: "auth_in_progress", message: "Authentication in progress" },
+      });
+      assert.ok(inProgress.getDom().innerHTML.includes("Anmeldung läuft"));
+
+      const robot = createInstance({});
+      robot.translate = translateDe;
+      const robotState = robot.buildDeviceDisplayState(
+        {
+          name: "Robby",
+          type: "CleaningRobot",
+          connected: true,
+          DeviceAlertsByKey: { "ConsumerProducts.CleaningRobot.Status.DustBoxInserted": "Dust box missing" },
+        },
+        {},
+        robot.getDeviceUtils(),
+      );
+      assert.ok(JSON.stringify(robotState).includes("Staubbehälter fehlt"), JSON.stringify(robotState));
+    }
+
     console.log("frontend-render.test.js OK");
   } finally {
     restoreGlobals();

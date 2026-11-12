@@ -35,6 +35,10 @@
 - `lib/device-utils.js` is loaded twice: via `require` in the backend and via `getScripts()` in
   the browser. Keep it free of Node-only and DOM-only APIs. The same holds for
   `lib/display-state.js` (what a device card shows: progress, program line, status texts).
+- What an API payload or SSE event changes on a device object is `lib/device-events.js`
+  (`applyEventToDevice()`, pure functions, backend only). `lib/homeconnect-api.js` keeps HTTP, OAuth
+  and SSE; its `applyEventToDevice()` method only forwards, so services and test stubs can reach the
+  event handling through the client.
 - Backend layout: `node_helper.js` (~420 lines) keeps the fields, the status emitters, the
   snapshot timer and socket dispatch. Method groups live in their own files and are spread
   into the helper definition (they work on the helper's state, so tests keep calling them on

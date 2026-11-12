@@ -1,6 +1,6 @@
 {
   "name": "mmm-homeconnect2",
-  "version": "1.7.11",
+  "version": "1.8.0",
   "private": true,
   "description": "MagicMirror² Module for Home Connect",
   "keywords": [
@@ -33,10 +33,12 @@
     "postinstall": "node scripts/install-mmm-shared-submodule.js",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "test": "node tests/run-all.js",
+    "test": "node --test --import ./tests/helpers/quiet-console.js tests/*.test.js",
+    "test:coverage": "node --test --experimental-test-coverage --test-reporter=spec --import ./tests/helpers/quiet-console.js '--test-coverage-exclude=tests/**' '--test-coverage-exclude=scripts/**' '--test-coverage-exclude=lib/mmm-shared/**' tests/*.test.js",
     "check": "node scripts/magicmirror-check.mjs --current",
     "shared:update": "git submodule update --remote --init --checkout lib/mmm-shared && git submodule status lib/mmm-shared",
-    "deps:update": "npx --yes npm-check-updates -u && npm install && biome migrate --write"
+    "deps:update": "npx --yes npm-check-updates -u && npm install && biome migrate --write",
+    "test:live": "node scripts/live-smoke-test.js"
   },
   "dependencies": {
     "eventsource": "^5.1.5",

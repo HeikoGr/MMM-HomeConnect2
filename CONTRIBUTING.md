@@ -59,6 +59,11 @@ Releases are prepared on `develop`: release-please keeps a `chore(develop): rele
 date. Merging it bumps the version and writes the changelog on `develop`; a PR from `develop` to
 `master` (merge commit) then publishes the release, tag and GitHub release.
 
+Dependencies: Dependabot opens grouped PRs against `develop` (minor and patch, new releases wait
+3 days). Updates of GitHub Actions and devDependencies merge themselves once CI passes; runtime
+dependencies run on the mirror next to the user's credentials and wait for a review. Actions are
+pinned to a commit SHA with the version as a comment; Dependabot keeps both up to date.
+
 6. Style
 
 - Use Biome. Run `node --run lint:fix` to auto-fix style issues.

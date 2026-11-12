@@ -185,6 +185,7 @@ Module.register("MMM-HomeConnect2", {
           this.authStatus = {
             status: "polling",
             message: safePayload.message,
+            messageKey: "AUTH_IN_PROGRESS",
           };
         }
         this.lifecycle.render();
@@ -272,7 +273,7 @@ Module.register("MMM-HomeConnect2", {
 
   buildDeviceDisplayState(device, runtimeHints, deviceUtils) {
     return this.getDisplayState().buildDeviceDisplayState(device, runtimeHints, deviceUtils, {
-      translate: (key) => this.translate(key),
+      translate: (key, variables) => this.translate(key, variables),
       formatClockTime: (timestamp) => this.formatClockTime(timestamp),
       debug: (this.config?.logLevel || "").toLowerCase() === "debug",
       now: Date.now(),
@@ -288,7 +289,7 @@ Module.register("MMM-HomeConnect2", {
       device,
       displayState: this.buildDeviceDisplayState(device, runtimeHints, deviceUtils),
       showDeviceIcon: Boolean(this.config.showDeviceIcon),
-      translate: (key) => this.translate(key),
+      translate: (key, variables) => this.translate(key, variables),
       iconUrl: (imageName) => this.file(`icons/${imageName}`),
     });
   },
@@ -296,7 +297,7 @@ Module.register("MMM-HomeConnect2", {
   getDom() {
     // Cards: lib/device-card-renderer.js; everything else: lib/status-views.js.
     const views = window.HomeConnectStatusViews;
-    const ctx = { translate: (key) => this.translate(key), now: Date.now() };
+    const ctx = { translate: (key, variables) => this.translate(key, variables), now: Date.now() };
     const div = document.createElement("div");
     const append = (...nodes) => {
       for (const node of nodes.flat()) {
