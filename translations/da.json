@@ -14,7 +14,7 @@
   "AUTH_MINUTES": "minutter",
   "AUTH_SECONDS": "sekunder",
   "AUTH_FAILED_TITLE": "Godkendelse mislykkedes",
-  "AUTH_FAILED_INFO": "Genstart MagicMirror for at prøve igen.",
+  "AUTH_FAILED_INFO": "Et nyt login starter automatisk, senest når siden genindlæses.",
   "AUTH_INVALID_CLIENT": "Home Connect accepterer ikke dette clientId. Kontrollér Client ID'et for din Home Connect-app i config.js, og genstart MagicMirror.",
   "SESSION_BASED_AUTH": "Sessionsbaseret godkendelse aktiv",
   "PROGRAM_FINISHED": "Program færdig",
@@ -39,5 +39,14 @@
   "CONFIG_MISSING_CLIENT_ID": "Intet clientId angivet. Indtast Client ID'et for din Home Connect-app i config.js, og genstart MagicMirror.",
   "AVAILABLE_PROGRAMS": "Programmer",
   "AVAILABLE_OPTIONS": "Valgmuligheder",
-  "ACTIVE_ALERTS": "Advarsler"
+  "ACTIVE_ALERTS": "Advarsler",
+  "AUTH_IN_PROGRESS": "Login i gang",
+  "AUTH_POLLING_ATTEMPT": "Venter på bekræftelse af login (forsøg {attempt} af {maxAttempts})",
+  "AUTH_CODE_EXPIRED": "Login-koden udløb, før den blev bekræftet.",
+  "AUTH_DENIED": "Login blev afvist.",
+  "AUTH_NOT_CONFIRMED": "Login blev ikke bekræftet i tide.",
+  "RATE_LIMIT_WAIT": "Home Connect API-grænse nået – venter {seconds} s",
+  "RATE_LIMIT_RESTART": "Home Connect API-grænse nået – genstart MagicMirror om 2 minutter",
+  "RATE_LIMIT_REACHED": "Home Connect API-grænse nået",
+  "ALERT_DUST_BOX_MISSING": "Støvbeholder mangler"
 }

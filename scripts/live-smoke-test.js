@@ -1,59 +1,14 @@
 "use strict";
 
-// Simple test runner for local unit tests and optional live API smoke test.
+// Live smoke test against the real Home Connect API (`node --run test:live`): uses the stored
+// refresh token and the clientId from the environment (HC_CLIENT_ID, HC_CLIENT_SECRET) or from
+// /opt/magic_mirror/config/config.js, lists the appliances and prints status, settings and the
+// active program of each. Read-only, but every call counts against the daily API quota.
 
-const { spawnSync } = require("node:child_process");
 const { refreshTokenPath } = require("../lib/module-paths");
-
-function shouldRunLiveSmokeTest() {
-  const value = String(process.env.HC_RUN_LIVE_SMOKE_TEST || "")
-    .trim()
-    .toLowerCase();
-  return value === "1" || value === "true" || value === "yes";
-}
-
-function runNode(file) {
-  const result = spawnSync(process.execPath, [file], {
-    cwd: __dirname,
-    stdio: "inherit",
-  });
-
-  if (result.error) {
-    throw result.error;
-  }
-
-  if (typeof result.status === "number" && result.status !== 0) {
-    const error = new Error(`${file} failed with exit code ${result.status}`);
-    error.exitCode = result.status;
-    throw error;
-  }
-
-  if (result.signal) {
-    const error = new Error(`${file} terminated by signal ${result.signal}`);
-    error.exitCode = 1;
-    throw error;
-  }
-}
-
-// Every tests/*.test.js, so a new test file cannot be left out by accident.
-function runUnitTests() {
-  const fs = require("node:fs");
-  const files = fs
-    .readdirSync(__dirname)
-    .filter((file) => file.endsWith(".test.js"))
-    .sort();
-  for (const file of files) {
-    runNode(file);
-  }
-}
 
 async function runLiveSmokeTest() {
   const fs = require("node:fs");
-  if (!shouldRunLiveSmokeTest()) {
-    console.log("Skipping live HomeConnect smoke test. Set HC_RUN_LIVE_SMOKE_TEST=1 to enable it.");
-    return;
-  }
-
   if (!fs.existsSync(refreshTokenPath)) {
     console.log("No .state/refresh_token.json found – skipping live API smoke test.");
     return;
@@ -89,7 +44,7 @@ async function runLiveSmokeTest() {
   let clientId = process.env.HC_CLIENT_ID || "";
   let clientSecret = process.env.HC_CLIENT_SECRET || "";
 
-  // If clientId not provided via ENV, try to read module config at ../config/config.js
+  // If clientId is not provided via ENV, read it from the running MagicMirror config.
   if (!clientId) {
     try {
       // Read global MagicMirror config (absolute path)
@@ -137,7 +92,7 @@ async function runLiveSmokeTest() {
 
   if (!clientId) {
     console.log(
-      "HC_CLIENT_ID not set and not found in ../config/config.js – skipping live test. Set HC_CLIENT_ID to run.",
+      "HC_CLIENT_ID not set and not found in /opt/magic_mirror/config/config.js – skipping live test. Set HC_CLIENT_ID to run.",
     );
     return;
   }
@@ -168,7 +123,7 @@ async function runLiveSmokeTest() {
 
     console.log(`Live smoke test OK – fetched ${appliances.length} appliance(s).`);
 
-    // helper to add a timeout to API calls to avoid hanging the runner
+    // helper to add a timeout to API calls to avoid hanging the script
     const callWithTimeout = async (fn, ms = 5000) => {
       return Promise.race([fn(), new Promise((_, reject) => setTimeout(() => reject(new Error("api timeout")), ms))]);
     };
@@ -212,45 +167,9 @@ async function runLiveSmokeTest() {
     console.error("Live smoke test error:", err?.message ? err.message : err);
     process.exitCode = 1;
   } finally {
-    // Cleanup: clear token refresh timer and close EventSource connections
-    try {
-      if (hc) {
-        if (hc.tokenRefreshTimeout) {
-          clearTimeout(hc.tokenRefreshTimeout);
-          hc.tokenRefreshTimeout = null;
-        }
-        if (hc.eventSource && typeof hc.eventSource.close === "function") {
-          try {
-            hc.eventSource.close();
-          } catch {
-            /* ignore close error */
-          }
-          hc.eventSource = null;
-        }
-        if (hc.eventSources && typeof hc.eventSources === "object") {
-          for (const k of Object.keys(hc.eventSources)) {
-            try {
-              const es = hc.eventSources[k];
-              if (es && typeof es.close === "function") es.close();
-            } catch {
-              /* ignore close error */
-            }
-          }
-          hc.eventSources = {};
-        }
-      }
-    } catch (cleanupErr) {
-      console.warn("Live smoke test cleanup error", cleanupErr?.message ? cleanupErr.message : cleanupErr);
-    }
+    // Stops the refresh timer and closes every event source, so the process can exit.
+    hc?.destroy();
   }
 }
 
-(async () => {
-  try {
-    runUnitTests();
-    await runLiveSmokeTest();
-  } catch (error) {
-    console.error(error?.message ? error.message : error);
-    process.exitCode = error?.exitCode ? error.exitCode : 1;
-  }
-})();
+runLiveSmokeTest();

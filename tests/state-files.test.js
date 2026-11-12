@@ -145,6 +145,14 @@ process.on("exit", () => fs.rmSync(tmpRoot, { recursive: true, force: true }));
   assert.strictEqual(tokenStore.deleteRefreshTokenFile(), true);
   assert.strictEqual(fs.existsSync(tokenPath), false);
   assert.strictEqual(tokenStore.deleteRefreshTokenFile(), false);
+
+  // A disk error is reported as false, never thrown: the store runs inside event handlers
+  // without a try/catch, and a throw there would take down every MagicMirror module.
+  // A directory in place of the token file makes both the write and the delete fail.
+  fs.mkdirSync(tokenPath, { recursive: true });
+  assert.strictEqual(tokenStore.persistRefreshToken("refresh-def"), false);
+  assert.strictEqual(tokenStore.deleteRefreshTokenFile(), false);
+  assert.strictEqual(fs.statSync(tokenPath).isDirectory(), true);
 }
 
 console.log("state-files tests passed");

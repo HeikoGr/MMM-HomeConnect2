@@ -14,7 +14,7 @@
   "AUTH_MINUTES": "minutes",
   "AUTH_SECONDS": "seconds",
   "AUTH_FAILED_TITLE": "Authentication failed",
-  "AUTH_FAILED_INFO": "Please restart MagicMirror to try again.",
+  "AUTH_FAILED_INFO": "A new sign-in starts automatically, at the latest when this page is reloaded.",
   "AUTH_INVALID_CLIENT": "Home Connect does not accept this clientId. Check the Client ID of your Home Connect app in config.js and restart MagicMirror.",
   "SESSION_BASED_AUTH": "Session-based authentication active",
   "PROGRAM_FINISHED": "Program finished",
@@ -39,5 +39,14 @@
   "CONFIG_MISSING_CLIENT_ID": "No clientId set. Enter the Client ID of your Home Connect app in config.js and restart MagicMirror.",
   "AVAILABLE_PROGRAMS": "Programs",
   "AVAILABLE_OPTIONS": "Options",
-  "ACTIVE_ALERTS": "Alerts"
+  "ACTIVE_ALERTS": "Alerts",
+  "AUTH_IN_PROGRESS": "Login in progress",
+  "AUTH_POLLING_ATTEMPT": "Waiting for the login to be confirmed (attempt {attempt} of {maxAttempts})",
+  "AUTH_CODE_EXPIRED": "The login code expired before it was confirmed.",
+  "AUTH_DENIED": "The login was declined.",
+  "AUTH_NOT_CONFIRMED": "The login was not confirmed in time.",
+  "RATE_LIMIT_WAIT": "Home Connect API limit reached - waiting {seconds} s",
+  "RATE_LIMIT_RESTART": "Home Connect API limit reached - please restart MagicMirror in 2 minutes",
+  "RATE_LIMIT_REACHED": "Home Connect API limit reached",
+  "ALERT_DUST_BOX_MISSING": "Dust box missing"
 }

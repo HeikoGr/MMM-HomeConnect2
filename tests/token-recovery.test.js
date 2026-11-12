@@ -282,6 +282,23 @@ const originalFetch = globalThis.fetch;
     helper.headlessAuthRetryTimer = null;
     helper.handleHeadlessAuthError({});
     clearTimeout(helper.headlessAuthRetryTimer);
+    assert.strictEqual(helper.lastAuthFailure.messageKey, undefined, "no reason, no key: English text stays");
+
+    // A known reason carries a translation key for the display, next to the English message.
+    helper.headlessAuthRetryTimer = null;
+    const expired = new Error("❌ Device code expired - please restart");
+    expired.authReason = "expired_token";
+    helper.handleHeadlessAuthError(expired);
+    clearTimeout(helper.headlessAuthRetryTimer);
+    assert.strictEqual(helper.lastAuthFailure.messageKey, "AUTH_CODE_EXPIRED");
+    assert.match(helper.lastAuthFailure.message, /^Authentication failed: /);
+    assert.strictEqual(helper.lastAuthFailure.reason, undefined, "retried or resumed on reload: no restart hint");
+
+    // Polling too quickly: no retry follows, so the display must say that a restart is needed.
+    helper.headlessAuthRetryTimer = null;
+    helper.handleHeadlessAuthError(new Error("polling too quickly"));
+    assert.strictEqual(helper.headlessAuthRetryTimer, null, "no automatic retry");
+    assert.strictEqual(helper.lastAuthFailure.reason, "rate_limited");
   }
 
   // --- the server config wins over the browser ----------------------------
