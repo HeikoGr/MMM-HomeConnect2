@@ -14,7 +14,7 @@
   "AUTH_MINUTES": "Minuten",
   "AUTH_SECONDS": "Sekunden",
   "AUTH_FAILED_TITLE": "Authentifizierung fehlgeschlagen",
-  "AUTH_FAILED_INFO": "Bitte starten Sie MagicMirror neu, um es erneut zu versuchen.",
+  "AUTH_FAILED_INFO": "Eine neue Anmeldung startet automatisch, spätestens beim Neuladen dieser Seite.",
   "AUTH_INVALID_CLIENT": "Home Connect akzeptiert diese clientId nicht. Prüfen Sie die Client-ID Ihrer Home-Connect-App in der config.js und starten Sie MagicMirror neu.",
   "SESSION_BASED_AUTH": "Session-basierte Authentifizierung aktiv",
   "PROGRAM_FINISHED": "Programm fertig",
@@ -39,5 +39,14 @@
   "CONFIG_MISSING_CLIENT_ID": "Keine clientId gesetzt. Tragen Sie die Client-ID Ihrer Home-Connect-App in der config.js ein und starten Sie MagicMirror neu.",
   "AVAILABLE_PROGRAMS": "Programme",
   "AVAILABLE_OPTIONS": "Optionen",
-  "ACTIVE_ALERTS": "Hinweise"
+  "ACTIVE_ALERTS": "Hinweise",
+  "AUTH_IN_PROGRESS": "Anmeldung läuft",
+  "AUTH_POLLING_ATTEMPT": "Warte auf Bestätigung der Anmeldung (Versuch {attempt} von {maxAttempts})",
+  "AUTH_CODE_EXPIRED": "Der Anmeldecode ist abgelaufen, bevor er bestätigt wurde.",
+  "AUTH_DENIED": "Die Anmeldung wurde abgelehnt.",
+  "AUTH_NOT_CONFIRMED": "Die Anmeldung wurde nicht rechtzeitig bestätigt.",
+  "RATE_LIMIT_WAIT": "Home-Connect-API-Limit erreicht – warte {seconds} s",
+  "RATE_LIMIT_RESTART": "Home-Connect-API-Limit erreicht – bitte MagicMirror in 2 Minuten neu starten",
+  "RATE_LIMIT_REACHED": "Home-Connect-API-Limit erreicht",
+  "ALERT_DUST_BOX_MISSING": "Staubbehälter fehlt"
 }
