@@ -230,5 +230,71 @@ function createProgramService(overrides = {}) {
     assert.strictEqual(evt.p.isRateLimit, true);
   }
 
+  // fetchActiveProgramForDevice: a thrown 404 means "no active program", but a "404" that only
+  // appears in an error text (an id, a port) is a real error and must not be swallowed
+  {
+    const { service, logs } = createProgramService();
+    service.attachClient({
+      getActiveProgram: async () => {
+        const err = new Error("Not found");
+        err.statusCode = 404;
+        throw err;
+      },
+    });
+    const notFound = await service.fetchActiveProgramForDevice("ha-1", "Washer");
+    assert.deepStrictEqual(notFound, { haId: "ha-1", success: false, statusCode: 404, error: "No active program" });
+
+    service.attachClient({
+      getActiveProgram: async () => {
+        throw new Error("connect ECONNREFUSED 10.0.0.1:4040");
+      },
+    });
+    const failed = await service.fetchActiveProgramForDevice("ha-1", "Washer");
+    assert.strictEqual(failed.success, false);
+    assert.strictEqual(failed.statusCode, null);
+    assert.strictEqual(failed.error, "connect ECONNREFUSED 10.0.0.1:4040");
+    assert.ok(logs.some((entry) => entry.level === "error" && entry.message.includes("ECONNREFUSED")));
+  }
+
+  // fetchActiveProgramForDevice: a 429 answer is raised with its Retry-After, so the caller
+  // can block further requests; other failures come back as a result
+  {
+    const { service } = createProgramService();
+    service.attachClient({
+      getActiveProgram: async () => ({ success: false, statusCode: 429, retryAfterSeconds: 120, error: "Too Many" }),
+    });
+    await assert.rejects(service.fetchActiveProgramForDevice("ha-1", "Washer"), (error) => {
+      assert.strictEqual(error.statusCode, 429);
+      assert.strictEqual(error.retryAfterSeconds, 120);
+      return true;
+    });
+
+    service.attachClient({
+      getActiveProgram: async () => ({ success: false, statusCode: 500, error: "Internal" }),
+    });
+    assert.deepStrictEqual(await service.fetchActiveProgramForDevice("ha-1", "Washer"), {
+      haId: "ha-1",
+      success: false,
+      statusCode: 500,
+      error: "Internal",
+    });
+
+    service.attachClient({});
+    const noWrapper = await service.fetchActiveProgramForDevice("ha-1", "Washer");
+    assert.strictEqual(noWrapper.success, false);
+    assert.match(noWrapper.error, /missing getActiveProgram/);
+  }
+
+  // fetchAvailableProgramsSnapshot: a 429 while listing the available programs is raised too
+  {
+    const { service } = createProgramService();
+    service.attachClient({
+      getActiveProgram: async () => ({ success: false, statusCode: 404 }),
+      getSelectedProgram: async () => ({ success: false, statusCode: 404 }),
+      getAvailablePrograms: async () => ({ success: false, statusCode: 429, error: "Too Many" }),
+    });
+    await assert.rejects(service.fetchActiveProgramForDevice("ha-1", "Washer"), (error) => error.statusCode === 429);
+  }
+
   console.log("program-service.test.js OK");
 })();
