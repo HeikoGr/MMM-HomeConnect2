@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.8.1](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.8.0...v1.8.1) (2026-11-13)
+
+
+### 🐛 Fixes
+
+* do not treat a failed client init as an open session ([ae79696](https://github.com/HeikoGr/MMM-HomeConnect2/commit/ae79696e17ae6507370dbe3edabc85823af28792))
+
+
+### 🧱 Refactoring
+
+* remove the unused global SSE channel and client feature checks ([ae79696](https://github.com/HeikoGr/MMM-HomeConnect2/commit/ae79696e17ae6507370dbe3edabc85823af28792))
+
 ## [1.8.0](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.7.11...v1.8.0) (2026-11-12)
 
 

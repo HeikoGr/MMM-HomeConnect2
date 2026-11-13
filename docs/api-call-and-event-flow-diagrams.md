@@ -34,11 +34,8 @@ flowchart TD
   G2 --> G4[then: active-program snapshot - all devices on the first sync, running ones on routine resyncs]
 
   G1 --> H[Establish SSE subscriptions]
-  H --> H0{Per-device channels supported?}
-  H0 -->|yes| H1[subscribe KEEP-ALIVE + per-device EVENTS]
-  H0 -->|no or failed| H2[fallback to global EVENTS subscription]
+  H --> H1[one channel per appliance, at most 10: KEEP-ALIVE, NOTIFY, STATUS, EVENT, connection events]
   H1 --> H3[start heartbeat monitor]
-  H2 --> H3
 
   subgraph SSE[SSE Runtime]
     H3 --> I1[watchdog timer - restarted by every message, fires after 70 s of silence]
@@ -66,8 +63,7 @@ flowchart TD
     P5 -->|200| P6[apply ACTIVE_PROGRAM]
     P5 -->|404| P7[getSelectedProgram]
     P7 -->|200| P8[apply SELECTED_PROGRAM]
-    P7 -->|no data| P9[getAvailablePrograms]
-    P9 --> P10[apply AVAILABLE_PROGRAMS]
+    P7 -->|no data| P9[no active program - retried while the appliance appears to run]
     P5 -->|429| P11[set rateLimitUntil from Retry-After]
   end
 ```
@@ -124,9 +120,6 @@ sequenceDiagram
       else 404
         HC-->>PS: not found
         PS->>HC: getSelectedProgram
-        opt still no usable program
-          PS->>HC: getAvailablePrograms
-        end
       else 429
         HC-->>PS: rate limit + Retry-After
         PS->>NH: setRateLimitUntil(now + Retry-After)
@@ -153,7 +146,7 @@ sequenceDiagram
 ## Notes
 
 - The frontend only renders backend-provided state; it does not trigger standalone API refresh loops.
-- Program label semantics are explicit: ACTIVE_PROGRAM, SELECTED_PROGRAM, and AVAILABLE_PROGRAMS.
+- Program label semantics are explicit: ACTIVE_PROGRAM and SELECTED_PROGRAM (the list of available programs is not fetched for display).
 - Rate-limit handling uses server metadata (`Retry-After`) when available.
 - Routine resyncs (the 30-minute snapshot and the SSE watchdog) ask only running appliances for
   their program. An idle appliance answers `/programs/active` with 404, which costs quota and counts

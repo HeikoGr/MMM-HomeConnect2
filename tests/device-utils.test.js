@@ -13,8 +13,6 @@ const {
   isDoorOpen,
   hasInformativeState,
   shouldDisplayDevice,
-  summarizeAvailablePrograms,
-  summarizeProgramConstraints,
   deviceAppearsActive,
   parseOperationState,
 } = require("../lib/device-utils");
@@ -255,33 +253,6 @@ const {
       ],
     }),
     ["Temperatur: 40 °C", "Schleudern: 1400 rpm", "varioSpeed", "Bedampfen"],
-  );
-
-  assert.deepStrictEqual(
-    summarizeAvailablePrograms([
-      { key: "ConsumerProducts.CoffeeMaker.Program.Beverage.Coffee", name: "Coffee" },
-      { key: "ConsumerProducts.CoffeeMaker.Program.Beverage.Espresso", name: "Espresso" },
-    ]),
-    ["Coffee", "Espresso"],
-  );
-
-  assert.deepStrictEqual(
-    summarizeProgramConstraints({
-      options: [
-        {
-          key: "ConsumerProducts.CoffeeMaker.Option.FillQuantity",
-          unit: "ml",
-          constraints: { min: 60, max: 260 },
-        },
-        {
-          key: "ConsumerProducts.CoffeeMaker.Option.BeanAmount",
-          constraints: {
-            allowedvalues: ["ConsumerProducts.CoffeeMaker.EnumType.BeanAmount.Mild"],
-          },
-        },
-      ],
-    }),
-    ["Fill Quantity: 60-260 ml", "Bean Amount"],
   );
 
   assert.strictEqual(getDeviceTypeMeta("CoffeeMachine").iconName, "CoffeeMaker.png");

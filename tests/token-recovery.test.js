@@ -11,6 +11,7 @@ const fs = require("node:fs");
 const Module = require("node:module");
 const os = require("node:os");
 const path = require("node:path");
+const { applyEventToDevice } = require("../lib/device-events");
 
 // The helper deletes the token file on invalid_grant - never the real one.
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "mmm-homeconnect2-token-recovery-"));
@@ -178,7 +179,7 @@ const originalFetch = globalThis.fetch;
 
     const device = { name: "Washer" };
     for (const key of ["__proto__", "constructor", "prototype"]) {
-      hc.applyEventToDevice(device, { key, value: { polluted: true } });
+      applyEventToDevice(device, { key, value: { polluted: true } });
     }
     assert.strictEqual(Object.getPrototypeOf(device), Object.prototype);
     assert.strictEqual({}.polluted, undefined);
@@ -305,7 +306,6 @@ const originalFetch = globalThis.fetch;
   {
     prepareHelper();
     helper.name = "MMM-HomeConnect2";
-    helper.configReceived = false;
     helper.sessionOwnerConfig = null;
     helper.sessionAuthenticated = false;
     helper.hc = null;

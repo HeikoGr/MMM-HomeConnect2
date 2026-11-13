@@ -1,10 +1,10 @@
 "use strict";
 
 const assert = require("node:assert");
+const { applyEventToDevice } = require("../lib/device-events");
 const { reconcileRunStates } = require("../lib/run-state-store");
 const { addEndedRun, mergeProgramCatalog, summarize } = require("../lib/program-stats");
 const DeviceService = require("../lib/device-service");
-const HomeConnect = require("../lib/homeconnect-api");
 
 const STATE = (label) => `BSH.Common.EnumType.OperationState.${label}`;
 const PROGRAM = "LaundryCare.Dryer.Program.Synthetic";
@@ -206,7 +206,6 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     let now = T0;
     Date.now = () => now;
     try {
-      const hc = new HomeConnect("client", "secret", "refresh");
       const device = {
         haId: "dishwasher",
         name: "Geschirrspüler",
@@ -216,7 +215,7 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const delayed = { key: "BSH.Common.Status.OperationState", value: STATE("DelayedStart") };
       const remaining = { key: "BSH.Common.Option.RemainingProgramTime", value: 9000 };
       for (const event of remainingFirst ? [remaining, delayed] : [delayed, remaining]) {
-        hc.applyEventToDevice(device, event);
+        applyEventToDevice(device, event);
       }
       assert.strictEqual(device._remainingObservedAt, undefined, "no start time while the start is delayed");
 
@@ -227,7 +226,7 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
       // Three hours later the program starts.
       now = T0 + 180 * MIN;
-      hc.applyEventToDevice(device, { key: "BSH.Common.Status.OperationState", value: STATE("Run") });
+      applyEventToDevice(device, { key: "BSH.Common.Status.OperationState", value: STATE("Run") });
       assert.strictEqual(device._remainingObservedAt, now);
       assert.strictEqual(device._initialRemaining, 9000);
       reconcileRunStates([device], records, now, session);
@@ -243,7 +242,7 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
       // Finished after 150 minutes of running.
       now = T0 + 330 * MIN;
-      hc.applyEventToDevice(device, { key: "BSH.Common.Status.OperationState", value: STATE("Finished") });
+      applyEventToDevice(device, { key: "BSH.Common.Status.OperationState", value: STATE("Finished") });
       const { ended } = reconcileRunStates([device], records, now, session);
       assert.strictEqual(addEndedRun({}, ended[0]).durationS, 150 * 60);
     } finally {

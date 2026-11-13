@@ -145,7 +145,6 @@ function createDeviceService(overrides = {}) {
         success: true,
         data: { status: [] },
       }),
-      applyEventToDevice() {},
     });
 
     await service.fetchDeviceStatus(device);
@@ -168,11 +167,13 @@ function createDeviceService(overrides = {}) {
       getStatus: async () =>
         new Promise((resolve) => {
           releaseStatus = () =>
-            resolve({ success: true, data: { status: [{ key: "BSH.Common.Status.OperationState" }] } });
+            resolve({
+              success: true,
+              data: {
+                status: [{ key: "BSH.Common.Status.OperationState", value: "BSH.Common.EnumType.OperationState.Run" }],
+              },
+            });
         }),
-      applyEventToDevice(device) {
-        device.sawEvent = true;
-      },
     });
 
     const statusPromise = service.fetchDeviceStatus(originalDevice);
@@ -185,9 +186,10 @@ function createDeviceService(overrides = {}) {
     releaseStatus();
     await statusPromise;
 
+    assert.strictEqual(originalDevice.OperationState, undefined);
     assert.strictEqual(
-      replacementDevice.sawEvent,
-      true,
+      replacementDevice.OperationState,
+      "BSH.Common.EnumType.OperationState.Run",
       "status update must land on the live device, not the orphaned reference",
     );
     assert.strictEqual(originalDevice.sawEvent, undefined, "the orphaned reference must not be the one mutated");
@@ -198,8 +200,9 @@ function createDeviceService(overrides = {}) {
     const { service, notifications } = createDeviceService({ heartbeat: { enabled: false } });
     const sendSocketNotificationCalls = [];
     service.attachClient({
-      subscribe: () => {},
+      subscribeDevice: () => {},
       refreshTokens: () => Promise.resolve(),
+      tokenRefreshBackoffRemainingMs: () => 0,
       closeEventSources: () => {},
     });
     service.fetchDeviceStatus = () => wait(40);
@@ -239,13 +242,7 @@ function createDeviceService(overrides = {}) {
   {
     const requested = [];
     const { service } = createDeviceService({ onActiveProgramNeeded: (haId) => requested.push(haId) });
-    service.attachClient({
-      applyEventToDevice: (device, item) => {
-        if (item.key === "BSH.Common.Status.OperationState") {
-          device.OperationState = item.value;
-        }
-      },
-    });
+    service.attachClient({});
     service.devices.set("ha-dryer", {
       haId: "ha-dryer",
       name: "Dryer",
@@ -283,6 +280,7 @@ function createDeviceService(overrides = {}) {
       refreshTokens: async () => {
         refreshCalls += 1;
       },
+      tokenRefreshBackoffRemainingMs: () => 0,
     });
     service.noteTokenRefreshed(Date.now());
 
@@ -302,6 +300,7 @@ function createDeviceService(overrides = {}) {
       refreshTokens: async () => {
         refreshCalls += 1;
       },
+      tokenRefreshBackoffRemainingMs: () => 0,
     };
     service.attachClient(hcMock);
 
@@ -351,6 +350,7 @@ function createDeviceService(overrides = {}) {
     const hcMock = {
       subscribeDevice: (haId, type) => subscribeCalls.push(`${haId}:${type}`),
       refreshTokens: () => Promise.resolve(),
+      tokenRefreshBackoffRemainingMs: () => 0,
       closeEventSources: () => {},
     };
     sseService.attachClient(hcMock);
@@ -406,24 +406,14 @@ function createDeviceService(overrides = {}) {
     assert.ok(notifications.some((entry) => entry.n === "INIT_STATUS" && entry.p.status === "sse_recovered"));
   }
 
-  // Attaching a new HomeConnect client closes previous event sources
+  // Attaching a new HomeConnect client tears the previous one down (streams and token timer)
   {
     const { service } = createDeviceService();
-    const closeCalls = [];
-    const oldClient = {
-      setEventSourceRetryConfig: () => {},
-      closeEventSources: (opts) => closeCalls.push(opts),
-    };
-    const newClient = {
-      setEventSourceRetryConfig: () => {},
-      closeEventSources: () => {},
-    };
+    let destroyed = 0;
+    service.attachClient({ destroy: () => (destroyed += 1) });
+    service.attachClient({ destroy: () => {} });
 
-    service.attachClient(oldClient);
-    service.attachClient(newClient);
-
-    assert.strictEqual(closeCalls.length, 1, "Previous client should be closed when new client attached");
-    assert.deepStrictEqual(closeCalls[0], { devices: true, global: true });
+    assert.strictEqual(destroyed, 1, "Previous client should be destroyed when a new client is attached");
   }
 
   // SSE heartbeat: a silent stream before the first event must not trigger recovery
@@ -439,6 +429,7 @@ function createDeviceService(overrides = {}) {
     const hcMock = {
       subscribeDevice: (haId, type) => subscribeCalls.push(`${haId}:${type}`),
       refreshTokens: () => Promise.resolve(),
+      tokenRefreshBackoffRemainingMs: () => 0,
       closeEventSources: () => {},
     };
 
@@ -500,12 +491,10 @@ function createDeviceService(overrides = {}) {
       },
     });
     const hcMock = {
-      subscribe: () => {},
+      subscribeDevice: () => {},
       refreshTokens: () => Promise.resolve(),
+      tokenRefreshBackoffRemainingMs: () => 0,
       closeEventSources: () => {},
-      applyEventToDevice: (device, item) => {
-        device[item.key] = item.value;
-      },
     };
 
     service.attachClient(hcMock);
@@ -563,6 +552,7 @@ function createDeviceService(overrides = {}) {
         tokenRefreshes += 1;
         return Promise.resolve();
       },
+      tokenRefreshBackoffRemainingMs: () => 0,
       closeEventSources: () => {
         closeCalls += 1;
       },
@@ -571,7 +561,6 @@ function createDeviceService(overrides = {}) {
         settingsFetches += 1;
         return Promise.resolve({ success: true, data: { settings: [] } });
       },
-      applyEventToDevice: () => {},
     };
     service.attachClient(hcMock);
 
@@ -611,13 +600,13 @@ function createDeviceService(overrides = {}) {
     service.attachClient({
       subscribeDevice: () => {},
       refreshTokens: () => Promise.resolve(),
+      tokenRefreshBackoffRemainingMs: () => 0,
       closeEventSources: () => {},
       getStatus: () => Promise.resolve({ success: true, data: { status: [] } }),
       getSettings: () => {
         settingsFetches += 1;
         return Promise.resolve({ success: true, data: { settings: [] } });
       },
-      applyEventToDevice: () => {},
     });
 
     const apiResult = {
@@ -695,6 +684,7 @@ function createDeviceService(overrides = {}) {
       },
       getSettings: () => Promise.resolve({ success: true, data: { settings: [] } }),
       refreshTokens: () => Promise.resolve(),
+      tokenRefreshBackoffRemainingMs: () => 0,
       subscribeDevice() {},
       closeEventSources() {},
     });
@@ -784,8 +774,8 @@ function createDeviceService(overrides = {}) {
     service.attachClient({
       subscribeDevice: () => {},
       refreshTokens: () => Promise.resolve(),
+      tokenRefreshBackoffRemainingMs: () => 0,
       closeEventSources: () => {},
-      applyEventToDevice: () => {},
       getStatus: async (haId) => {
         statusFetches.push(haId);
         inFlight += 1;
@@ -818,6 +808,18 @@ function createDeviceService(overrides = {}) {
     assert.strictEqual(maxInFlight, 1, "Expected appliances to be enriched one at a time");
 
     service.shutdown();
+  }
+
+  // The appliance id of an event comes from its URI only where the URI names it.
+  {
+    const { service } = createDeviceService();
+    assert.strictEqual(service.extractHaIdFromUri("/api/homeappliances/SIEMENS-HCS-1/events"), "SIEMENS-HCS-1");
+    assert.strictEqual(
+      service.extractHaIdFromUri("/notifications/homeappliances/BOSCH-2/events/x"),
+      "BOSCH-2",
+      "the notification form names it the same way",
+    );
+    assert.strictEqual(service.extractHaIdFromUri("/a/b/c/d"), null, "no guessing from an unrelated path");
   }
 
   console.log("device-service.test.js OK");

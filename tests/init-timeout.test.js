@@ -65,7 +65,7 @@ function setup(t) {
   const helper = loadHelper();
   const statuses = [];
   helper.config = { clientId: "id", clientSecret: "secret" };
-  helper.refreshToken = "saved";
+  helper.globalSession.refreshToken = "saved";
   helper.deviceService = null;
   helper.programService = null;
   helper.hcInitTimeoutMs = 20;
@@ -159,4 +159,43 @@ test("a 429 during init sets the rate-limit block and the retry waits it out", a
     statuses.some((entry) => entry.isRateLimit === true),
     "the displays are told about the rate limit",
   );
+});
+
+test("a display that connects while the init retry waits does not turn the failed client into a session", async (t) => {
+  const { helper, statuses } = setup(t);
+  helper.authService = { setConfig() {} };
+  helper.broadcastToAllClients = () => {};
+  helper.sendEventToInstance = () => {};
+  helper.sessionOwnerConfig = { clientId: "id", clientSecret: "secret", language: "" };
+  helper.config = { clientId: "id", clientSecret: "secret", language: "" };
+  t.after(() => helper.clearPeriodicFullSnapshotRefresh());
+
+  helper.globalSession.refreshToken = "saved";
+  const attempt = helper.initializeHomeConnect("saved");
+  created[0].setAcceptLanguage = () => {};
+  created[0].fail(new Error("getaddrinfo ENOTFOUND api.home-connect.com"));
+  await assert.rejects(attempt, /ENOTFOUND/);
+  assert.ok(helper.hcInitRetryTimer, "a retry is waiting");
+
+  // The backend asks every new socket connection for CONFIGURE, so this happens on any reload.
+  helper.handleConfigNotification({ identifier: "module_1_MMM-HomeConnect2", clientId: "id", clientSecret: "secret" });
+
+  assert.equal(helper.sessionAuthenticated, false, "the init has not succeeded");
+  assert.ok(helper.hcInitRetryTimer, "the retry stays scheduled");
+  assert.ok(!statuses.some((entry) => entry.status === "complete"), "no display is told the session is complete");
+});
+
+test("a program request during a rate-limit block gets the translatable notice", (t) => {
+  const { helper, statuses } = setup(t);
+  helper.hc = {};
+  helper.setRateLimitUntil(Date.now() + 60 * 1000);
+  t.after(() => helper.setRateLimitUntil(0));
+
+  helper.handleGetActivePrograms({ identifier: "tab-1" });
+
+  const notice = statuses.find((entry) => entry.status === "device_error");
+  assert.ok(notice, "the display is told about the block");
+  assert.equal(notice.messageKey, "RATE_LIMIT_WAIT");
+  assert.equal(notice.identifier, "tab-1");
+  assert.ok(notice.messageParams.seconds > 0);
 });
