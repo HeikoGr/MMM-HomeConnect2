@@ -151,7 +151,6 @@ function createInstance(overrides = {}) {
     assert.ok(runningDom.innerHTML.includes("35%"));
     assert.ok(runningDom.innerHTML.includes("deviceProgressBar"));
     assert.ok(runningDom.innerHTML.includes("fa-play"));
-    assert.ok(!runningDom.innerHTML.includes("AVAILABLE_PROGRAMS"));
 
     const runningDisplayState = runningInstance.buildDeviceDisplayState(
       runningInstance.devices[0],
@@ -801,7 +800,6 @@ function createInstance(overrides = {}) {
           name: "Coffee machine",
           type: "Microwave",
           PowerState: "Off",
-          AvailablePrograms: ["Coffee", "Espresso"],
           AvailableOptionDetails: ["Bean Amount", "Fill Quantity: 60-260 ml"],
           DeviceAlertsByKey: {
             tank: "Water tank empty",
@@ -825,13 +823,11 @@ function createInstance(overrides = {}) {
           name: "Washer",
           type: "Washer",
           PowerState: "Off",
-          AvailablePrograms: ["Cotton", "Easy Care"],
           AvailableOptionDetails: ["Temperature", "Spin Speed"],
         },
       ],
     });
     const washerAvailableProgramsDom = washerAvailableProgramsInstance.getDom();
-    assert.ok(!washerAvailableProgramsDom.innerHTML.includes("AVAILABLE_PROGRAMS"));
     assert.ok(!washerAvailableProgramsDom.innerHTML.includes("AVAILABLE_OPTIONS"));
     assert.ok(!washerAvailableProgramsDom.innerHTML.includes("Temperature"));
 

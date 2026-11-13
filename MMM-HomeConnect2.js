@@ -117,26 +117,19 @@ Module.register("MMM-HomeConnect2", {
     });
   },
 
-  /**
-   * The backend greets every new socket connection with INIT_REQUIRED - after a
-   * server restart or a long network drop this display is unknown there and
-   * must register again. Always answered: right after page load the greeting
-   * may cross the first CONFIGURE, and the backend takes the second one as a
-   * repeat, while ignoring it could leave the display unregistered when the
-   * server restarted before it answered the first.
-   */
-  handleInitRequired() {
-    this.sendConfigure();
-  },
-
   socketNotificationReceived(notification, payload) {
     if (notification !== this.notifications.EVENT) {
       return;
     }
 
     if (payload?.action === "INIT_REQUIRED") {
+      // The backend greets every new socket connection with INIT_REQUIRED - after a server
+      // restart or a long network drop this display is unknown there and must register again.
+      // Always answered: right after page load the greeting may cross the first CONFIGURE, and
+      // the backend takes the second one as a repeat, while ignoring it could leave the display
+      // unregistered when the server restarted before it answered the first.
       if (payload.identifier === "*" || payload.identifier === this.identifier) {
-        this.handleInitRequired();
+        this.sendConfigure();
       }
       return;
     }
@@ -238,10 +231,6 @@ Module.register("MMM-HomeConnect2", {
     this.lifecycle.resume();
   },
 
-  getDisplayState() {
-    return window.HomeConnectDisplayState;
-  },
-
   // Always loaded through getScripts(). Were it missing, failing loudly beats rendering
   // "no active appliances" from stand-in functions.
   getDeviceUtils() {
@@ -272,7 +261,7 @@ Module.register("MMM-HomeConnect2", {
   },
 
   buildDeviceDisplayState(device, runtimeHints, deviceUtils) {
-    return this.getDisplayState().buildDeviceDisplayState(device, runtimeHints, deviceUtils, {
+    return window.HomeConnectDisplayState.buildDeviceDisplayState(device, runtimeHints, deviceUtils, {
       translate: (key, variables) => this.translate(key, variables),
       formatClockTime: (timestamp) => this.formatClockTime(timestamp),
       debug: (this.config?.logLevel || "").toLowerCase() === "debug",

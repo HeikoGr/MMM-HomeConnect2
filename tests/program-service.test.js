@@ -20,7 +20,6 @@ function createProgramService(overrides = {}) {
         name: "Washer",
         type: "Washer",
         connected: false,
-        optionsApplied: [],
       },
     ],
   ]);
@@ -34,11 +33,7 @@ function createProgramService(overrides = {}) {
     },
     ...overrides,
   });
-  service.attachClient({
-    applyEventToDevice(device, option) {
-      device.optionsApplied.push(option);
-    },
-  });
+  service.attachClient({});
   return { service, globalSession, logs, devices };
 }
 
@@ -60,7 +55,8 @@ function createProgramService(overrides = {}) {
     assert.strictEqual(payload.name, "Washer");
     const device = devices.get("ha-1");
     assert.strictEqual(device.connected, true);
-    assert.strictEqual(device.optionsApplied.length, 2);
+    assert.ok(Object.hasOwn(device, "op1"), "every option is applied to the device");
+    assert.strictEqual(device.EstimatedTotalProgramTime, 4200);
     assert.strictEqual(device.ActiveProgramKey, "LaundryCare.Washer.Program.EasyCare");
     assert.strictEqual(device.ActiveProgramName, "Easy Care");
     assert.strictEqual(device.ActiveProgramSource, "active");
@@ -112,26 +108,6 @@ function createProgramService(overrides = {}) {
     ]);
   }
 
-  // applyProgramResult: stores available programs when no active program exists
-  {
-    const { service, devices } = createProgramService();
-    const result = {
-      haId: "ha-1",
-      source: "available",
-      data: {
-        programs: [
-          { key: "ConsumerProducts.CoffeeMaker.Program.Beverage.Coffee", name: "Coffee" },
-          { key: "ConsumerProducts.CoffeeMaker.Program.Beverage.Espresso", name: "Espresso" },
-        ],
-      },
-    };
-
-    service.applyProgramResult(result);
-    const device = devices.get("ha-1");
-    assert.deepStrictEqual(device.AvailablePrograms, ["Coffee", "Espresso"]);
-    assert.strictEqual(device.ActiveProgramName, undefined);
-  }
-
   // fetchActiveProgramForDevice: falls back to selected program on 404 active program,
   // without fetching the program definition (its constraints were never displayed)
   {
@@ -146,7 +122,6 @@ function createProgramService(overrides = {}) {
         success: true,
         data: { key: "LaundryCare.Dryer.Program.Synthetic", name: "Synthetics", options: [] },
       }),
-      applyEventToDevice() {},
     });
 
     const result = await service.fetchActiveProgramForDevice("ha-1", "Washer");
@@ -155,63 +130,26 @@ function createProgramService(overrides = {}) {
     assert.strictEqual(result.data.name, "Synthetics");
   }
 
-  // fetchActiveProgramForDevice: falls back to available programs when active/selected are missing
+  // fetchActiveProgramForDevice: neither an active nor a selected program is "No active program",
+  // and costs exactly those two calls (the program catalogue is not fetched for it)
   {
     const { service } = createProgramService();
+    const calls = [];
+    const answer = (name, result) => async () => {
+      calls.push(name);
+      return result;
+    };
+    const notFound = { success: false, statusCode: 404, error: "Not found" };
     service.attachClient({
-      getActiveProgram: async () => ({ success: false, statusCode: 404, error: "Not found" }),
-      getSelectedProgram: async () => ({ success: false, statusCode: 404, error: "Not found" }),
-      getAvailablePrograms: async () => ({
-        success: true,
-        data: {
-          programs: [
-            { key: "Cooking.Common.Program.Hood.Venting", name: "Fan setting" },
-            { key: "Cooking.Common.Program.Hood.Automatic", name: "Automatic" },
-          ],
-        },
-      }),
-      applyEventToDevice() {},
+      getActiveProgram: answer("active", notFound),
+      getSelectedProgram: answer("selected", notFound),
+      getAvailablePrograms: answer("available", { success: true, data: { programs: [] } }),
     });
 
     const result = await service.fetchActiveProgramForDevice("ha-1", "Washer");
-    assert.strictEqual(result.success, true);
-    assert.strictEqual(result.source, "available");
-    assert.strictEqual(result.data.programs.length, 2);
-  }
-
-  // fetchActiveProgramForDevice: still falls back to available programs for non-blocked types
-  {
-    const devices = new Map([
-      [
-        "ha-hood",
-        {
-          haId: "ha-hood",
-          name: "Hood",
-          type: "Cooktop",
-          optionsApplied: [],
-        },
-      ],
-    ]);
-    const { service } = createProgramService({ devices });
-    service.attachClient({
-      getActiveProgram: async () => ({ success: false, statusCode: 404, error: "Not found" }),
-      getSelectedProgram: async () => ({ success: false, statusCode: 404, error: "Not found" }),
-      getAvailablePrograms: async () => ({
-        success: true,
-        data: {
-          programs: [
-            { key: "Cooking.Common.Program.Hood.Venting", name: "Fan setting" },
-            { key: "Cooking.Common.Program.Hood.Automatic", name: "Automatic" },
-          ],
-        },
-      }),
-      applyEventToDevice() {},
-    });
-
-    const result = await service.fetchActiveProgramForDevice("ha-hood", "Hood");
-    assert.strictEqual(result.success, true);
-    assert.strictEqual(result.source, "available");
-    assert.strictEqual(result.data.programs.length, 2);
+    assert.strictEqual(result.success, false);
+    assert.strictEqual(result.error, "No active program");
+    assert.deepStrictEqual(calls, ["active", "selected"]);
   }
 
   // handleActiveProgramFetchError: rate limit sets rateLimitUntil
@@ -279,21 +217,10 @@ function createProgramService(overrides = {}) {
       error: "Internal",
     });
 
-    service.attachClient({});
-    const noWrapper = await service.fetchActiveProgramForDevice("ha-1", "Washer");
-    assert.strictEqual(noWrapper.success, false);
-    assert.match(noWrapper.error, /missing getActiveProgram/);
-  }
-
-  // fetchAvailableProgramsSnapshot: a 429 while listing the available programs is raised too
-  {
-    const { service } = createProgramService();
-    service.attachClient({
-      getActiveProgram: async () => ({ success: false, statusCode: 404 }),
-      getSelectedProgram: async () => ({ success: false, statusCode: 404 }),
-      getAvailablePrograms: async () => ({ success: false, statusCode: 429, error: "Too Many" }),
-    });
-    await assert.rejects(service.fetchActiveProgramForDevice("ha-1", "Washer"), (error) => error.statusCode === 429);
+    service.attachClient(null);
+    const noClient = await service.fetchActiveProgramForDevice("ha-1", "Washer");
+    assert.strictEqual(noClient.success, false);
+    assert.match(noClient.error, /not attached/);
   }
 
   console.log("program-service.test.js OK");

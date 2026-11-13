@@ -4,6 +4,7 @@ const assert = require("node:assert");
 const modulePath = require.resolve("../lib/homeconnect-api");
 const HomeConnect = require(modulePath);
 const deviceUtils = require("../lib/device-utils");
+const { applyEventToDevice } = require("../lib/device-events");
 
 function getGlobalBuiltin(name) {
   return Reflect.get(globalThis, name);
@@ -14,10 +15,9 @@ function setGlobalBuiltin(name, value) {
 }
 
 (() => {
-  const hc = new HomeConnect("client", "secret", "refresh");
   const device = { connected: false };
 
-  hc.applyEventToDevice(device, {
+  applyEventToDevice(device, {
     key: "BSH.Common.Status.RemainingProgramTime",
     value: { value: "PT1H15M" },
   });
@@ -29,39 +29,39 @@ function setGlobalBuiltin(name, value) {
   assert.strictEqual(device["BSH.Common.Status.RemainingProgramTime"], undefined);
 
   // A key with no friendly field keeps its raw spelling - that is its only storage.
-  hc.applyEventToDevice(device, {
+  applyEventToDevice(device, {
     key: "BSH.Common.Option.StartInRelative",
     value: { value: "PT2H" },
   });
   assert.strictEqual(deviceUtils.parseStartInRelativeSeconds(device), 7200);
 
   // PowerState arrives as a bare enum over SSE and object-wrapped from /settings.
-  hc.applyEventToDevice(device, {
+  applyEventToDevice(device, {
     key: "BSH.Common.Setting.PowerState",
     value: "BSH.Common.EnumType.PowerState.On",
   });
   assert.strictEqual(device.PowerState, "On");
 
-  hc.applyEventToDevice(device, {
+  applyEventToDevice(device, {
     key: "BSH.Common.Setting.PowerState",
     value: { value: "BSH.Common.EnumType.PowerState.Standby" },
   });
   assert.strictEqual(device.PowerState, "Standby");
 
   // An enum value outside the three known ones must not erase the power state.
-  hc.applyEventToDevice(device, {
+  applyEventToDevice(device, {
     key: "BSH.Common.Setting.PowerState",
     value: "BSH.Common.EnumType.PowerState.MainsOff",
   });
   assert.strictEqual(device.PowerState, "MainsOff");
 
-  hc.applyEventToDevice(device, {
+  applyEventToDevice(device, {
     key: "BSH.Common.Setting.PowerState",
     value: null,
   });
   assert.strictEqual(device.PowerState, "MainsOff");
 
-  hc.applyEventToDevice(device, {
+  applyEventToDevice(device, {
     key: "BSH.Common.Setting.PowerState",
     value: "BSH.Common.EnumType.PowerState.Off",
   });
@@ -69,21 +69,21 @@ function setGlobalBuiltin(name, value) {
   assert.strictEqual(device._initialRemaining, 4500);
   assert.ok(Number.isFinite(device._remainingObservedAt));
 
-  hc.applyEventToDevice(device, {
+  applyEventToDevice(device, {
     key: "BSH.Common.Status.ProgramProgress",
     value: { value: "37" },
   });
 
   assert.strictEqual(device.ProgramProgress, 37);
 
-  hc.applyEventToDevice(device, {
+  applyEventToDevice(device, {
     key: "BSH.Common.Option.RemainingProgramTimeIsEstimated",
     value: true,
   });
 
   assert.strictEqual(device.RemainingProgramTimeIsEstimated, true);
 
-  hc.applyEventToDevice(device, {
+  applyEventToDevice(device, {
     key: "BSH.Common.Status.OperationState",
     value: "BSH.Common.EnumType.OperationState.Finished",
   });
@@ -94,14 +94,14 @@ function setGlobalBuiltin(name, value) {
   assert.strictEqual(device._remainingObservedAt, undefined);
   assert.strictEqual(device.RemainingProgramTimeIsEstimated, undefined);
 
-  hc.applyEventToDevice(device, {
+  applyEventToDevice(device, {
     key: "BSH.Common.Status.ProgramProgress",
     value: { value: "100" },
   });
 
   assert.strictEqual(device.ProgramProgress, 100);
 
-  hc.applyEventToDevice(device, {
+  applyEventToDevice(device, {
     key: "BSH.Common.Status.RemainingProgramTime",
     value: { value: "PT33M" },
   });
@@ -116,11 +116,11 @@ function setGlobalBuiltin(name, value) {
   // stops sending progress. A leftover value must not survive that transition,
   // otherwise a long-running instance keeps painting a bar the appliance no
   // longer reports while a freshly started one shows nothing.
-  hc.applyEventToDevice(device, {
+  applyEventToDevice(device, {
     key: "BSH.Common.Option.ProgramProgress",
     value: { value: "0" },
   });
-  hc.applyEventToDevice(device, {
+  applyEventToDevice(device, {
     key: "BSH.Common.Status.OperationState",
     value: "BSH.Common.EnumType.OperationState.Ready",
   });
@@ -133,11 +133,11 @@ function setGlobalBuiltin(name, value) {
   // The remaining time is the more damaging leftover: an appliance that ends a
   // cycle leaves it at 0, and 0 combined with the planned duration computes to a
   // permanent 100 %.
-  hc.applyEventToDevice(device, {
+  applyEventToDevice(device, {
     key: "BSH.Common.Option.RemainingProgramTime",
     value: 0,
   });
-  hc.applyEventToDevice(device, {
+  applyEventToDevice(device, {
     key: "BSH.Common.Status.OperationState",
     value: "BSH.Common.EnumType.OperationState.Ready",
   });
@@ -154,7 +154,7 @@ function setGlobalBuiltin(name, value) {
     RemainingProgramTimeIsEstimated: true,
     ActiveProgramName: "Easy Care",
   };
-  hc.applyEventToDevice(finishedDevice, {
+  applyEventToDevice(finishedDevice, {
     key: "BSH.Common.Status.OperationState",
     value: "BSH.Common.EnumType.OperationState.Finished",
   });
@@ -175,7 +175,7 @@ function setGlobalBuiltin(name, value) {
     ActiveProgramPhase: "Drying",
     ActiveProgramDetails: ["Drying target: Extra Dry"],
   };
-  hc.applyEventToDevice(endedDevice, {
+  applyEventToDevice(endedDevice, {
     key: "BSH.Common.Root.ActiveProgram",
     value: null,
   });
@@ -188,7 +188,7 @@ function setGlobalBuiltin(name, value) {
   // Reaching Ready demotes the same way - a status refresh always reports the
   // operation state, while Root.ActiveProgram only arrives as an event.
   const idleDevice = { ActiveProgramName: "Eco", ActiveProgramSource: "active" };
-  hc.applyEventToDevice(idleDevice, {
+  applyEventToDevice(idleDevice, {
     key: "BSH.Common.Status.OperationState",
     value: "BSH.Common.EnumType.OperationState.Ready",
   });
@@ -197,33 +197,33 @@ function setGlobalBuiltin(name, value) {
 
   // A program that is genuinely running keeps its claim.
   const runningDevice = { ActiveProgramName: "Eco", ActiveProgramSource: "active" };
-  hc.applyEventToDevice(runningDevice, {
+  applyEventToDevice(runningDevice, {
     key: "BSH.Common.Root.ActiveProgram",
     value: "Dishcare.Dishwasher.Program.Eco50",
   });
 
   assert.strictEqual(runningDevice.ActiveProgramSource, "active");
 
-  hc.applyEventToDevice(device, {
+  applyEventToDevice(device, {
     key: "Refrigeration.Common.Status.Door.Freezer",
     value: "BSH.Common.EnumType.DoorState.Open",
   });
   assert.strictEqual(device.DoorState, "Open");
   assert.strictEqual(device.RefrigerationDoorStates.Freezer, "Freezer: Open");
 
-  hc.applyEventToDevice(device, {
+  applyEventToDevice(device, {
     key: "ConsumerProducts.CoffeeMaker.Option.BeanAmount",
     value: "ConsumerProducts.CoffeeMaker.EnumType.BeanAmount.Strong",
   });
   assert.strictEqual(device.DeviceStatusByKey["ConsumerProducts.CoffeeMaker.Option.BeanAmount"], "Bean Amount: Strong");
 
-  hc.applyEventToDevice(device, {
+  applyEventToDevice(device, {
     key: "ConsumerProducts.CoffeeMaker.Event.WaterTankEmpty",
     value: true,
   });
   assert.strictEqual(device.DeviceAlertsByKey["ConsumerProducts.CoffeeMaker.Event.WaterTankEmpty"], "Water Tank Empty");
 
-  hc.applyEventToDevice(device, {
+  applyEventToDevice(device, {
     key: "Cooking.Common.Option.Hood.VentingLevel",
     value: "Cooking.Hood.EnumType.Stage.FanStage02",
   });
@@ -232,13 +232,13 @@ function setGlobalBuiltin(name, value) {
     "Venting Level: Fan Stage 02",
   );
 
-  hc.applyEventToDevice(device, {
+  applyEventToDevice(device, {
     key: "Cooking.Oven.Event.PreheatFinished",
     value: true,
   });
   assert.strictEqual(device.DeviceAlertsByKey["Cooking.Oven.Event.PreheatFinished"], "Preheat Finished");
 
-  hc.applyEventToDevice(device, {
+  applyEventToDevice(device, {
     key: "ConsumerProducts.CleaningRobot.Event.RobotIsStuck",
     value: true,
   });
@@ -346,7 +346,7 @@ function setGlobalBuiltin(name, value) {
     hc = new HomeConnectWithFetchStub("client", "secret", "refresh", {
       acceptLanguage: "de",
     });
-    await hc.init({ isSimulated: false });
+    await hc.init();
     await hc.getSelectedProgram("ha-1");
 
     const firstGet = requests.find((request) => request.method === "GET" && request.url.includes("/programs/selected"));
@@ -380,7 +380,7 @@ function setGlobalBuiltin(name, value) {
         hc.tokenRefreshTimeout = null;
       }
       if (typeof hc.closeEventSources === "function") {
-        hc.closeEventSources({ devices: true, global: true });
+        hc.closeEventSources();
       }
     }
     setGlobalBuiltin("fetch", originalFetch);
@@ -456,7 +456,7 @@ function setGlobalBuiltin(name, value) {
       acceptLanguage: "en",
       requestTimeoutMs: 100,
     });
-    await hc.init({ isSimulated: false });
+    await hc.init();
 
     const result = await hc.getStatus("ha-rate-limit");
     assert.strictEqual(result.success, false);
@@ -469,7 +469,7 @@ function setGlobalBuiltin(name, value) {
         hc.tokenRefreshTimeout = null;
       }
       if (typeof hc.closeEventSources === "function") {
-        hc.closeEventSources({ devices: true, global: true });
+        hc.closeEventSources();
       }
     }
     setGlobalBuiltin("fetch", originalFetch);
@@ -547,7 +547,7 @@ function setGlobalBuiltin(name, value) {
       acceptLanguage: "de",
       requestTimeoutMs: 20,
     });
-    await hc.init({ isSimulated: false });
+    await hc.init();
 
     const result = await hc.getStatus("ha-timeout");
     assert.strictEqual(result.success, false);
@@ -560,7 +560,7 @@ function setGlobalBuiltin(name, value) {
         hc.tokenRefreshTimeout = null;
       }
       if (typeof hc.closeEventSources === "function") {
-        hc.closeEventSources({ devices: true, global: true });
+        hc.closeEventSources();
       }
     }
     setGlobalBuiltin("fetch", originalFetch);
