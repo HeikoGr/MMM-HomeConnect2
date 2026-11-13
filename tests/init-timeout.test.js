@@ -160,3 +160,28 @@ test("a 429 during init sets the rate-limit block and the retry waits it out", a
     "the displays are told about the rate limit",
   );
 });
+
+test("a display that connects while the init retry waits does not turn the failed client into a session", async (t) => {
+  const { helper, statuses } = setup(t);
+  helper.authService = { setConfig() {} };
+  helper.broadcastToAllClients = () => {};
+  helper.sendEventToInstance = () => {};
+  helper.sessionOwnerConfig = { clientId: "id", clientSecret: "secret", language: "" };
+  helper.configReceived = true; // an earlier display opened the session
+  helper.config = { clientId: "id", clientSecret: "secret", language: "" };
+  t.after(() => helper.clearPeriodicFullSnapshotRefresh());
+
+  helper.globalSession.refreshToken = "saved";
+  const attempt = helper.initializeHomeConnect("saved");
+  created[0].setAcceptLanguage = () => {};
+  created[0].fail(new Error("getaddrinfo ENOTFOUND api.home-connect.com"));
+  await assert.rejects(attempt, /ENOTFOUND/);
+  assert.ok(helper.hcInitRetryTimer, "a retry is waiting");
+
+  // The backend asks every new socket connection for CONFIGURE, so this happens on any reload.
+  helper.handleConfigNotification({ identifier: "module_1_MMM-HomeConnect2", clientId: "id", clientSecret: "secret" });
+
+  assert.equal(helper.sessionAuthenticated, false, "the init has not succeeded");
+  assert.ok(helper.hcInitRetryTimer, "the retry stays scheduled");
+  assert.ok(!statuses.some((entry) => entry.status === "complete"), "no display is told the session is complete");
+});
