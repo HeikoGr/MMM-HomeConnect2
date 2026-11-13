@@ -12,7 +12,6 @@ const shared = require("./lib/mmm-shared/mmm-shared");
 const { createClientRegistry, formatLogEntry } = require("./lib/mmm-shared/backend-session");
 const NodeHelper = require("node_helper"),
   globalSession = {
-    accessToken: null, // Access token for API requests
     refreshToken: null, // Refresh token for obtaining new access tokens
     clientInstances: new Set(), // identifiers of the registered displays
     lastAuthAttempt: 0, // Timestamp of the last authentication attempt
@@ -57,13 +56,10 @@ module.exports = NodeHelper.create({
 
   // Shared across every display of this MagicMirror; the mixins reach it here.
   globalSession,
-  refreshToken: null,
   hc: null,
-  configReceived: false,
   initializationAttempts: 0,
   maxInitAttempts: 3,
   identifier: null,
-  sharedConfigOwnerIdentifier: null,
   activeProgramManager: null,
   authService: null,
   deviceService: null,
@@ -241,32 +237,27 @@ module.exports = NodeHelper.create({
       },
     });
 
-    try {
-      this.activeProgramManager = new ActiveProgramManager({
-        // Retries run on their own timer; during a rate-limit block they get a 429 result
-        // without an API call, which ends them (a 429 is not retryable).
-        fetchFn: (haId, deviceName) =>
-          this.isRateLimited()
-            ? Promise.resolve({ haId, success: false, statusCode: 429, error: "Rate limit active" })
-            : this.fetchActiveProgramForDevice(haId, deviceName),
-        // A retry's result has to reach the device object - broadcasting it alone
-        // left the display on its previous state.
-        broadcastFn: (programData, requester, result) => {
-          if (result && this.programService) {
-            this.programService.applyProgramResult(result);
-          }
-          this.broadcastProgramData(programData, requester);
-        },
-        isDeviceActiveFn: (haId) => deviceAppearsActive(this.deviceService.devices.get(haId)),
-        logger: log,
-        maxRetries: ACTIVE_PROGRAM_MAX_RETRIES,
-        retryDelayMs: ACTIVE_PROGRAM_RETRY_DELAY_MS,
-      });
-      log.debug("ActiveProgramManager initialized");
-    } catch (err) {
-      log.error("Failed to initialize ActiveProgramManager:", err);
-      this.activeProgramManager = null;
-    }
+    this.activeProgramManager = new ActiveProgramManager({
+      // Retries run on their own timer; during a rate-limit block they get a 429 result
+      // without an API call, which ends them (a 429 is not retryable).
+      fetchFn: (haId, deviceName) =>
+        this.isRateLimited()
+          ? Promise.resolve({ haId, success: false, statusCode: 429, error: "Rate limit active" })
+          : this.fetchActiveProgramForDevice(haId, deviceName),
+      // A retry's result has to reach the device object - broadcasting it alone
+      // left the display on its previous state.
+      broadcastFn: (programData, requester, result) => {
+        if (result) {
+          this.programService.applyProgramResult(result);
+        }
+        this.broadcastProgramData(programData, requester);
+      },
+      isDeviceActiveFn: (haId) => deviceAppearsActive(this.deviceService.devices.get(haId)),
+      logger: log,
+      maxRetries: ACTIVE_PROGRAM_MAX_RETRIES,
+      retryDelayMs: ACTIVE_PROGRAM_RETRY_DELAY_MS,
+    });
+    log.debug("ActiveProgramManager initialized");
 
     this.programService = new ProgramService({
       logger: log,
@@ -386,9 +377,7 @@ module.exports = NodeHelper.create({
 
   stop() {
     log.info(`Stopping module helper: ${this.name}`);
-    if (this.activeProgramManager && typeof this.activeProgramManager.clearAll === "function") {
-      this.activeProgramManager.clearAll();
-    }
+    this.activeProgramManager.clearAll();
     if (this.headlessAuthRetryTimer) {
       clearTimeout(this.headlessAuthRetryTimer);
       this.headlessAuthRetryTimer = null;
@@ -405,13 +394,10 @@ module.exports = NodeHelper.create({
     this.clearPeriodicFullSnapshotRefresh();
     this.clientRegistry?.stop();
     this.programFetchCoordinator().reset();
-    if (this.deviceService && typeof this.deviceService.shutdown === "function") {
-      this.deviceService.shutdown();
-    }
+    this.deviceService.shutdown();
   },
 
-  // Admission and fetch loop live in lib/program-fetch-coordinator.js; these
-  // two stay on the helper as the entry points (and test seams).
+  // Admission and the fetch loop live in lib/program-fetch-coordinator.js.
   programFetchCoordinator() {
     if (!this.programFetch) {
       this.programFetch = new ProgramFetchCoordinator({
@@ -422,8 +408,7 @@ module.exports = NodeHelper.create({
         getActiveProgramManager: () => this.activeProgramManager,
         isRateLimited: () => this.isRateLimited(),
         emitInitStatus: (status, payload, options) => this.emitInitStatus(status, payload, options),
-        request: (payload) => this.handleGetActivePrograms(payload),
-        runFetch: (devices, requester, meta) => this.fetchActiveProgramsForDevices(devices, requester, meta),
+        emitRateLimitNotice: (identifier) => this.emitRateLimitNotice(identifier),
         fetchOne: (haId, name) => this.fetchActiveProgramForDevice(haId, name),
         broadcastProgramData: (data, requester) => this.broadcastProgramData(data, requester),
         handleError: (error) => this.handleActiveProgramFetchError(error),
@@ -466,21 +451,14 @@ module.exports = NodeHelper.create({
   },
 
   async fetchActiveProgramForDevice(haId, deviceName) {
-    if (!this.programService) return { haId, success: false, error: "ProgramService not available" };
     return this.programService.fetchActiveProgramForDevice(haId, deviceName);
   },
 
-  fetchActiveProgramsForDevices(deviceArray, requestingIdentifier, requestMeta = {}) {
-    return this.programFetchCoordinator().fetchDevices(deviceArray, requestingIdentifier, requestMeta);
-  },
-
   handleActiveProgramFetchError(error) {
-    if (!this.programService) return;
     this.programService.handleActiveProgramFetchError(error, this.broadcastToAllClients.bind(this));
   },
 
   broadcastProgramData(programData, requestingIdentifier) {
-    if (!this.programService) return;
     this.programService.broadcastProgramData(
       programData,
       requestingIdentifier,

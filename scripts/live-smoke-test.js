@@ -104,7 +104,7 @@ async function runLiveSmokeTest() {
   let hc = null;
   try {
     hc = new HomeConnect(clientId, clientSecret, tokenValue);
-    await hc.init({ isSimulated: false });
+    await hc.init();
 
     const res = await hc.getHomeAppliances();
     let appliances = [];

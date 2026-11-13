@@ -40,8 +40,6 @@ Module._load = function patchedLoad(request, parent, isMain) {
 const helper = require("../node_helper");
 Module._load = originalLoad;
 
-const originalFetchActiveProgramsForDevices = helper.fetchActiveProgramsForDevices;
-
 function resetHelperState() {
   helper.sessionAuthenticated = false;
   helper.authFlowInProgress = false;
@@ -55,11 +53,11 @@ function resetHelperState() {
   helper.lastDebugStatsBroadcastTs = 0;
   helper.hc = null;
   helper.identifier = null;
-  helper.sharedConfigOwnerIdentifier = null;
   helper.sessionOwnerConfig = null;
   helper.lastAuthFailure = null;
   helper.pendingAuthInfo = null;
-  helper.programFetchCoordinator().reset();
+  // A fresh coordinator per test: the fetch loop it starts can be replaced on the instance.
+  helper.programFetch = null;
   if (helper.fullSnapshotTimer) {
     clearInterval(helper.fullSnapshotTimer);
     helper.fullSnapshotTimer = null;
@@ -70,7 +68,6 @@ function resetHelperState() {
     EVENT: "MMM-HomeConnect2_EVENT",
   };
   helper.config = null;
-  helper.configReceived = false;
 }
 
 // globalSession lives in the helper's module scope, so the registered clients are
@@ -378,7 +375,7 @@ function registeredInstances() {
   });
   helper.broadcastProgramData = () => {};
 
-  await helper.fetchActiveProgramsForDevices([washerDevice], "frontend-a");
+  await helper.programFetchCoordinator().fetchDevices([washerDevice], "frontend-a");
 
   assert.strictEqual(scheduledRetries.length, 1);
 
@@ -390,7 +387,7 @@ function registeredInstances() {
     devices: new Map([["ha-1", { haId: "ha-1", name: "Washer" }]]),
   };
   let fetchCalls = 0;
-  helper.fetchActiveProgramsForDevices = () => {
+  helper.programFetchCoordinator().runFetch = () => {
     fetchCalls += 1;
   };
 
@@ -415,7 +412,6 @@ function registeredInstances() {
   resetHelperState();
   helper.hc = {};
   helper.sessionAuthenticated = true;
-  helper.fetchActiveProgramsForDevices = originalFetchActiveProgramsForDevices;
   helper.deviceService = {
     devices: new Map([
       ["ha-1", { haId: "ha-1", name: "Washer", connected: true }],
@@ -470,7 +466,7 @@ function registeredInstances() {
   assert.strictEqual(helper.programFetchCoordinator().state.pendingHaIds.size, 1);
 
   releaseWasherFetch();
-  // fetchActiveProgramsForDevices waits 500ms between devices to avoid
+  // the fetch loop waits 500ms between devices to avoid
   // hammering the API before its finally block (which drains the pending
   // queue) runs.
   await wait(600);
@@ -482,7 +478,7 @@ function registeredInstances() {
   );
   assert.strictEqual(helper.programFetchCoordinator().state.pendingHaIds.size, 0);
 
-  helper.fetchActiveProgramsForDevices = () => {};
+  helper.programFetchCoordinator().runFetch = () => {};
 
   // Recently completed forced requests for the same devices should be deduplicated
   // across different frontend instances for a short window.
@@ -493,7 +489,7 @@ function registeredInstances() {
     devices: new Map([["ha-1", { haId: "ha-1", name: "Washer" }]]),
   };
   fetchCalls = 0;
-  helper.fetchActiveProgramsForDevices = (devices, _identifier, requestMeta = {}) => {
+  helper.programFetchCoordinator().runFetch = (devices, _identifier, requestMeta = {}) => {
     fetchCalls += 1;
     if (requestMeta.force) {
       for (const device of devices) {
@@ -548,7 +544,6 @@ function registeredInstances() {
   };
   helper.handleConfigNotificationFirstTime = (identifier) => {
     configuredInstances.push(`first:${identifier}`);
-    helper.configReceived = true;
   };
   helper.handleConfigNotificationSubsequent = (identifier) => {
     configuredInstances.push(`next:${identifier}`);
@@ -590,7 +585,6 @@ function registeredInstances() {
   });
 
   assert.strictEqual(helper.identifier, "frontend-a");
-  assert.strictEqual(helper.sharedConfigOwnerIdentifier, "frontend-a");
   assert.strictEqual(helper.config.language, "de");
   assert.strictEqual(helper.config.logLevel, "info");
   assert.strictEqual(helper.sessionOwnerConfig.logLevel, "info");
@@ -632,7 +626,6 @@ function registeredInstances() {
   ];
   helper.handleConfigNotificationFirstTime = (identifier) => {
     firstTimeConfigs.push(identifier);
-    helper.configReceived = true;
   };
   helper.handleConfigNotificationSubsequent = () => {};
 
@@ -645,7 +638,7 @@ function registeredInstances() {
   assert.ok(!registeredInstances().includes("stale-tab"));
 
   helper.handleConfigNotification({ identifier: "fresh-tab", clientId: "client-new", clientSecret: "" });
-  assert.strictEqual(helper.sharedConfigOwnerIdentifier, "fresh-tab");
+  assert.strictEqual(helper.identifier, "fresh-tab");
   assert.deepStrictEqual(firstTimeConfigs, ["fresh-tab"]);
   assert.ok(!initStatuses.some(({ payload }) => payload.isConfigMismatch), "no mismatch for the current config");
 
@@ -669,7 +662,7 @@ function registeredInstances() {
   helper.serverConfigs = () => [undefined, undefined];
   helper.handleConfigNotification({ identifier: "any-tab", clientId: "client-x" });
   assert.deepStrictEqual(initStatuses, []);
-  assert.strictEqual(helper.sharedConfigOwnerIdentifier, "any-tab");
+  assert.strictEqual(helper.identifier, "any-tab");
 
   // A tab from before a language change is outdated too: it would otherwise render
   // its old language next to the server's. The entry is found by the module index
@@ -729,9 +722,7 @@ function registeredInstances() {
   helper.deviceService = { setConfig() {} };
   helper.hc = null;
   helper.retiredLanguageOptionReported = false;
-  helper.handleConfigNotificationFirstTime = () => {
-    helper.configReceived = true;
-  };
+  helper.handleConfigNotificationFirstTime = () => {};
   helper.handleConfigNotificationSubsequent = () => {};
   helper.serverConfigs = () => [{ language: "de" }];
 
@@ -1083,7 +1074,7 @@ function registeredInstances() {
       getActiveProgramManager: () => null,
       isRateLimited: () => false,
       emitInitStatus: () => {},
-      request: () => {},
+      emitRateLimitNotice: () => {},
       runFetch: (targetDevices) => fetched.push(targetDevices.map((device) => device.haId)),
       fetchOne: async () => ({}),
       broadcastProgramData: () => {},

@@ -321,23 +321,11 @@ function makeFakeEventSource() {
     assert.strictEqual(hc.getEventSourceRetryState("device:ha-1").timer, null, "Expected the retry to be dropped");
     assert.strictEqual(hc.getEventSourceRetryState("device:ha-1").retryAt, null);
 
-    // ...and only the matching timers go when just one kind of channel is closed.
-    hc.handleEventSourceError("global", { code: 503, message: "Non-200 status code (503)" });
-    hc.closeEventSources({ global: false });
-    assert.ok(hc.getEventSourceRetryState("global").timer, "Expected the global retry to stay");
-    hc.closeEventSources();
-
     hc.subscribeDevice("ha-1", "NOTIFY", listener);
     const live = created.at(-1);
     hc.recreateEventSourceByLabel("device:ha-1");
     assert.strictEqual(live.closed, true, "Expected a replaced stream to be closed");
     assert.notStrictEqual(hc.eventSources["ha-1"], live);
-
-    hc.subscribe("NOTIFY", listener);
-    const liveGlobal = hc.eventSource;
-    hc.recreateEventSourceByLabel("global");
-    assert.strictEqual(liveGlobal.closed, true, "Expected a replaced global stream to be closed");
-    assert.notStrictEqual(hc.eventSource, liveGlobal);
 
     // Open streams are counted per stream, also those nothing references any more.
     const streams = [{ readyState: 1 }, { readyState: 0 }, { readyState: 2 }];

@@ -65,7 +65,7 @@ function setup(t) {
   const helper = loadHelper();
   const statuses = [];
   helper.config = { clientId: "id", clientSecret: "secret" };
-  helper.refreshToken = "saved";
+  helper.globalSession.refreshToken = "saved";
   helper.deviceService = null;
   helper.programService = null;
   helper.hcInitTimeoutMs = 20;
@@ -167,7 +167,6 @@ test("a display that connects while the init retry waits does not turn the faile
   helper.broadcastToAllClients = () => {};
   helper.sendEventToInstance = () => {};
   helper.sessionOwnerConfig = { clientId: "id", clientSecret: "secret", language: "" };
-  helper.configReceived = true; // an earlier display opened the session
   helper.config = { clientId: "id", clientSecret: "secret", language: "" };
   t.after(() => helper.clearPeriodicFullSnapshotRefresh());
 
@@ -184,4 +183,19 @@ test("a display that connects while the init retry waits does not turn the faile
   assert.equal(helper.sessionAuthenticated, false, "the init has not succeeded");
   assert.ok(helper.hcInitRetryTimer, "the retry stays scheduled");
   assert.ok(!statuses.some((entry) => entry.status === "complete"), "no display is told the session is complete");
+});
+
+test("a program request during a rate-limit block gets the translatable notice", (t) => {
+  const { helper, statuses } = setup(t);
+  helper.hc = {};
+  helper.setRateLimitUntil(Date.now() + 60 * 1000);
+  t.after(() => helper.setRateLimitUntil(0));
+
+  helper.handleGetActivePrograms({ identifier: "tab-1" });
+
+  const notice = statuses.find((entry) => entry.status === "device_error");
+  assert.ok(notice, "the display is told about the block");
+  assert.equal(notice.messageKey, "RATE_LIMIT_WAIT");
+  assert.equal(notice.identifier, "tab-1");
+  assert.ok(notice.messageParams.seconds > 0);
 });
