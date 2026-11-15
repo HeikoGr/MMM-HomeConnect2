@@ -174,27 +174,46 @@ function registeredInstances() {
   assert.strictEqual(helper.debugStats.lastApiCallTs, 2300);
   assert.deepStrictEqual(helper.debugStats.apiCounters, { homeappliances: 2 });
 
-  // Broadcasts are throttled so a busy SSE stream cannot re-render every client
-  // per event - but a forced call (a client that just connected) always goes out.
+  // Debug stats go only to displays that show the debug panel; without one nothing is sent.
+  // Bursts are throttled so a busy SSE stream cannot re-render per event - but a forced
+  // call (a debug display that just connected) always goes out.
   resetHelperState();
   helper.broadcastDebugStats = originalBroadcastDebugStats;
-  let debugBroadcasts = 0;
-  const originalBroadcastToAllClients = helper.broadcastToAllClients;
-  helper.broadcastToAllClients = (notification) => {
+  const debugSends = [];
+  const originalSendEventToInstanceForDebug = helper.sendEventToInstance;
+  helper.sendEventToInstance = (identifier, notification, payload) => {
     if (notification === "DEBUG_STATS") {
-      debugBroadcasts += 1;
+      debugSends.push({ identifier, payload });
     }
   };
+  helper.globalSession.clientInstances.clear();
+  helper.globalSession.debugInstances.clear();
+  helper.globalSession.clientInstances.add("plain");
 
   helper.recordSseEvent();
+  helper.broadcastDebugStats(true);
+  assert.strictEqual(debugSends.length, 0, "No display with a debug panel: no DEBUG_STATS at all");
+
+  helper.globalSession.clientInstances.add("debug");
+  helper.globalSession.debugInstances.add("debug");
+  helper.globalSession.debugInstances.add("gone"); // registered once, display since released
+  helper.lastDebugStatsBroadcastTs = 0;
   helper.recordSseEvent();
   helper.recordSseEvent();
-  assert.strictEqual(debugBroadcasts, 1, "Bursts of events must collapse into one broadcast");
+  helper.recordSseEvent();
+  assert.deepStrictEqual(
+    debugSends.map((send) => send.identifier),
+    ["debug"],
+    "Bursts of events must collapse into one send, only to the debug display",
+  );
+  assert.strictEqual("rateLimitUntil" in debugSends[0].payload.session, false);
 
   helper.broadcastDebugStats(true);
-  assert.strictEqual(debugBroadcasts, 2, "A forced broadcast must ignore the throttle");
+  assert.strictEqual(debugSends.length, 2, "A forced send must ignore the throttle");
 
-  helper.broadcastToAllClients = originalBroadcastToAllClients;
+  helper.sendEventToInstance = originalSendEventToInstanceForDebug;
+  helper.globalSession.clientInstances.clear();
+  helper.globalSession.debugInstances.clear();
 
   // SSE stale should rebuild subscriptions and then perform one full resync.
   resetHelperState();
@@ -596,6 +615,13 @@ function registeredInstances() {
     assert.ok(registeredAfterDrift.includes(identifier), `${identifier} must stay registered`);
   });
   assert.ok(!registeredAfterDrift.includes("frontend-d"), "The rejected client must not receive broadcasts");
+  assert.deepStrictEqual(
+    [...helper.globalSession.debugInstances],
+    ["frontend-c"],
+    "Only the display with logLevel debug shows the debug panel and gets DEBUG_STATS",
+  );
+  helper.releaseClientInstance("frontend-c");
+  assert.strictEqual(helper.globalSession.debugInstances.size, 0, "A released display is forgotten");
 
   // Exactly one hard rejection, and only for the credential mismatch.
   assert.strictEqual(configMismatchStatuses.length, 1);
