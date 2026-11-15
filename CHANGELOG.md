@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.8.2](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.8.1...v1.8.2) (2026-11-15)
+
+
+### ⚡ Performance
+
+* send debug stats only to displays with the debug panel ([#139](https://github.com/HeikoGr/MMM-HomeConnect2/issues/139)) ([3fb8bc4](https://github.com/HeikoGr/MMM-HomeConnect2/commit/3fb8bc479b0988828cd11af1c6b2f0b331a02dd2))
+
+
+### 🔧 Maintenance
+
+* update mmm-shared and trust GitHub's published SSH host keys ([#140](https://github.com/HeikoGr/MMM-HomeConnect2/issues/140)) ([a1f30bc](https://github.com/HeikoGr/MMM-HomeConnect2/commit/a1f30bcdc9420e5a9c344b024f87daa903f5569c))
+
 ## [1.8.1](https://github.com/HeikoGr/MMM-HomeConnect2/compare/v1.8.0...v1.8.1) (2026-11-13)
 
 

@@ -14,6 +14,7 @@ const NodeHelper = require("node_helper"),
   globalSession = {
     refreshToken: null, // Refresh token for obtaining new access tokens
     clientInstances: new Set(), // identifiers of the registered displays
+    debugInstances: new Set(), // the registered displays that show the debug panel (logLevel "debug")
     lastAuthAttempt: 0, // Timestamp of the last authentication attempt
     MIN_AUTH_INTERVAL: 60000, // 1 minute between auth attempts
     rateLimitUntil: 0, // Timestamp until which rate limiting is active
@@ -303,6 +304,7 @@ module.exports = NodeHelper.create({
 
   // The display's browser is gone: stop addressing it.
   releaseClientInstance(identifier) {
+    globalSession.debugInstances.delete(identifier);
     if (globalSession.clientInstances.delete(identifier)) {
       log.info(`Released client instance without a connected display: ${identifier}`);
     }

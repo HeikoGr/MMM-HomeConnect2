@@ -13,7 +13,7 @@ function runGit(args) {
   });
 }
 
-// A git checkout fetches the submodule here; anything else (a ZIP download, a
+// A git clone fetches the submodule here; anything else (a ZIP download, a
 // failed git call) is only checked below.
 if (fs.existsSync(path.join(repoRoot, ".git")) && fs.existsSync(path.join(repoRoot, ".gitmodules"))) {
   const syncResult = runGit(["submodule", "sync", "--", submodulePath]);
@@ -36,7 +36,7 @@ if (!fs.existsSync(entryFile)) {
       "MMM-HomeConnect2: the lib/mmm-shared submodule is missing.",
       "Install the module with git instead of a ZIP download:",
       "  git clone --recurse-submodules https://github.com/HeikoGr/MMM-HomeConnect2",
-      "or, in an existing git checkout:",
+      "or, in an existing git clone:",
       "  git submodule update --init --recursive",
       "",
     ].join("\n"),
